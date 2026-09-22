@@ -1,0 +1,1987 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rebuttal Bench — OpenReview markdown + MathJax previewer</title>
+
+<!-- OpenReview currently parses Markdown with Marked (GFM), sanitizes the
+     generated HTML, and only then asks MathJax to typeset it. -->
+<script>
+window.MJ_READY = false;
+window.MathJax = {
+  loader: { load: ['ui/safe'] },
+  options: {
+    ignoreHtmlClass: 'disable-tex-rendering'
+  },
+  tex: {
+    inlineMath: [['$', '$'], ['\\(', '\\)']],
+    displayMath: [['$$', '$$'], ['\\[', '\\]']],
+    processEscapes: true,
+    processEnvironments: true
+  },
+  chtml: {
+    scale: 1,
+    minScale: 0.5,
+    matchFontHeight: true,
+    mtextInheritFont: false,
+    merrorInheritFont: true,
+    mathmlSpacing: false,
+    skipAttributes: {},
+    exFactor: 0.5,
+    displayAlign: 'left',
+    displayIndent: '0'
+  },
+  startup: {
+    typeset: false,
+    ready() {
+      MathJax.startup.defaultReady();
+      var safe = MathJax.startup.document && MathJax.startup.document.safe;
+      if (safe && safe.filterAttributes && safe.filterMethods) {
+        safe.filterAttributes.set('fontfamily', 'filterFamily');
+        safe.filterMethods.filterFamily = function (_safe, family) { return String(family).split(/;/)[0]; };
+      }
+      MathJax.startup.promise.then(function () {
+        window.MJ_READY = true;
+        if (typeof window.onMathJaxReady === 'function') window.onMathJaxReady();
+      });
+    }
+  }
+};
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.6/lib/marked.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.11/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-chtml-full.js" async></script>
+
+<!-- OpenReview sets its note text in Noto Sans. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,400;0,500;0,700;1,400;1,700&display=swap">
+
+<style>
+  /* OpenReview's own metric-matched fallback, copied from their stylesheet, so
+     the preview keeps Noto Sans line breaks even when the webfont is missing. */
+  @font-face {
+    font-family: "Noto Sans Fallback";
+    src: local("Arial");
+    ascent-override: 100.54%;
+    descent-override: 27.56%;
+    line-gap-override: 0.00%;
+    size-adjust: 106.33%;
+  }
+  :root {
+    --accent: #8c1b13;            /* OpenReview maroon */
+    --accent-ink: #8c1b13;
+    --bg: #ffffff;
+    --panel: #ffffff;
+    --panel-2: #f3f4f7;
+    --line: #e2e5ea;
+    --text: #22262e;
+    --dim: #69707f;
+    --err: #c2382b;
+    --warn: #d99a26;
+    --note: #6f9bd1;
+    --ok: #1d7a4f;
+    --title-err: #a02c20;
+    --title-warn: #8a5f07;
+    --title-note: #2f5e96;
+    --editor-bg: #ffffff;
+    --editor-focus: #ffffff;
+    --placeholder: #a2a9b6;
+    --scroll-bg: #ffffff;
+    --scroll-pad: 0;
+    --paper-radius: 0;
+    --paper-shadow: none;
+    --paper-pad: 24px 34px 46px;
+    --card: #ffffff;
+    --card-hover: #f6f7f9;
+    --card-line: #eceef1;
+    --snippet-bg: #f6f7f9;
+    --mark-bg: rgba(194, 56, 43, 0.16);
+    --mark-fg: #7c1d12;
+    --chip-ok: rgba(29, 122, 79, 0.12);
+    --chip-near: rgba(217, 154, 38, 0.20);
+    --chip-over: rgba(194, 56, 43, 0.16);
+    --chip-over-fg: #a02c20;
+    --btn-bg: #ffffff;
+    --btn-hover: #f4f5f7;
+    --btn-hover-line: #c6ccd4;
+    --head-bg: #fafbfc;
+    --toast-bg: #2a2f3a;
+    --toast-fg: #ffffff;
+    /* Light mode reproduces openreview-web's note palette exactly. */
+    --paper-bg: #ffffff;
+    --paper-ink: #333333;
+    --paper-head: #2c3a4a;
+    --paper-link: #3e6775;
+    --paper-code-ink: #8c1b13;
+    --paper-code-bg: #f9f2f4;
+    --paper-pre-bg: #f5f5f5;
+    --paper-pre-ink: #333333;
+    --paper-pre-line: #cccccc;
+    --paper-quote: #cccccc;
+    --paper-line: #dddddd;
+    --paper-hr-top: rgba(0, 0, 0, 0.1);
+    --paper-hr-bottom: rgba(255, 255, 255, 0.3);
+    --paper-dim: #9aa1b0;
+    --editor-fs: 13px;
+    --preview-zoom: 1;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --serif: "Iowan Old Style", Charter, Georgia, "Times New Roman", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  html[data-theme="dark"] {
+    --accent: #c24e30;
+    --accent-ink: #e2967f;
+    --bg: #101319;
+    --panel: #161a23;
+    --panel-2: #1c212d;
+    --line: #2a3040;
+    --text: #e7ebf3;
+    --dim: #8c94a8;
+    --err: #e0604f;
+    --warn: #e0a23c;
+    --note: #7fa6d9;
+    --ok: #4cb57f;
+    --title-err: #f2a79c;
+    --title-warn: #efc488;
+    --title-note: #a9c4e4;
+    --editor-bg: #161a23;
+    --editor-focus: #181d28;
+    --placeholder: #566078;
+    --scroll-bg: #0c0e13;
+    --scroll-pad: 22px 22px 40px;
+    --paper-radius: 10px;
+    --paper-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+    --paper-pad: 30px 36px 36px;
+    --card: #161a23;
+    --card-hover: #1c212d;
+    --card-line: #2a3040;
+    --snippet-bg: #101319;
+    --mark-bg: rgba(224, 96, 79, 0.25);
+    --mark-fg: #ffd9d2;
+    --chip-ok: rgba(76, 181, 127, 0.18);
+    --chip-near: rgba(224, 162, 60, 0.22);
+    --chip-over: rgba(224, 96, 79, 0.28);
+    --chip-over-fg: #ffb4a8;
+    --btn-bg: #1c212d;
+    --btn-hover: #232939;
+    --btn-hover-line: #8c94a8;
+    --head-bg: #101319;
+    --toast-bg: #1c212d;
+    --toast-fg: #e7ebf3;
+    /* Dark mode keeps every OpenReview metric and re-tints only the colours. */
+    --paper-bg: #171c26;
+    --paper-ink: #e2e7f0;
+    --paper-head: #f2f5fa;
+    --paper-link: #8ab4f0;
+    --paper-code-ink: #ff9d84;
+    --paper-code-bg: #2a1d20;
+    --paper-pre-bg: #0f131b;
+    --paper-pre-ink: #d7dde8;
+    --paper-pre-line: #333c4e;
+    --paper-quote: #3d4658;
+    --paper-line: #333c4e;
+    --paper-hr-top: rgba(255, 255, 255, 0.12);
+    --paper-hr-bottom: rgba(0, 0, 0, 0.25);
+    --paper-dim: #7b849a;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---------- header ---------- */
+  header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 14px 20px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .brand h1 {
+    margin: 0;
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 21px;
+    letter-spacing: 0.01em;
+  }
+  .brand h1 .dot { color: var(--accent); }
+  .brand .tag {
+    margin: 3px 0 0;
+    font-size: 12.5px;
+    color: var(--dim);
+    max-width: 60ch;
+    line-height: 1.45;
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .controls label { font-size: 12.5px; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+  .controls input[type="number"] {
+    width: 76px;
+    background: var(--btn-bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 5px 7px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+  }
+  .controls input[type="checkbox"] { accent-color: var(--accent); }
+
+  button {
+    background: var(--btn-bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 6px 13px;
+    font-size: 13px;
+    font-family: var(--sans);
+    cursor: pointer;
+  }
+  .controls button:hover { background: var(--btn-hover); border-color: var(--btn-hover-line); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { filter: brightness(1.1); }
+
+  .fs-ctl {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 2px;
+    background: var(--btn-bg);
+  }
+  .fs-ctl .fs-label { font-size: 11px; color: var(--dim); padding: 0 4px 0 7px; user-select: none; }
+  .fs-ctl button {
+    border: 0;
+    background: var(--panel-2);
+    border-radius: 4px;
+    width: 24px;
+    padding: 2px 0;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  .fs-ctl button:hover { background: var(--card-hover); border-color: transparent; }
+  .fs-ctl .fs-val {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--dim);
+    min-width: 24px;
+    text-align: center;
+    user-select: none;
+  }
+
+  /* ---------- stats bar ---------- */
+  .statsbar {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: wrap;
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--dim);
+  }
+
+  .charchip {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px 12px;
+    background: var(--panel);
+    color: var(--text);
+  }
+  .charchip .fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 0%;
+    background: var(--chip-ok);
+    transition: width 0.2s ease, background 0.2s ease;
+  }
+  .charchip.near .fill { background: var(--chip-near); }
+  .charchip.over .fill { background: var(--chip-over); }
+  .charchip.over { border-color: var(--err); color: var(--chip-over-fg); }
+  .charchip .txt { position: relative; }
+
+  #hazStat.bad { color: var(--title-warn); }
+  #hazStat.err { color: var(--err); }
+  #hazStat.good { color: var(--ok); }
+  #mjStatus { margin-left: auto; }
+  #mjStatus.good { color: var(--ok); }
+  #mjStatus.err { color: var(--err); }
+
+  /* ---------- main split ---------- */
+  main {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
+  }
+  .divider { background: var(--line); }
+
+  .pane { display: flex; flex-direction: column; min-height: 0; }
+
+  .pane-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 9px 18px 8px;
+    background: var(--head-bg);
+  }
+  .pane-head h2 {
+    margin: 0;
+    font-size: 11px;
+    font-family: var(--mono);
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+  }
+  .pane-head .hint { font-size: 11.5px; color: var(--dim); }
+
+  /* editor */
+  #src {
+    flex: 1 1 auto;
+    min-height: 0;
+    resize: none;
+    border: none;
+    border-top: 1px solid var(--line);
+    background: var(--editor-bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: var(--editor-fs);
+    line-height: 1.6;
+    padding: 14px 18px 18px;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+  }
+  #src:focus { outline: none; background: var(--editor-focus); }
+  #src::placeholder { color: var(--placeholder); }
+
+  /* hazards */
+  .lint {
+    flex: 0 1 auto;
+    max-height: 42%;
+    overflow-y: auto;
+    border-top: 1px solid var(--line);
+    background: var(--bg);
+  }
+  .lint-head {
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 18px 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--dim);
+    border-bottom: 1px solid var(--line);
+  }
+  #lintCount { color: var(--title-warn); }
+  #lintCount.zero { color: var(--ok); }
+
+  [hidden] { display: none !important; }
+
+  #fixAllBtn {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    text-transform: none;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  #fixAllBtn:hover { filter: brightness(1.12); }
+
+  .lint-empty {
+    padding: 12px 18px 14px;
+    font-size: 12.5px;
+    color: var(--dim);
+    line-height: 1.5;
+  }
+
+  .issue {
+    width: 100%;
+    text-align: left;
+    display: block;
+    background: var(--card);
+    border: none;
+    border-bottom: 1px solid var(--card-line);
+    border-left: 3px solid var(--warn);
+    border-radius: 0;
+    padding: 9px 18px 10px 15px;
+    cursor: pointer;
+  }
+  .issue:hover { background: var(--card-hover); }
+  .issue.err  { border-left-color: var(--err); }
+  .issue.warn { border-left-color: var(--warn); }
+  .issue.note { border-left-color: var(--note); }
+
+  .issue-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 18px;
+  }
+  .issue .where {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--dim);
+  }
+  .fixbtn {
+    flex: 0 0 auto;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.5;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--btn-bg);
+    border: 1px solid var(--line);
+    color: var(--dim);
+    white-space: nowrap;
+    max-width: 46%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .fixbtn:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .issue .title { font-size: 13px; font-weight: 600; margin: 2px 0 3px; }
+  .issue.err  .title { color: var(--title-err); }
+  .issue.warn .title { color: var(--title-warn); }
+  .issue.note .title { color: var(--title-note); }
+
+  .issue .snippet {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--dim);
+    background: var(--snippet-bg);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 4px 8px;
+    margin: 3px 0 5px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .issue .snippet mark {
+    background: var(--mark-bg);
+    color: var(--mark-fg);
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+  .issue .detail { font-size: 12px; color: var(--dim); line-height: 1.5; }
+  .issue .detail code {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0 4px;
+    color: var(--text);
+  }
+
+  /* cheat sheet */
+  .cheat {
+    border-top: 1px solid var(--line);
+    background: var(--head-bg);
+    font-size: 12.5px;
+  }
+  .cheat summary {
+    padding: 8px 18px;
+    cursor: pointer;
+    color: var(--dim);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .cheat summary:hover { color: var(--text); }
+  .cheat table { border-collapse: collapse; margin: 0 18px 14px; width: calc(100% - 36px); }
+  .cheat th, .cheat td {
+    text-align: left;
+    padding: 5px 10px;
+    border: 1px solid var(--line);
+    color: var(--dim);
+    font-size: 12px;
+  }
+  .cheat th { color: var(--text); font-weight: 600; background: var(--panel-2); }
+  .cheat code { font-family: var(--mono); color: var(--accent-ink); }
+
+  /* preview */
+  /* Over-wide content scrolls in the pane, not the note box, so the note itself
+     keeps OpenReview's own overflow behaviour. */
+  .scroller {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: auto;
+    border-top: 1px solid var(--line);
+    background: var(--scroll-bg);
+    padding: var(--scroll-pad);
+  }
+  /* ---- OpenReview note styles ----------------------------------------
+     Every value below is measured from openreview-web's compiled stylesheet
+     as it computes on a rendered comment (.note-content .note-content-value
+     .markdown-rendered): 12px/18px Noto Sans, 8px block gaps, horizontal-rule
+     tables, 90% maroon code. At 100% zoom the preview is 1:1 with the site;
+     the zoom control scales the whole block, so proportions never drift. */
+  .paper {
+    background: var(--paper-bg);
+    color: var(--paper-ink);
+    max-width: 1140px;
+    margin: 0 auto;
+    zoom: var(--preview-zoom, 1);
+    border-radius: var(--paper-radius);
+    padding: var(--paper-pad);
+    font-family: "Noto Sans", "Noto Sans Fallback", Arial, Helvetica, sans-serif;
+    font-size: 12px;
+    line-height: 18px;
+    box-shadow: var(--paper-shadow);
+    overflow-wrap: break-word;
+  }
+  .paper > :first-child { margin-top: 0; }
+  .paper p { margin: 0 0 8px; }
+  .paper h1, .paper h2, .paper h3, .paper h4, .paper h5, .paper h6 {
+    font-family: inherit;
+    font-weight: 500;
+    line-height: 1.1;
+    color: var(--paper-head);
+    margin: 0 0 8px;
+  }
+  .paper h1 { font-size: 22px; font-weight: 700; }
+  .paper h2 { font-size: 20px; }
+  .paper h3 { font-size: 16px; }
+  .paper h4, .paper h5, .paper h6 { font-size: 12px; font-weight: 400; }
+  .paper strong { font-weight: 700; color: var(--paper-head); }
+  .paper a { color: var(--paper-link); }
+  .paper del { text-decoration-thickness: 1px; }
+  .paper ul, .paper ol { padding-left: 24px; margin: 0 0 8px; }
+  .paper li { padding: 0; }
+  .paper li p,
+  .paper ul ul, .paper ul ol, .paper ol ul, .paper ol ol { margin-bottom: 2px; }
+  .paper img { max-width: 100%; height: auto; }
+  .paper img.icon { width: 16px; height: 16px; }
+  .paper code {
+    font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+    font-size: 90%;
+    color: var(--paper-code-ink);
+    background: var(--paper-code-bg);
+    border-radius: 4px;
+    padding: 2px 4px;
+  }
+  .paper pre {
+    font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+    font-size: 13px;
+    line-height: 1.42857143;
+    color: var(--paper-pre-ink);
+    background: var(--paper-pre-bg);
+    border: 1px solid var(--paper-pre-line);
+    border-radius: 0;
+    padding: 4px 8px;
+    margin: 0 0 8px;
+    overflow: auto;
+    word-break: break-all;
+    word-wrap: break-word;
+  }
+  .paper pre code {
+    font-size: 12px;
+    color: inherit;
+    background: none;
+    border-radius: 0;
+    padding: 0;
+    white-space: pre-wrap;
+  }
+  .paper blockquote {
+    font-size: 12px;
+    padding: 4px 8px;
+    margin: 0 0 8px;
+    border-left: 5px solid var(--paper-quote);
+  }
+  .paper blockquote p { margin-bottom: 0; }
+  .paper table { border-collapse: collapse; background: transparent; max-width: 100%; margin: 0 0 8px; }
+  .paper th { padding: 4px; text-align: left; vertical-align: bottom; font-weight: 700; border-bottom: 2px solid var(--paper-line); }
+  .paper td { padding: 4px; vertical-align: top; border-top: 1px solid var(--paper-line); }
+  .paper hr { height: 0; border: 0; border-top: 1px solid var(--paper-hr-top); border-bottom: 1px solid var(--paper-hr-bottom); margin: 8px 0; }
+  .paper .empty { color: var(--paper-dim); font-style: italic; }
+  /* OpenReview's own display-math rules: a permanent horizontal scrollbar under
+     every display equation, and no bottom margin unless it ends its block. */
+  .paper mjx-container[jax="CHTML"][display="true"] {
+    overflow-x: scroll;
+    overflow-y: hidden;
+    margin-bottom: 0;
+  }
+  .paper mjx-container[jax="CHTML"][display="true"]:last-child { margin-bottom: 1em; }
+  .paper mjx-container[jax="CHTML"][display="true"] mjx-math { padding: 1px 0; }
+
+  footer {
+    padding: 7px 20px 9px;
+    border-top: 1px solid var(--line);
+    font-size: 11.5px;
+    color: var(--dim);
+    line-height: 1.5;
+    background: var(--bg);
+  }
+  footer a { color: var(--accent-ink); }
+
+  .toast {
+    position: fixed;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%) translateY(8px);
+    background: var(--toast-bg);
+    border: 1px solid var(--line);
+    color: var(--toast-fg);
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 13px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    z-index: 10;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+
+  @media (max-width: 920px) {
+    main { grid-template-columns: 1fr; grid-template-rows: minmax(45vh, 1fr) 1px minmax(45vh, 1fr); }
+    #mjStatus { margin-left: 0; }
+    .lint { max-height: 34%; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>Rebuttal Bench<span class="dot">.</span></h1>
+    <p class="tag">Renders your comment the way OpenReview does — CommonMark markdown first, then MathJax on the result — so the breakage shows up here instead of under your reviewers' noses.</p>
+  </div>
+  <div class="controls">
+    <div class="fs-ctl" title="Editor font size">
+      <span class="fs-label">Editor</span>
+      <button type="button" data-fs="fsEditor" data-dir="-1" aria-label="Smaller editor text">−</button>
+      <span class="fs-val" id="fsEditorVal">13</span>
+      <button type="button" data-fs="fsEditor" data-dir="1" aria-label="Larger editor text">+</button>
+    </div>
+    <div class="fs-ctl" title="Preview zoom — 100% is exactly OpenReview's size (12px Noto Sans)">
+      <span class="fs-label">Preview</span>
+      <button type="button" data-fs="zoomPreview" data-dir="-1" aria-label="Zoom preview out">−</button>
+      <span class="fs-val" id="fsPreviewVal">100%</span>
+      <button type="button" data-fs="zoomPreview" data-dir="1" aria-label="Zoom preview in">+</button>
+    </div>
+    <label>Limit <input id="limit" type="number" value="5000" min="0" step="100" aria-label="Character limit"></label>
+    <label><input type="checkbox" id="sync" checked> Sync scroll</label>
+    <button id="themeBtn">Dark mode</button>
+    <button id="exampleBtn">Load example</button>
+    <button id="clearBtn">Clear</button>
+    <button id="copyBtn" class="primary">Copy source</button>
+  </div>
+</header>
+
+<div class="statsbar">
+  <span class="charchip" id="charChip"><span class="fill" id="charFill"></span><span class="txt" id="charStat">0 / 5,000 characters</span></span>
+  <span id="wordStat">0 words</span>
+  <span id="mathStat">0 math spans</span>
+  <span id="hazStat" class="good">0 hazards</span>
+  <span id="saveState"></span>
+  <span id="mjStatus">Loading MathJax…</span>
+</div>
+
+<main>
+  <section class="pane" aria-label="Source editor">
+    <div class="pane-head"><h2>Source</h2><span class="hint">exactly what you'll paste into OpenReview</span></div>
+    <textarea id="src" spellcheck="false" placeholder="Type or paste your rebuttal…"></textarea>
+    <div class="lint">
+      <div class="lint-head"><span>Hazards</span> <span id="lintCount" class="zero">0</span><button type="button" id="fixAllBtn" hidden title="Rewrite every hazard that has a mechanical fix. One Ctrl+Z undoes the whole pass.">Fix all</button></div>
+      <div id="lintList"></div>
+    </div>
+    <details class="cheat">
+      <summary>Escape cheat sheet</summary>
+      <table>
+        <tr><th>You want MathJax to see</th><th>Type this</th><th>Why</th></tr>
+        <tr><td>row break <code>\\</code> in a matrix or <code>aligned</code></td><td><code>\\\\</code></td><td>CommonMark halves backslash pairs</td></tr>
+        <tr><td>literal braces <code>\{ \}</code></td><td><code>\\{ \\}</code></td><td>CommonMark deletes <code>\</code> before punctuation</td></tr>
+        <tr><td><code>_</code> next to <code>}</code>, <code>)</code> or a space</td><td><code>\_</code></td><td>the escape stops italics pairing; markdown hands a bare <code>_</code> to MathJax</td></tr>
+        <tr><td><code>*</code> or <code>~</code> used as bare TeX characters</td><td><code>\*</code> or <code>\~</code></td><td>stops GFM emphasis/strikethrough; the slash is intentionally removed</td></tr>
+        <tr><td>display math written as <code>\[ … \]</code></td><td><code>$$ … $$</code></td><td>simplest option; alternatively double the delimiter slashes as <code>\\[ … \\]</code></td></tr>
+        <tr><td>a dollar sign as currency</td><td><code>\\$</code></td><td>one slash survives Markdown, so MathJax treats the dollar literally</td></tr>
+        <tr><td>bare <code>|</code> inside math in a GFM table</td><td><code>\|</code></td><td>the odd slash protects the table cell, then Markdown removes it</td></tr>
+        <tr><td>TeX <code>\|</code> inside a GFM table</td><td><code>\\\|</code> (or <code>\Vert</code>)</td><td>three source slashes protect the cell and leave one for MathJax</td></tr>
+        <tr><td>one unbroken <code>$$ … $$</code> block</td><td>no blank lines inside</td><td>a blank line splits it into two paragraphs</td></tr>
+      </table>
+    </details>
+  </section>
+
+  <div class="divider" aria-hidden="true"></div>
+
+  <section class="pane" aria-label="Rendered preview">
+    <div class="pane-head"><h2>Preview</h2><span class="hint">OpenReview's own note styles — 1:1 at 100%</span></div>
+    <div class="scroller" id="scroller">
+      <article class="paper" id="preview"><p class="empty">Nothing to preview yet.</p></article>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Pipeline mirror: Marked 15.0.6 in GFM mode with OpenReview’s HTML/image/checkbox renderers → DOMPurify → MathJax 3.2.2 <code>tex-chtml-full</code> with <code>ui/safe</code>. Preview styling mirrors <code>.note-content .markdown-rendered</code> from the live openreview.net stylesheet — Noto Sans 12px/18px, 8px block gaps, rule-only tables — so at 100% zoom it is 1:1 with the site. Line <em>wrapping</em> still depends on the reader’s window width and reply depth, which no previewer can pin down. This follows the current <a href="https://github.com/openreview/openreview-web" target="_blank" rel="noopener">openreview-web implementation</a>; the live service can change, so give the posted comment one last glance. Drafts autosave only on this device.
+</footer>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+'use strict';
+
+/* ================= pure analysis ================= */
+
+var PUNCT = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~';
+function isPunct(c) { return c !== '' && PUNCT.indexOf(c) !== -1; }
+function isAlnum(c) { return /[A-Za-z0-9]/.test(c || ''); }
+
+function computeLineStarts(src) {
+  var starts = [0];
+  for (var i = 0; i < src.length; i++) if (src[i] === '\n') starts.push(i + 1);
+  return starts;
+}
+function lineColOf(starts, idx) {
+  var lo = 0, hi = starts.length - 1;
+  while (lo < hi) {
+    var mid = (lo + hi + 1) >> 1;
+    if (starts[mid] <= idx) lo = mid; else hi = mid - 1;
+  }
+  return { line: lo + 1, col: idx - starts[lo] + 1 };
+}
+
+function countBackslashesBefore(src, idx) {
+  var n = 0;
+  for (var i = idx - 1; i >= 0 && src[i] === '\\'; i--) n++;
+  return n;
+}
+
+/* Markdown turns each pair of source backslashes into one. If an odd source
+   backslash remains before ASCII punctuation, that final slash escapes the
+   punctuation and is removed. MathJax therefore sees floor(n / 2) slashes
+   immediately before a dollar sign. */
+function dollarIsMathDelimiter(src, idx) {
+  return Math.floor(countBackslashesBefore(src, idx) / 2) % 2 === 0;
+}
+
+function makeMask(length, ranges) {
+  var mask = new Uint8Array(length);
+  ranges.forEach(function (r) {
+    var a = Math.max(0, r.start), b = Math.min(length, r.end);
+    for (var i = a; i < b; i++) mask[i] = 1;
+  });
+  return mask;
+}
+
+function mergeSimpleRanges(ranges) {
+  if (!ranges.length) return [];
+  ranges = ranges.slice().sort(function (a, b) { return a.start - b.start || a.end - b.end; });
+  var out = [{ start: ranges[0].start, end: ranges[0].end }];
+  for (var i = 1; i < ranges.length; i++) {
+    var last = out[out.length - 1], cur = ranges[i];
+    if (cur.start <= last.end) last.end = Math.max(last.end, cur.end);
+    else out.push({ start: cur.start, end: cur.end });
+  }
+  return out;
+}
+
+/* Locate Marked tokens back in the original source. Marked tokens expose their
+   raw source, so sequential searches are reliable for ordinary rebuttal text
+   and give us much lower-noise linting than character heuristics. */
+function collectMarkedRanges(src) {
+  var api = (typeof window !== 'undefined') ? window.marked : null;
+  var lexer = api && typeof api.lexer === 'function' ? api.lexer : null;
+  if (!lexer) return [];
+
+  var root;
+  try { root = lexer.call(api, src); } catch (e) { return []; }
+  var ranges = [];
+
+  function locate(raw, cursor, regionStart, regionEnd) {
+    if (!raw) return null;
+    var at = src.indexOf(raw, cursor);
+    if (at < regionStart || at < 0 || at + raw.length > regionEnd) at = src.indexOf(raw, regionStart);
+    if (at < regionStart || at < 0 || at + raw.length > regionEnd) return null;
+    return { start: at, end: at + raw.length };
+  }
+
+  function visitCells(cells, regionStart, regionEnd, depth) {
+    if (!Array.isArray(cells)) return;
+    cells.forEach(function (cell) {
+      if (cell && Array.isArray(cell.tokens)) visit(cell.tokens, regionStart, regionEnd, depth);
+    });
+  }
+
+  function visit(tokens, regionStart, regionEnd, depth) {
+    if (!Array.isArray(tokens)) return;
+    var cursor = regionStart;
+    tokens.forEach(function (tok) {
+      if (!tok || typeof tok !== 'object') return;
+      var raw = typeof tok.raw === 'string' ? tok.raw : '';
+      var pos = locate(raw, cursor, regionStart, regionEnd);
+      var childStart = regionStart, childEnd = regionEnd;
+      if (pos) {
+        ranges.push({ type: tok.type || '', start: pos.start, end: pos.end, token: tok, depth: depth });
+        cursor = Math.max(cursor, pos.end);
+        childStart = pos.start;
+        childEnd = pos.end;
+      }
+      if (Array.isArray(tok.tokens)) visit(tok.tokens, childStart, childEnd, depth + 1);
+      if (Array.isArray(tok.items)) visit(tok.items, childStart, childEnd, depth + 1);
+      visitCells(tok.header, childStart, childEnd, depth + 1);
+      if (Array.isArray(tok.rows)) tok.rows.forEach(function (row) { visitCells(row, childStart, childEnd, depth + 1); });
+    });
+  }
+
+  visit(root, 0, src.length, 0);
+  return ranges;
+}
+
+/* Fallback masking for when the CDN parser is unavailable. The live page uses
+   Marked's exact code tokens; this scanner mainly keeps the pure analyzer safe. */
+function fallbackCodeRanges(src) {
+  var ranges = [];
+  var lines = src.split('\n');
+  var starts = computeLineStarts(src);
+  var fence = null;
+
+  for (var li = 0; li < lines.length; li++) {
+    var line = lines[li];
+    var lineStart = starts[li];
+    var lineEnd = lineStart + line.length + (li < lines.length - 1 ? 1 : 0);
+    if (!fence) {
+      var fm = line.match(/^ {0,3}(`{3,}|~{3,})/);
+      if (fm) fence = { ch: fm[1][0], len: fm[1].length, start: lineStart };
+    } else {
+      var closeRe = new RegExp('^ {0,3}' + (fence.ch === '`' ? '`' : '~') + '{' + fence.len + ',}[ \\t]*$');
+      if (closeRe.test(line)) {
+        ranges.push({ start: fence.start, end: lineEnd });
+        fence = null;
+      }
+    }
+  }
+  if (fence) ranges.push({ start: fence.start, end: src.length });
+
+  /* Top-level indented code starts at the document start or after a blank line. */
+  var fenceMask = makeMask(src.length, ranges);
+  var inIndent = false, indentStart = 0, prevBlank = true;
+  for (var li2 = 0; li2 < lines.length; li2++) {
+    var L = lines[li2], st = starts[li2];
+    var en = st + L.length + (li2 < lines.length - 1 ? 1 : 0);
+    if (fenceMask[st]) { prevBlank = true; continue; }
+    var blank = /^[ \\t]*$/.test(L);
+    var indented = /^(?: {4}| {0,3}\t)/.test(L);
+    if (inIndent && !blank && !indented) {
+      ranges.push({ start: indentStart, end: st });
+      inIndent = false;
+    }
+    if (!inIndent && prevBlank && indented && !blank) {
+      inIndent = true;
+      indentStart = st;
+    }
+    prevBlank = blank;
+    if (inIndent && li2 === lines.length - 1) ranges.push({ start: indentStart, end: en });
+  }
+
+  /* Inline code supports arbitrary-length backtick fences and soft newlines. */
+  var blockMask = makeMask(src.length, ranges);
+  for (var i = 0; i < src.length;) {
+    if (blockMask[i] || src[i] !== '`') { i++; continue; }
+    var run = 1;
+    while (src[i + run] === '`') run++;
+    var j = i + run, found = -1;
+    while (j < src.length) {
+      if (blockMask[j]) { j++; continue; }
+      if (src[j] !== '`') { j++; continue; }
+      var r2 = 1;
+      while (src[j + r2] === '`') r2++;
+      if (r2 === run) { found = j; break; }
+      j += r2;
+    }
+    if (found >= 0) {
+      ranges.push({ start: i, end: found + run });
+      for (var z = i; z < found + run; z++) blockMask[z] = 1;
+      i = found + run;
+    } else {
+      i += run;
+    }
+  }
+  return mergeSimpleRanges(ranges);
+}
+
+function codeRangesFrom(src, markedRanges) {
+  var exact = markedRanges.filter(function (r) { return r.type === 'code' || r.type === 'codespan'; });
+  var simple = exact.map(function (r) { return { start: r.start, end: r.end }; });
+  return markedRanges.length ? mergeSimpleRanges(simple) : fallbackCodeRanges(src);
+}
+
+function slashDelimiterSurvivesMarkdown(run) {
+  return Math.floor(run / 2) % 2 === 1;
+}
+
+function scanMathSpans(src, codeRanges) {
+  var codeMask = makeMask(src.length, codeRanges);
+  var occupied = new Uint8Array(src.length);
+  var spans = [], unpaired = [];
+
+  function usableDollar(i) {
+    return i >= 0 && i < src.length && src[i] === '$' && !codeMask[i] && !occupied[i] && dollarIsMathDelimiter(src, i);
+  }
+  function mark(a, b) { for (var i = a; i < b; i++) occupied[i] = 1; }
+
+  /* Match display delimiters first, matching MathJax's delimiter precedence. */
+  for (var i = 0; i < src.length;) {
+    if (usableDollar(i) && usableDollar(i + 1)) {
+      var close = -1;
+      for (var j = i + 2; j < src.length - 1; j++) {
+        if (usableDollar(j) && usableDollar(j + 1)) { close = j; break; }
+      }
+      if (close >= 0) {
+        var dsp = { start: i, end: close + 2, innerStart: i + 2, innerEnd: close, display: true, delimiter: 'dollar' };
+        spans.push(dsp);
+        mark(dsp.start, dsp.end);
+        i = dsp.end;
+      } else {
+        unpaired.push({ start: i, end: i + 2, display: true, delimiter: 'dollar' });
+        mark(i, i + 2);
+        i += 2;
+      }
+    } else {
+      i++;
+    }
+  }
+
+  /* Then match remaining single-dollar inline spans. */
+  for (var p = 0; p < src.length;) {
+    if (!usableDollar(p)) { p++; continue; }
+    var closeInline = -1;
+    for (var q = p + 1; q < src.length; q++) {
+      if (usableDollar(q)) { closeInline = q; break; }
+    }
+    if (closeInline >= 0) {
+      var inl = { start: p, end: closeInline + 1, innerStart: p + 1, innerEnd: closeInline, display: false, delimiter: 'dollar' };
+      spans.push(inl);
+      mark(inl.start, inl.end);
+      p = inl.end;
+    } else {
+      unpaired.push({ start: p, end: p + 1, display: false, delimiter: 'dollar' });
+      mark(p, p + 1);
+      p++;
+    }
+  }
+
+  /* Finally scan the backslash delimiters that survive Markdown. This covers
+     source \\( ... \\) and \\[ ... \\] without treating the broken
+     one-slash forms as math. Dollar spans already claimed above are left alone. */
+  function scanSlashDelimited(openChar, closeChar, display) {
+    for (var a = 0; a < src.length;) {
+      if (codeMask[a] || occupied[a] || src[a] !== '\\') { a++; continue; }
+      var b = a;
+      while (b < src.length && src[b] === '\\') b++;
+      var openRun = b - a;
+      if (src[b] === closeChar && slashDelimiterSurvivesMarkdown(openRun)) {
+        unpaired.push({
+          start: a,
+          end: b + 1,
+          display: display,
+          delimiter: 'slashClose',
+          openChar: openChar,
+          closeChar: closeChar
+        });
+        mark(a, b + 1);
+        a = b + 1;
+        continue;
+      }
+      if (src[b] !== openChar || !slashDelimiterSurvivesMarkdown(openRun)) { a = Math.max(b, a + 1); continue; }
+
+      var closeStart = -1, closeCharAt = -1;
+      for (var c = b + 1; c < src.length;) {
+        if (occupied[c]) break; /* do not manufacture overlapping/nested spans */
+        if (codeMask[c] || src[c] !== '\\') { c++; continue; }
+        var d = c;
+        while (d < src.length && src[d] === '\\') d++;
+        var closeRun = d - c;
+        if (src[d] === closeChar && slashDelimiterSurvivesMarkdown(closeRun)) {
+          closeStart = c;
+          closeCharAt = d;
+          break;
+        }
+        c = Math.max(d, c + 1);
+      }
+
+      if (closeStart >= 0) {
+        var slashSpan = {
+          start: a,
+          end: closeCharAt + 1,
+          innerStart: b + 1,
+          innerEnd: closeStart,
+          display: display,
+          delimiter: 'slash'
+        };
+        spans.push(slashSpan);
+        mark(slashSpan.start, slashSpan.end);
+        a = slashSpan.end;
+      } else {
+        unpaired.push({
+          start: a,
+          end: b + 1,
+          display: display,
+          delimiter: 'slash',
+          openChar: openChar,
+          closeChar: closeChar
+        });
+        mark(a, b + 1);
+        a = b + 1;
+      }
+    }
+  }
+  scanSlashDelimited('[', ']', true);
+  scanSlashDelimited('(', ')', false);
+
+  spans.sort(function (a, b) { return a.start - b.start; });
+  unpaired.sort(function (a, b) { return a.start - b.start; });
+  return { spans: spans, unpaired: unpaired, codeMask: codeMask };
+}
+
+function rangeOverlaps(a, b) { return a.start < b.end && b.start < a.end; }
+function rangeWraps(r, sp) { return r.start <= sp.start && r.end >= sp.end; }
+
+function bs(n) { return n > 0 ? new Array(n + 1).join('\\') : ''; }
+
+function analyze(src) {
+  var issues = [];
+  var issueKeys = Object.create(null);
+
+  /* An autofix is a list of source edits. `was` is captured at analysis time so
+     the click handler can refuse to apply an edit against text that has moved
+     on, and so a fix-all pass can re-verify between rounds. */
+  function edit(start, end, text) {
+    start = Math.max(0, Math.min(src.length, start));
+    end = Math.max(start, Math.min(src.length, end));
+    return { start: start, end: end, text: text, was: src.slice(start, end) };
+  }
+  function fix(label, edits) {
+    if (!edits || !edits.length) return null;
+    var changes = edits.some(function (e) { return e.text !== e.was; });
+    return changes ? { label: label, edits: edits } : null;
+  }
+
+  function push(sev, title, detail, start, end, autofix) {
+    start = Math.max(0, Math.min(src.length, start));
+    end = Math.max(start + 1, Math.min(src.length, end));
+    var key = sev + '|' + title + '|' + start + '|' + end;
+    if (issueKeys[key]) return;
+    issueKeys[key] = true;
+    issues.push({ sev: sev, title: title, detail: detail, start: start, end: end, fix: autofix || null });
+  }
+
+  /* Markdown emphasis / strikethrough that ate TeX: shield both delimiter runs
+     so Marked passes the characters through to MathJax unchanged. */
+  function emphasisFix(r) {
+    var ch = src[r.start];
+    if (ch !== '*' && ch !== '_' && ch !== '~') return null;
+    var open = 0;
+    while (src[r.start + open] === ch) open++;
+    var close = 0;
+    while (r.end - 1 - close >= r.start && src[r.end - 1 - close] === ch) close++;
+    if (!open || !close || r.start + open > r.end - close) return null;
+    var shield = new Array(open + 1).join('\\' + ch);
+    var shieldEnd = new Array(close + 1).join('\\' + ch);
+    return fix('escape ' + ch, [
+      edit(r.start, r.start + open, shield),
+      edit(r.end - close, r.end, shieldEnd)
+    ]);
+  }
+
+  var markedRanges = collectMarkedRanges(src);
+  var codeRanges = codeRangesFrom(src, markedRanges);
+  var scan = scanMathSpans(src, codeRanges);
+  var spans = scan.spans;
+  var codeMask = scan.codeMask;
+  var mathMask = makeMask(src.length, spans);
+
+  /* 1. Unpaired dollars, with the especially common single-backslash trap called out. */
+  scan.unpaired.slice(0, 12).forEach(function (u) {
+    if (u.delimiter === 'slash' || u.delimiter === 'slashClose') {
+      var isClose = u.delimiter === 'slashClose';
+      push('warn', (isClose ? 'Stray \\' + u.closeChar : 'Unpaired \\' + u.openChar) + ' delimiter',
+        isClose
+          ? 'This closing MathJax delimiter survives Markdown but has no matching <code>\\' + u.openChar + '</code>.'
+          : 'This MathJax delimiter survives Markdown but has no matching <code>\\' + u.closeChar + '</code>. Close it, or use <code>' + (u.display ? '$$ … $$' : '$ … $') + '</code> instead.',
+        u.start, u.end);
+      return;
+    }
+    var slashRun = countBackslashesBefore(src, u.start);
+    if (!u.display && slashRun % 4 === 1) {
+      push('err', '\\$ is not protected after Markdown',
+        'Markdown consumes the final source backslash, leaving an even number before <code>$</code>; MathJax therefore still sees a delimiter. For a literal currency sign type <code>\\\\$</code>.',
+        u.start - slashRun, u.end,
+        fix('\\\\$', [edit(u.start - slashRun, u.start, bs(slashRun + 1))]));
+    } else {
+      push('warn', u.display ? 'Unpaired $$' : 'Unpaired $',
+        'This delimiter has no partner after Markdown escaping is accounted for. It may absorb later prose into math or leave TeX visible. Pair it, or use <code>\\\\$</code> for a literal dollar sign.',
+        u.start, u.end);
+    }
+  });
+
+  spans.forEach(function (sp) {
+    if (sp.delimiter !== 'dollar') return;
+    [sp.start, sp.innerEnd].forEach(function (at) {
+      var slashRun = countBackslashesBefore(src, at);
+      if (slashRun % 4 === 1) {
+        push('err', 'Backslash does not protect this $',
+          'Markdown removes the final source backslash, and the remaining slash count is even, so MathJax still treats this <code>$</code> as a delimiter. Type <code>\\\\$</code> for a literal dollar sign.',
+          at - slashRun, at + 1,
+          fix('\\\\$', [edit(at - slashRun, at, bs(slashRun + 1))]));
+      }
+    });
+  });
+
+  /* 2. Common \(...\) and \[...\] source delimiters that one Markdown slash destroys. */
+  function warnDegradedPair(openChar, closeChar, display) {
+    var stack = [];
+    for (var i = 0; i < src.length - 1; i++) {
+      if (codeMask[i] || mathMask[i] || src[i] !== '\\') continue;
+      var j = i;
+      while (src[j] === '\\') j++;
+      var run = j - i, next = src[j] || '';
+      if (run === 1 && next === openChar) stack.push(i);
+      if (run === 1 && next === closeChar && stack.length) {
+        var at = stack.pop();
+        var delim = display ? '$$' : '$';
+        push('warn', '\\' + openChar + ' … \\' + closeChar + ' loses its MathJax delimiters',
+          'A single backslash before punctuation is a Markdown escape and disappears before MathJax runs. Prefer <code>' + (display ? '$$ … $$' : '$ … $') + '</code>, or type <code>\\\\' + openChar + ' … \\\\' + closeChar + '</code> so one backslash survives on each side.',
+          at, at + 2,
+          fix(delim + ' … ' + delim, [edit(at, at + 2, delim), edit(i, i + 2, delim)]));
+      }
+      i = j - 1;
+    }
+  }
+  warnDegradedPair('(', ')', false);
+  warnDegradedPair('[', ']', true);
+
+  /* 3. Per-formula escape checks. Safe Markdown shields \_, \*, and \~ are
+        intentionally silent: Marked removes the slash and MathJax receives the
+        desired bare TeX character. */
+  spans.forEach(function (sp) {
+    var inner = src.slice(sp.innerStart, sp.innerEnd);
+    var rowLike = /(?:begin\s*\{\s*(?:align\*?|aligned|alignedat|array|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|cases|gather\*?|gathered|split|multline\*?|smallmatrix)\s*\}|substack\s*\{|subarray\s*\{)/.test(inner);
+
+    for (var i = sp.innerStart; i < sp.innerEnd;) {
+      if (src[i] !== '\\') { i++; continue; }
+      var j = i;
+      while (j < sp.innerEnd && src[j] === '\\') j++;
+      var run = j - i, next = src[j] || '';
+
+      if (next === '\n' && run % 2 === 1) {
+        push('err', 'Markdown hard break inside math',
+          'The final unpaired backslash plus newline becomes an HTML <code>&lt;br&gt;</code> before MathJax runs, splitting the formula. Remove it, or use exactly <code>\\\\\\\\</code> source backslashes for a TeX row break.',
+          i, j,
+          rowLike
+            ? fix('\\\\\\\\ row break', [edit(i, j, bs(4))])
+            : fix('drop the backslash', [edit(i, j, '')]));
+      } else if (rowLike && run === 2 && (next === '\n' || next === '[')) {
+        push('err', 'TeX row break collapses to one backslash',
+          'Inside a row-based TeX environment, two source backslashes become only one after Markdown. Type <code>\\\\\\\\</code> so MathJax receives <code>\\\\</code>' + (next === '[' ? ' before the optional row spacing' : '') + '.',
+          i, j,
+          fix('\\\\\\\\', [edit(i, j, bs(4))]));
+      } else if (run === 1 && isPunct(next)) {
+        if (next === '~' && src[j + 1] === '{') {
+          push('warn', '\\~{…} loses the TeX accent command',
+            'A single slash is consumed by Markdown, so MathJax receives a bare <code>~</code>. Type <code>\\\\~{…}</code> when you intend the TeX accent command; plain <code>\\~</code> remains the correct shield for a bare tilde.',
+            i, Math.min(sp.innerEnd, j + 2),
+            fix('\\\\~', [edit(i, j, bs(2))]));
+        } else if (next === '_' || next === '*' || next === '~') {
+          /* Correct Markdown shields; deliberately no issue. */
+        } else if (next === '$') {
+          /* Dollar pairing/parity is handled by scanMathSpans. */
+        } else if (next === '|' && markedRanges.some(function (r) { return r.type === 'table' && i >= r.start && i < r.end; })) {
+          /* Correct shield for a GFM table cell separator; MathJax receives |. */
+        } else {
+          push('warn', '\\' + next + ' is consumed by Markdown',
+            'A single backslash before ASCII punctuation is removed before MathJax runs, so MathJax receives <code>' + escHtml(next) + '</code>. If you intended the TeX control symbol <code>\\' + escHtml(next) + '</code>, type <code>\\\\' + escHtml(next) + '</code>.',
+            i, j + 1,
+            fix('\\\\' + next, [edit(i, j, bs(2))]));
+        }
+      }
+      i = Math.max(j, i + 1);
+    }
+
+    if (/\n[ \\t]*\n/.test(inner)) {
+      var blankEdits = [];
+      var blankRe = /\n(?:[ \t]*\n)+/g, bm;
+      while ((bm = blankRe.exec(inner))) {
+        blankEdits.push(edit(sp.innerStart + bm.index, sp.innerStart + bm.index + bm[0].length, '\n'));
+      }
+      push('err', 'Blank line splits a math span into separate blocks',
+        'Markdown starts a new paragraph at the blank line. MathJax cannot match delimiters across those HTML blocks, even though the source delimiters look paired. Remove the blank line.',
+        sp.start, sp.start + (sp.display ? 2 : 1),
+        fix('close the gap', blankEdits));
+    }
+
+    if (sp.delimiter === 'dollar' && !sp.display && /^\s*\d[\d,.]*(?:\s|$)/.test(inner) && !/[\\^_{}=]/.test(inner)) {
+      push('note', 'Currency dollars pair into a formula',
+        'This looks like prose between two currency signs, but MathJax receives it as one inline formula. For each literal dollar sign type <code>\\\\$</code> (which reaches MathJax as <code>\\$</code>).',
+        sp.start, sp.end,
+        fix('escape both $', [edit(sp.start, sp.start + 1, bs(2) + '$'), edit(sp.innerEnd, sp.innerEnd + 1, bs(2) + '$')]));
+    }
+  });
+
+  /* 4. Parser-confirmed structural hazards. These are emitted only when Marked
+        actually formed a token that cuts through a $...$ / $$...$$ range. */
+  var risky = {
+    em: ['Markdown emphasis splits this formula', 'Escape the Markdown delimiter that formed the emphasis (usually <code>\\_</code> or <code>\\*</code>) so MathJax receives the TeX character instead.'],
+    strong: ['Markdown strong emphasis splits this formula', 'Escape the Markdown delimiter that formed the bold span so it remains part of the TeX source.'],
+    del: ['GFM strikethrough splits this formula', 'Marked treats paired <code>~</code> / <code>~~</code> as strikethrough. Write <code>\\~</code> where the tilde is meant for TeX.'],
+    link: ['Markdown link or autolink splits this formula', 'Marked creates an <code>&lt;a&gt;</code> element before MathJax. Rewrite the link-like text, or escape the Markdown punctuation so the entire formula remains one text run.'],
+    codespan: ['Inline code interrupts this formula', 'MathJax skips <code>&lt;code&gt;</code>. Remove the backticks or move the code span outside the math delimiters.'],
+    br: ['Hard line break interrupts this formula', 'Marked inserts <code>&lt;br&gt;</code> before MathJax. Remove the Markdown hard break; use the correctly escaped TeX row separator when a row break is intended.'],
+    image: ['Image syntax interrupts this formula', 'OpenReview renders unsupported image syntax as text, and the Markdown tokenization can split the surrounding formula. Rewrite or escape the brackets and parentheses.']
+  };
+
+  markedRanges.forEach(function (r) {
+    if (!risky[r.type]) return;
+    for (var s = 0; s < spans.length; s++) {
+      var sp = spans[s];
+      if (!rangeOverlaps(r, sp) || rangeWraps(r, sp)) continue;
+      var raw = src.slice(r.start, r.end);
+      var offset = 0;
+      if (r.type === 'link' || r.type === 'image') offset = Math.max(0, raw.indexOf('['));
+      else if (r.type === 'br') offset = Math.max(0, raw.search(/[\\ \n]/));
+      var hs = r.start + offset;
+      var he = Math.min(r.end, hs + Math.max(1, r.type === 'strong' ? 2 : 1));
+      var autofix = null;
+      if (r.type === 'em' || r.type === 'strong' || r.type === 'del') autofix = emphasisFix(r);
+      else if (r.type === 'br' && src[r.end - 1] === '\n' && r.end - 1 > r.start) autofix = fix('drop the break', [edit(r.start, r.end - 1, '')]);
+      push('err', risky[r.type][0], risky[r.type][1], hs, he, autofix);
+      break;
+    }
+  });
+
+  var blockTypes = { paragraph: 1, heading: 1, blockquote: 1, list: 1, list_item: 1, table: 1, code: 1, hr: 1, def: 1 };
+  spans.forEach(function (sp) {
+    if (/\n[ \t]*\n/.test(src.slice(sp.innerStart, sp.innerEnd))) return;
+    var cuts = markedRanges.filter(function (r) {
+      return blockTypes[r.type] && rangeOverlaps(r, sp) && !rangeWraps(r, sp);
+    }).sort(function (a, b) {
+      return a.start - b.start || (b.depth || 0) - (a.depth || 0);
+    });
+    if (!cuts.length) return;
+    var cut = cuts[0];
+    push('err', 'Markdown block structure splits this formula',
+      'Marked creates a <code>' + escHtml(cut.type) + '</code> block inside or across these delimiters, and MathJax does not match math through separate block elements. Keep the complete formula inside one paragraph/block and escape any line-start Markdown marker.',
+      Math.max(sp.start, cut.start), Math.min(sp.end, Math.max(cut.start + 1, cut.end)));
+  });
+
+  /* Actual (not hypothetical) prose emphasis caused by multiplication stars. */
+  markedRanges.forEach(function (r) {
+    if (r.type !== 'em' && r.type !== 'strong') return;
+    if (spans.some(function (sp) { return rangeOverlaps(r, sp); })) return;
+    var n = r.type === 'strong' ? 2 : 1;
+    if (src[r.start] === '*' && isAlnum(src[r.start - 1]) && isAlnum(src[r.start + n])) {
+      push('warn', 'Multiplication asterisks became Markdown emphasis',
+        'Marked actually paired this intraword asterisk with a later one and removed both delimiters. Write <code>\\*</code> in prose or use <code>×</code>.',
+        r.start, r.start + n, emphasisFix(r));
+    }
+  });
+
+  /* 5. GFM table cell separators are parsed before MathJax. */
+  markedRanges.filter(function (r) { return r.type === 'table'; }).forEach(function (table) {
+    spans.forEach(function (sp) {
+      if (sp.start < table.start || sp.end > table.end) return;
+      for (var i = sp.innerStart; i < sp.innerEnd; i++) {
+        if (src[i] === '|' && countBackslashesBefore(src, i) % 2 === 0) {
+          push('err', 'Table cell separator inside math',
+            'Because this formula is in a GFM table, an even number of source slashes leaves this <code>|</code> available as a cell separator. Type <code>&#92;|</code> for a bare MathJax bar, or <code>&#92;&#92;&#92;|</code> (or <code>&#92;Vert</code>) when you need a TeX double-bar command.',
+            i, i + 1,
+            /* One more slash makes the run odd: the table parser sees an escaped
+               bar and Markdown then hands MathJax the same TeX it had before. */
+            fix('shield the |', [edit(i, i + 1, '\\|')]));
+        }
+      }
+    });
+  });
+
+  /* 6. Fallback for link syntax if token-to-source mapping ever misses it. */
+  spans.forEach(function (sp) {
+    var inner = src.slice(sp.innerStart, sp.innerEnd);
+    var lm = inner.match(/\[[^\]\n]*\]\([^\)\n]*\)/);
+    if (lm && !issues.some(function (x) { return x.title.indexOf('link') !== -1 && x.start >= sp.start && x.start < sp.end; })) {
+      push('err', '[ … ]( … ) becomes a hyperlink inside math',
+        'Marked converts this sequence into an anchor before MathJax runs. Insert a space between <code>]</code> and <code>(</code>, or escape the Markdown punctuation.',
+        sp.innerStart + lm.index, sp.innerStart + lm.index + lm[0].length);
+    }
+  });
+
+  /* 7. Exact indented-code warning from Marked when available. */
+  var sawExactIndented = false;
+  markedRanges.forEach(function (r) {
+    if (r.type !== 'code' || !r.token || r.token.codeBlockStyle !== 'indented') return;
+    sawExactIndented = true;
+    if (/[$\\]/.test(src.slice(r.start, r.end))) {
+      var unindent = [], pos = r.start, lines = src.slice(r.start, r.end).split('\n');
+      for (var k = 0; k < lines.length; k++) {
+        var lead = lines[k].match(/^(?: {1,4}|\t)/);
+        if (lead) unindent.push(edit(pos, pos + lead[0].length, ''));
+        pos += lines[k].length + 1;
+      }
+      push('warn', 'Indented text became a code block',
+        'Marked treats this indentation as code, and MathJax skips code blocks. Remove the leading indentation when the TeX should render.',
+        r.start, Math.min(r.end, r.start + 8),
+        fix('unindent', unindent));
+    }
+  });
+  if (!sawExactIndented && !markedRanges.length) {
+    fallbackCodeRanges(src).forEach(function (r) {
+      var raw = src.slice(r.start, r.end);
+      if (/^(?: {4}|\t)/.test(raw) && /[$\\]/.test(raw)) {
+        push('warn', 'Indented text may be a code block',
+          'Markdown can treat this indentation as code, which MathJax skips. Remove the leading indentation when the TeX should render.',
+          r.start, Math.min(r.end, r.start + 8));
+      }
+    });
+  }
+
+  issues.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
+  return { issues: issues, spans: spans };
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function escAttr(s) {
+  return escHtml(s == null ? '' : s).replace(/'/g, '&#39;');
+}
+
+/* ================= dom wiring ================= */
+
+var markedApi = window.marked || null;
+var purifier = window.DOMPurify || null;
+
+function setupOpenReviewMarked() {
+  if (!markedApi || typeof markedApi.Renderer !== 'function' || typeof markedApi.setOptions !== 'function') return false;
+  var renderer = new markedApi.Renderer();
+
+  renderer.image = function (token, oldTitle, oldText) {
+    var href, title, text;
+    if (token && typeof token === 'object') {
+      href = token.href || '';
+      title = token.title;
+      text = token.text || '';
+    } else {
+      href = token || '';
+      title = oldTitle;
+      text = oldText || '';
+    }
+    if (href.indexOf('/images/') === 0) {
+      var titleAttr = title ? ' title="' + escAttr(title) + '"' : '';
+      var classAttr = /_icon\.svg$/.test(href) ? ' class="icon"' : '';
+      return '<img src="' + escAttr(href) + '" alt="' + escAttr(text) + '"' + titleAttr + classAttr + '>';
+    }
+    return escHtml('<img src="' + href + '" alt="' + text + '" title="' + title + '">');
+  };
+  renderer.checkbox = function (token) {
+    var checked = token && typeof token === 'object' ? token.checked : token;
+    return checked ? '[x]' : '[ ]';
+  };
+  renderer.html = function (token) {
+    var text = token && typeof token === 'object' ? token.text : token;
+    return escHtml(text || '');
+  };
+
+  markedApi.setOptions({
+    baseUrl: null,
+    breaks: false,
+    gfm: true,
+    headerIds: false,
+    langPrefix: 'language-',
+    mangle: false,
+    renderer: renderer
+  });
+  return true;
+}
+
+var MARKED_READY = setupOpenReviewMarked();
+if (purifier && typeof purifier.addHook === 'function') {
+  purifier.addHook('afterSanitizeAttributes', function (node) {
+    if (node && node.tagName === 'A') {
+      node.setAttribute('target', '_blank');
+      node.setAttribute('rel', 'noopener noreferrer');
+    }
+  });
+}
+
+function renderOpenReviewMarkdown(text) {
+  if (!MARKED_READY) throw new Error('Marked failed to load');
+  var parse = typeof markedApi.parse === 'function' ? markedApi.parse : markedApi.marked;
+  if (typeof parse !== 'function') throw new Error('Marked parser is unavailable');
+  var html = parse.call(markedApi, text);
+  if (!purifier || typeof purifier.sanitize !== 'function') throw new Error('DOMPurify failed to load');
+  return purifier.sanitize(html);
+}
+
+var ta = document.getElementById('src');
+var preview = document.getElementById('preview');
+var scroller = document.getElementById('scroller');
+var lintList = document.getElementById('lintList');
+var lintCount = document.getElementById('lintCount');
+var fixAllBtn = document.getElementById('fixAllBtn');
+var charStat = document.getElementById('charStat');
+var charChip = document.getElementById('charChip');
+var charFill = document.getElementById('charFill');
+var wordStat = document.getElementById('wordStat');
+var mathStat = document.getElementById('mathStat');
+var hazStat = document.getElementById('hazStat');
+var mjStatus = document.getElementById('mjStatus');
+var limitInput = document.getElementById('limit');
+var syncBox = document.getElementById('sync');
+var toast = document.getElementById('toast');
+var themeBtn = document.getElementById('themeBtn');
+var fsEditorVal = document.getElementById('fsEditorVal');
+var fsPreviewVal = document.getElementById('fsPreviewVal');
+var saveStateEl = document.getElementById('saveState');
+
+/* ---- persistence: artifact storage -> localStorage -> memory ---- */
+var canArtifactStore = !!(window.storage && typeof window.storage.get === 'function' && typeof window.storage.set === 'function' && typeof window.storage.delete === 'function');
+var canLocalStore = (function () {
+  try { var k = '__probe__'; localStorage.setItem(k, '1'); localStorage.removeItem(k); return true; }
+  catch (e) { return false; }
+})();
+var memStore = {};
+
+function fallbackGet(key) {
+  if (canLocalStore) { try { return localStorage.getItem(key); } catch (e) {} }
+  return Object.prototype.hasOwnProperty.call(memStore, key) ? memStore[key] : null;
+}
+function fallbackSet(key, val) {
+  var ok = false;
+  if (canLocalStore) { try { localStorage.setItem(key, val); ok = true; } catch (e) {} }
+  memStore[key] = val;
+  return ok;
+}
+function storeGet(key) {
+  if (canArtifactStore) {
+    return window.storage.get(key, false)
+      .then(function (r) { return r ? r.value : fallbackGet(key); })
+      .catch(function () { return fallbackGet(key); });
+  }
+  return Promise.resolve(fallbackGet(key));
+}
+function storeSet(key, val) {
+  var localOk = fallbackSet(key, val);
+  if (canArtifactStore) {
+    return window.storage.set(key, val, false)
+      .then(function () { return true; })
+      .catch(function () { return localOk; });
+  }
+  return Promise.resolve(localOk);
+}
+function storeDel(key) {
+  delete memStore[key];
+  if (canLocalStore) { try { localStorage.removeItem(key); } catch (e) {} }
+  if (canArtifactStore) return window.storage.delete(key, false).catch(function () {});
+  return Promise.resolve();
+}
+
+/* ---- preferences (theme, font sizes, limit, sync) ---- */
+var PREFS_KEY = 'rebuttal-bench-prefs';
+var DRAFT_KEY = 'rebuttal-bench-draft';
+var FS_RANGES = { fsEditor: [11, 20], zoomPreview: [70, 200] };
+var FS_STEPS = { fsEditor: 1, zoomPreview: 10 };
+var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, sync: true };
+
+function applyPrefs() {
+  document.documentElement.setAttribute('data-theme', prefs.theme === 'dark' ? 'dark' : 'light');
+  document.documentElement.style.setProperty('--editor-fs', prefs.fsEditor + 'px');
+  document.documentElement.style.setProperty('--preview-zoom', prefs.zoomPreview / 100);
+  fsEditorVal.textContent = prefs.fsEditor;
+  fsPreviewVal.textContent = prefs.zoomPreview + '%';
+  themeBtn.textContent = prefs.theme === 'dark' ? 'Light mode' : 'Dark mode';
+  limitInput.value = prefs.limit;
+  syncBox.checked = !!prefs.sync;
+}
+
+var prefsTimer = null;
+function savePrefs() {
+  clearTimeout(prefsTimer);
+  prefsTimer = setTimeout(function () { storeSet(PREFS_KEY, JSON.stringify(prefs)); }, 300);
+}
+
+/* ---- draft autosave ---- */
+var draftTimer = null;
+function saveDraftSoon() {
+  saveStateEl.textContent = 'Saving\u2026';
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(saveDraftNow, 700);
+}
+function saveDraftNow() {
+  storeSet(DRAFT_KEY, ta.value).then(function (persisted) {
+    saveStateEl.textContent = persisted ? 'Draft saved' : 'Draft in memory only';
+  });
+}
+
+var lineStarts = [0];
+var currentIssues = [];
+
+var EXAMPLE = [
+  '**Response to Reviewer aBcD — Part 1/2**',
+  '',
+  'We thank the reviewer for the careful reading and constructive comments. We address each point below and will fold all clarifications into the revision.',
+  '',
+  '**Q1. "The update rule for the weights is unclear."**',
+  '',
+  'The parameters $\\mathbf{W}_{t}$ and the momentum buffer $\\mathbf{m}_{t}$ are updated jointly, so the per-step cost is $O(d)$ — identical to SGD:',
+  '',
+  '$$',
+  '\\begin{aligned}',
+  '\\mathbf{m}_{t+1} &= \\beta\\, \\mathbf{m}_{t} + (1-\\beta)\\, g_t \\\\',
+  '\\mathbf{W}_{t+1} &= \\mathbf{W}_{t} - \\eta\\, \\mathbf{m}_{t+1}',
+  '\\end{aligned}',
+  '$$',
+  '',
+  '**Q2. Compute cost.** Training used 8*A100 GPUs for roughly 30 h (about $450 of compute at $1.9 per GPU-hour), i.e. a*b*c cost scaling as claimed in Sec. 4.2.',
+  '',
+  '**Q3. Set notation.** We will clarify that $\\{x_i\\}_{i=1}^{N}$ denotes the training set and that sampling is i.i.d.',
+  '',
+  '**Q4. Variance across seeds.** As requested, mean \u00b1 std over 5 seeds (tables do render on OpenReview):',
+  '',
+  '| Method | AUROC |',
+  '| --- | --- |',
+  '| Baseline | 97.2 \u00b1 0.4 |',
+  '| Ours | 99.1 \u00b1 0.2 |',
+  '',
+  'The bound below was moved to App. B:',
+  '',
+  '\\[ \\mathbb{E}\\left[ \\| \\hat{y} - y \\|_2^2 \\right] \\le C \\sigma_x^2 \\Delta^2 \\]',
+  '',
+  '---',
+  '',
+  '*Every hazard flagged below is deliberate — click one to jump to it, then apply the fix from the cheat sheet and watch the preview heal.*'
+].join('\n');
+
+/* ---- rendering ---- */
+var renderBusy = false, renderQueued = false;
+
+function setMathStatus(text, kind) {
+  mjStatus.textContent = text;
+  mjStatus.className = kind || '';
+}
+
+function clearOldMath() {
+  if (window.MJ_READY && window.MathJax && typeof MathJax.typesetClear === 'function') {
+    try { MathJax.typesetClear([preview]); } catch (e) {}
+  }
+}
+
+function renderPreview() {
+  if (renderBusy) { renderQueued = true; return; }
+  renderBusy = true;
+  var text = ta.value;
+  var keep = scroller.scrollTop;
+
+  var done = function () {
+    scroller.scrollTop = keep;
+    renderBusy = false;
+    if (renderQueued) { renderQueued = false; renderPreview(); }
+  };
+
+  clearOldMath(); /* MathJax must forget old items before their DOM is removed. */
+
+  if (!text.trim()) {
+    preview.innerHTML = '<p class="empty">Nothing to preview yet.</p>';
+    if (window.MJ_READY) setMathStatus('MathJax ready', 'good');
+    done();
+    return;
+  }
+
+  try {
+    preview.innerHTML = renderOpenReviewMarkdown(text);
+  } catch (e) {
+    preview.innerHTML = '<p class="empty">Preview error: ' + escHtml(e && e.message ? e.message : e) + '</p>';
+    setMathStatus('Preview library error', 'err');
+    done();
+    return;
+  }
+
+  if (window.MJ_READY && window.MathJax && typeof MathJax.typesetPromise === 'function') {
+    MathJax.typesetPromise([preview]).then(function () {
+      var nerr = preview.querySelectorAll('mjx-merror').length;
+      if (nerr) setMathStatus('MathJax: ' + nerr + ' TeX error' + (nerr === 1 ? '' : 's'), 'err');
+      else setMathStatus('MathJax ready', 'good');
+      done();
+    }).catch(function (e) {
+      setMathStatus('MathJax: ' + (e && e.message ? e.message : e), 'err');
+      done();
+    });
+  } else {
+    done();
+  }
+}
+
+window.onMathJaxReady = function () {
+  setMathStatus('MathJax ready', 'good');
+  renderPreview();
+};
+
+/* MathJax scales math to the ex-height of the surrounding font, so a typeset
+   that lands before Noto Sans arrives sizes the formulas against the fallback.
+   One re-render once the webfont settles keeps the math matching OpenReview. */
+if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
+  document.fonts.ready.then(function () { renderPreview(); });
+}
+
+/* ---- stats + lint ---- */
+function fmt(n) { return n.toLocaleString('en-US'); }
+
+function updateAll() {
+  var text = ta.value;
+  lineStarts = computeLineStarts(text);
+
+  var res = analyze(text);
+  currentIssues = res.issues;
+
+  /* stats */
+  var chars = Array.from(text).length;
+  var words = (text.trim().match(/\S+/g) || []).length;
+  var limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
+
+  charStat.textContent = limit > 0 ? fmt(chars) + ' / ' + fmt(limit) + ' characters' : fmt(chars) + ' characters';
+  var pct = limit > 0 ? Math.min(100, (chars / limit) * 100) : 0;
+  charFill.style.width = pct + '%';
+  charChip.classList.toggle('over', limit > 0 && chars > limit);
+  charChip.classList.toggle('near', limit > 0 && chars <= limit && chars >= 0.85 * limit);
+
+  wordStat.textContent = fmt(words) + ' words';
+  mathStat.textContent = fmt(res.spans.length) + ' math span' + (res.spans.length === 1 ? '' : 's');
+
+  var n = currentIssues.length;
+  var hasErr = currentIssues.some(function (x) { return x.sev === 'err'; });
+  hazStat.textContent = fmt(n) + ' hazard' + (n === 1 ? '' : 's');
+  hazStat.className = n === 0 ? 'good' : (hasErr ? 'err' : 'bad');
+  lintCount.textContent = String(n);
+  lintCount.classList.toggle('zero', n === 0);
+
+  /* lint cards */
+  if (n === 0) {
+    lintList.innerHTML = '<div class="lint-empty">Nothing that Marked would mangle before MathJax sees it. If the preview looks right, the posted comment should too.</div>';
+  } else {
+    var html = '';
+    currentIssues.slice(0, 60).forEach(function (iss, idx) {
+      var lc = lineColOf(lineStarts, iss.start);
+      var a = Math.max(0, iss.start - 22);
+      var b = Math.min(text.length, iss.end + 22);
+      var pre = text.slice(a, iss.start).replace(/\n/g, ' ');
+      var hit = text.slice(iss.start, iss.end).replace(/\n/g, ' ');
+      var post = text.slice(iss.end, b).replace(/\n/g, ' ');
+      html += '<div class="issue ' + iss.sev + '" data-idx="' + idx + '" role="button" tabindex="0">' +
+        '<div class="issue-top">' +
+        '<span class="where">line ' + lc.line + ', col ' + lc.col + '</span>' +
+        (iss.fix ? '<button type="button" class="fixbtn" data-fix="' + idx + '" title="' +
+          escAttr('Rewrite the source: ' + iss.fix.label) + '">Fix: ' + escHtml(iss.fix.label) + '</button>' : '') +
+        '</div>' +
+        '<div class="title">' + escHtml(iss.title) + '</div>' +
+        '<div class="snippet">' + escHtml(pre) + '<mark>' + escHtml(hit) + '</mark>' + escHtml(post) + '</div>' +
+        '<div class="detail">' + iss.detail + '</div>' +
+        '</div>';
+    });
+    if (n > 60) html += '<div class="lint-empty">…and ' + (n - 60) + ' more (Fix all still covers every one of them).</div>';
+    lintList.innerHTML = html;
+  }
+
+  var fixable = currentIssues.reduce(function (acc, iss) { return acc + (iss.fix ? 1 : 0); }, 0);
+  fixAllBtn.hidden = fixable === 0;
+  fixAllBtn.textContent = 'Fix all (' + fixable + ')';
+}
+
+/* ---- autofix ---- */
+
+var UNDO_HINT = /Mac|iPod|iPhone|iPad/.test((navigator.platform || '') + ' ' + (navigator.userAgent || '')) ? '⌘Z' : 'Ctrl+Z';
+fixAllBtn.title = 'Rewrite every hazard that has a mechanical fix. One ' + UNDO_HINT + ' undoes the whole pass.';
+
+function applyEditsToText(text, edits) {
+  var sorted = edits.slice().sort(function (a, b) { return a.start - b.start || a.end - b.end; });
+  var out = '', cursor = 0;
+  for (var i = 0; i < sorted.length; i++) {
+    var e = sorted[i];
+    if (e.start < cursor) continue;
+    out += text.slice(cursor, e.start) + e.text;
+    cursor = e.end;
+  }
+  return out + text.slice(cursor);
+}
+
+function editsStillValid(text, edits) {
+  return edits.every(function (e) {
+    return e.end <= text.length && text.slice(e.start, e.end) === e.was;
+  });
+}
+
+function editsOverlap(edits, taken) {
+  return edits.some(function (e) {
+    return taken.some(function (t) { return e.start < t.end && t.start < e.end; });
+  });
+}
+
+/* Replace the whole value through execCommand so the browser's own undo stack
+   keeps working: one Ctrl+Z reverts a fix, or an entire fix-all pass. */
+function setSourceText(next, selStart, selEnd) {
+  if (ta.value === next) return;
+  var ok = false;
+  try {
+    ta.focus();
+    ta.setSelectionRange(0, ta.value.length);
+    ok = document.execCommand('insertText', false, next);
+  } catch (e) { ok = false; }
+  if (!ok || ta.value !== next) ta.value = next;
+  if (typeof selStart === 'number') {
+    try { ta.setSelectionRange(selStart, typeof selEnd === 'number' ? selEnd : selStart); } catch (e) {}
+  }
+}
+
+function revealOffset(offset) {
+  var lc = lineColOf(computeLineStarts(ta.value), offset);
+  var lh = parseFloat(getComputedStyle(ta).lineHeight) || 21;
+  ta.scrollTop = Math.max(0, (lc.line - 1) * lh - ta.clientHeight / 3);
+}
+
+function afterSourceChange() {
+  updateAll();
+  renderPreview();
+  saveDraftSoon();
+}
+
+function applyIssueFix(iss) {
+  if (!iss || !iss.fix) return;
+  var text = ta.value;
+  if (!editsStillValid(text, iss.fix.edits)) {
+    updateAll();
+    showToast('The draft moved on — hazards refreshed, try again');
+    return;
+  }
+  var first = iss.fix.edits.slice().sort(function (a, b) { return a.start - b.start; })[0];
+  setSourceText(applyEditsToText(text, iss.fix.edits), first.start, first.start + first.text.length);
+  revealOffset(first.start);
+  afterSourceChange();
+  showToast('Fixed — ' + UNDO_HINT + ' undoes it');
+}
+
+/* Fixes can uncover fixes (turning \[ … \] into $$ … $$ exposes the escapes
+   inside), so re-analyze and repeat until a round changes nothing. */
+function applyAllFixes() {
+  var text = ta.value;
+  var startText = text;
+  var applied = 0;
+
+  for (var round = 0; round < 8; round++) {
+    var res = analyze(text);
+    var taken = [], roundCount = 0;
+    res.issues.forEach(function (iss) {
+      if (!iss.fix) return;
+      if (!editsStillValid(text, iss.fix.edits)) return;
+      if (editsOverlap(iss.fix.edits, taken)) return;
+      taken = taken.concat(iss.fix.edits);
+      roundCount++;
+    });
+    if (!roundCount) break;
+    text = applyEditsToText(text, taken);
+    applied += roundCount;
+  }
+
+  if (text === startText) { showToast('Nothing left that can be fixed mechanically'); return; }
+
+  var caret = ta.selectionStart;
+  setSourceText(text, Math.min(caret, text.length));
+  afterSourceChange();
+
+  var left = currentIssues.length;
+  showToast('Applied ' + applied + ' fix' + (applied === 1 ? '' : 'es') +
+    (left ? ' — ' + left + ' hazard' + (left === 1 ? '' : 's') + ' still need you' : ' — no hazards left') +
+    '. ' + UNDO_HINT + ' undoes the pass.');
+}
+
+function jumpToIssue(iss) {
+  ta.focus();
+  ta.setSelectionRange(iss.start, iss.end);
+  revealOffset(iss.start);
+}
+
+lintList.addEventListener('click', function (e) {
+  var fixBtn = e.target.closest('.fixbtn');
+  if (fixBtn) {
+    applyIssueFix(currentIssues[parseInt(fixBtn.dataset.fix, 10)]);
+    return;
+  }
+  var card = e.target.closest('.issue');
+  if (!card) return;
+  var iss = currentIssues[parseInt(card.dataset.idx, 10)];
+  if (iss) jumpToIssue(iss);
+});
+
+lintList.addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+  if (e.target.closest('.fixbtn')) return; /* the nested button handles itself */
+  var card = e.target.closest('.issue');
+  if (!card) return;
+  e.preventDefault();
+  var iss = currentIssues[parseInt(card.dataset.idx, 10)];
+  if (iss) jumpToIssue(iss);
+});
+
+fixAllBtn.addEventListener('click', applyAllFixes);
+
+/* ---- events ---- */
+var timer = null;
+function schedule() {
+  clearTimeout(timer);
+  timer = setTimeout(function () { updateAll(); renderPreview(); }, 220);
+}
+
+ta.addEventListener('input', function () { saveDraftSoon(); schedule(); });
+window.addEventListener('beforeunload', function () { fallbackSet(DRAFT_KEY, ta.value); });
+limitInput.addEventListener('input', function () {
+  prefs.limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
+  savePrefs();
+  updateAll();
+});
+
+syncBox.addEventListener('change', function () {
+  prefs.sync = syncBox.checked;
+  savePrefs();
+});
+
+themeBtn.addEventListener('click', function () {
+  prefs.theme = prefs.theme === 'dark' ? 'light' : 'dark';
+  applyPrefs();
+  savePrefs();
+});
+
+Array.prototype.forEach.call(document.querySelectorAll('.fs-ctl button'), function (btn) {
+  btn.addEventListener('click', function () {
+    var kind = btn.getAttribute('data-fs');
+    var next = prefs[kind] + parseInt(btn.getAttribute('data-dir'), 10) * FS_STEPS[kind];
+    var range = FS_RANGES[kind];
+    if (next < range[0] || next > range[1]) return;
+    prefs[kind] = next;
+    applyPrefs();
+    savePrefs();
+  });
+});
+
+ta.addEventListener('scroll', function () {
+  if (!syncBox.checked) return;
+  var denom = ta.scrollHeight - ta.clientHeight;
+  if (denom <= 0) return;
+  var ratio = ta.scrollTop / denom;
+  scroller.scrollTop = ratio * (scroller.scrollHeight - scroller.clientHeight);
+});
+
+document.getElementById('copyBtn').addEventListener('click', function () {
+  var txt = ta.value;
+  var ok = function () { showToast('Copied — paste it straight into OpenReview'); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(ok).catch(function () { fallbackCopy(ok); });
+  } else {
+    fallbackCopy(ok);
+  }
+});
+function fallbackCopy(ok) {
+  ta.focus();
+  ta.select();
+  try { document.execCommand('copy'); ok(); } catch (e) { showToast('Copy failed — select and copy manually'); }
+}
+
+document.getElementById('exampleBtn').addEventListener('click', function () {
+  if (ta.value && ta.value !== EXAMPLE && !window.confirm('Replace the current draft with the example? Your local autosave will also be replaced.')) return;
+  ta.value = EXAMPLE;
+  updateAll();
+  renderPreview();
+  saveDraftNow();
+});
+
+document.getElementById('clearBtn').addEventListener('click', function () {
+  if (ta.value && !window.confirm('Clear the editor and its local autosave?')) return;
+  ta.value = '';
+  storeSet(DRAFT_KEY, '').then(function (persisted) {
+    saveStateEl.textContent = persisted ? 'Blank draft saved' : 'Blank draft in memory only';
+  });
+  updateAll();
+  renderPreview();
+  ta.focus();
+});
+
+var toastTimer = null;
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { toast.classList.remove('show'); }, 1800);
+}
+
+/* ---- boot ---- */
+applyPrefs();
+storeGet(PREFS_KEY).then(function (v) {
+  if (v) {
+    try {
+      var p = JSON.parse(v);
+      if (p.theme === 'dark' || p.theme === 'light') prefs.theme = p.theme;
+      if (p.fsEditor >= FS_RANGES.fsEditor[0] && p.fsEditor <= FS_RANGES.fsEditor[1]) prefs.fsEditor = p.fsEditor;
+      /* Older drafts stored a preview font size in px; 12px was OpenReview's
+         own size, so carry the perceived scale over to the zoom control. */
+      var zoom = typeof p.zoomPreview === 'number' ? p.zoomPreview
+        : (typeof p.fsPreview === 'number' ? Math.round(p.fsPreview / 12 * 10) * 10 : null);
+      if (zoom !== null && zoom >= FS_RANGES.zoomPreview[0] && zoom <= FS_RANGES.zoomPreview[1]) prefs.zoomPreview = zoom;
+      if (typeof p.limit === 'number' && p.limit >= 0) prefs.limit = p.limit;
+      if (typeof p.sync === 'boolean') prefs.sync = p.sync;
+    } catch (e) {}
+  }
+  applyPrefs();
+  return storeGet(DRAFT_KEY);
+}).then(function (draft) {
+  if (typeof draft === 'string') {
+    ta.value = draft;
+    saveStateEl.textContent = draft ? 'Draft restored' : 'Blank draft restored';
+  } else {
+    ta.value = EXAMPLE;
+  }
+  updateAll();
+  renderPreview();
+});
+</script>
+</body>
+</html>

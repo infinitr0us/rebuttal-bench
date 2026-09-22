@@ -1,0 +1,2 @@
+# Keep LF everywhere (the HTML and tests are LF; Windows checkouts must not convert).
+* text=auto eol=lf
