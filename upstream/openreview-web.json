@@ -1,0 +1,50 @@
+{
+  "commit": "45c27aaa16ab4e92616c5dac7fd216edfa638da2",
+  "date": "2026-09-22T18:50:49Z",
+  "excerpts": {
+    "MathJax config": {
+      "file": "lib/mathjax-config.js",
+      "text": "/* globals MathJax: false */\n\nconst mathjaxConfig = {\n  loader: { load: ['ui/safe'] },\n  options: {\n    ignoreHtmlClass: 'disable-tex-rendering', // class that marks tags not to search\n  },\n  tex: {\n    inlineMath: [\n      ['$', '$'],\n      ['\\\\(', '\\\\)'],\n    ],\n  },\n  chtml: {\n    scale: 1, // global scaling factor for all expressions\n    minScale: 0.5, // smallest scaling factor to use\n    matchFontHeight: true, // true to match ex-height of surrounding font\n    mtextInheritFont: false, // true to make mtext elements use surrounding font\n    merrorInheritFont: true, // true to make merror text use surrounding font\n    mathmlSpacing: false, // true for MathML spacing rules, false for TeX rules\n    skipAttributes: {}, // RFDa and other attributes NOT to copy to the output\n    exFactor: 0.5, // default size of ex in em units\n    displayAlign: 'left', // default for indentalign when set to 'auto'\n    displayIndent: '0', // default for indentshift when set to 'auto'\n  },\n  startup: {\n    typeset: false, // don't perform initial typeset\n    ready() {\n      MathJax.startup.defaultReady()\n      const { safe } = MathJax.startup.document\n      safe.filterAttributes.set('fontfamily', 'filterFamily')\n      safe.filterMethods.filterFamily = (_safe, family) => family.split(/;/)[0]\n    },\n  },\n}\n\nexport default mathjaxConfig\n"
+    },
+    "MathJax script URL": {
+      "file": "app/MathjaxScript.js",
+      "text": "src=\"https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-chtml-full.js\""
+    },
+    "Marked renderer + options": {
+      "file": "client/view.js",
+      "text": "var setupMarked = function () {\n    var renderer = new marked.Renderer()\n\n    renderer.image = function ({ href, title, text }) {\n      if (href.startsWith('/images/')) {\n        var titleAttr = title ? 'title=\"' + title + '\" ' : ''\n        var classAttr = href.endsWith('_icon.svg') ? 'class=\"icon\" ' : ''\n        return '<img src=\"' + href + '\" alt=\"' + text + '\" ' + titleAttr + classAttr + '/>'\n      }\n      return $('<div />')\n        .text('<img src=\"' + href + '\" alt=\"' + text + '\" title=\"' + title + '\">')\n        .html()\n    }\n    renderer.checkbox = function ({ checked }) {\n      if (checked) return '[x]'\n      return '[ ]'\n    }\n    renderer.html = function ({ text }) {\n      return $('<div />').text(text).html()\n    }\n\n    // For details on options see https://marked.js.org/#/USING_ADVANCED.md#options\n    marked.setOptions({\n      baseUrl: null,\n      breaks: false,\n      gfm: true,\n      headerIds: false,\n      langPrefix: 'language-',\n      mangle: false,\n      renderer: renderer,\n    })\n  }"
+    },
+    "DOMPurify config + hook": {
+      "file": "app/AppInit.js",
+      "text": "DOMPurify.setConfig({ ALLOWED_TAGS: allowedHtmlTags })\n    DOMPurify.addHook('afterSanitizeAttributes', (node) => {\n      if (node.tagName === 'A') {\n        node.setAttribute('target', '_blank')\n        node.setAttribute('rel', 'noopener noreferrer')\n      }\n\n      node.removeAttribute?.('style')\n      node.removeAttribute?.('action')\n      node.removeAttribute?.('formaction')\n    })\n    window.DOMPurify = DOMPurify"
+    },
+    "DOMPurify allowed tags": {
+      "file": "lib/utils.js",
+      "text": "export const allowedHtmlTags = [\n  // headings and block structure\n  'h1',\n  'h2',\n  'h3',\n  'h4',\n  'h5',\n  'h6',\n  'p',\n  'div',\n  'span',\n  'blockquote',\n  'pre',\n  'hr',\n  'section',\n  'article',\n  'header',\n  'footer',\n  'figure',\n  'figcaption',\n  'details',\n  'summary',\n  // inline text\n  'a',\n  'b',\n  'i',\n  'em',\n  'strong',\n  'u',\n  's',\n  'strike',\n  'del',\n  'ins',\n  'sub',\n  'sup',\n  'small',\n  'mark',\n  'code',\n  'kbd',\n  'samp',\n  'var',\n  'abbr',\n  'cite',\n  'q',\n  'br',\n  'wbr',\n  // lists\n  'ul',\n  'ol',\n  'li',\n  'dl',\n  'dt',\n  'dd',\n  // tables\n  'table',\n  'thead',\n  'tbody',\n  'tfoot',\n  'tr',\n  'th',\n  'td',\n  'caption',\n  'colgroup',\n  'col',\n  // images\n  'img',\n]"
+    },
+    "Library versions (package-lock)": {
+      "file": "package-lock.json",
+      "text": "marked 15.0.6\ndompurify 3.4.13"
+    },
+    "Note rendering call": {
+      "file": "components/NoteContent.js",
+      "text": "setSanitizedHtml(DOMPurify.sanitize(marked(content)))\nsetSanitizedHtml(DOMPurify.sanitize(autoLinkContent(content)))\nconst html = marked(content, { renderer: new marked.Renderer() })\nclassName={classNames('note-content-value', 'markdown-rendered', className)}\nclassName={classNames('note-content-value', 'markdown-rendered', className)}"
+    },
+    "Character counter": {
+      "file": "components/EditorComponents/TextAreaWidget.js",
+      "text": "const charsRemaining = maxLength - contentLength\ncontentLength={convertToString(value)?.trim()?.length ?? 0}"
+    },
+    "Markdown note styles": {
+      "file": "styles/utils/_mixins.scss",
+      "text": "@mixin markdown-content-styles() {\n  white-space: normal;\n  overflow-wrap: break-word;\n\n  h1,\n  h2,\n  h3,\n  h4,\n  h5,\n  h6 {\n    color: constants.$darkBlue;\n    margin-top: 0;\n    margin-bottom: 0.5rem;\n  }\n  h1 {\n    font-size: 1.375rem;\n    font-weight: bold;\n  }\n  h2 {\n    font-size: 1.25rem;\n  }\n  h3 {\n    font-size: 1rem;\n  }\n  h4,\n  h5,\n  h6 {\n    font-size: 0.75rem;\n    font-weight: normal;\n  }\n  p {\n    margin-bottom: 0.5rem;\n  }\n  strong {\n    color: constants.$darkBlue;\n    padding-right: 0;\n  }\n  ol,\n  ul {\n    padding-left: 1.5rem;\n    margin-bottom: 0.5rem;\n    li {\n      padding: 0;\n      p {\n        margin-bottom: 0.125rem;\n      }\n    }\n    ol,\n    ul {\n      margin-bottom: 0.125rem;\n    }\n  }\n  hr {\n    margin: 0.5rem 0;\n  }\n  code {\n    color: constants.$orRed;\n  }\n  pre {\n    padding: 0.25rem 0.5rem;\n    margin-bottom: 0.5rem;\n    code {\n      font-size: 0.75rem;\n      color: #333;\n    }\n  }\n  img.icon {\n    width: 1rem;\n    height: 1rem;\n  }\n  blockquote {\n    font-size: 0.75rem;\n    padding: 0.25rem 0.5rem;\n    margin-bottom: 0.5rem;\n    border-left-color: #ccc;\n    p {\n      margin-bottom: 0;\n    }\n  }\n  table {\n    max-width: 100%;\n    margin-bottom: 0.5rem;\n    thead > tr > th {\n      vertical-align: bottom;\n      border-top: 0;\n      border-bottom: 2px solid #ddd;\n    }\n    tr > td,\n    tr > th {\n      padding: 0.25rem;\n      vertical-align: top;\n      border-top: 1px solid #ddd;\n    }\n  }\n}"
+    },
+    "Note content styles": {
+      "file": "styles/components/note-content.scss",
+      "text": "@use '../utils/constants';\n@use '../utils/mixins';\n\n.note-content {\n  font-size: 0.75rem;\n  line-height: 1.125rem;\n  margin-top: 0.125rem;\n  margin-bottom: 0.125rem;\n\n  li {\n    padding: 0.125rem 0;\n  }\n\n  strong {\n    font-weight: bold;\n    color: constants.$orRed;\n    padding-right: 0.25rem;\n  }\n\n  .note-content-value {\n    white-space: pre-wrap;\n    overflow-wrap: break-word;\n    &.markdown-rendered {\n      @include mixins.markdown-content-styles;\n    }\n  }\n\n  .private-contents-icon {\n    color: constants.$subtleGray;\n    padding-right: 0.25rem;\n  }\n\n  .attachment-download-link {\n    .glyphicon {\n      padding-right: 0.25rem;\n    }\n  }\n}\n"
+    },
+    "Display-math styles": {
+      "file": "styles/components.scss",
+      "text": "// Mathjax\n.note_content_value,\n.note-content-value {\n  mjx-container[jax='CHTML'][display='true'] {\n    overflow-x: scroll;\n    margin-bottom: 0;\n\n    &:last-child {\n      margin-bottom: 1em;\n    }\n    mjx-math {\n      padding: 1px 0;\n    }\n  }\n}"
+    }
+  }
+}
