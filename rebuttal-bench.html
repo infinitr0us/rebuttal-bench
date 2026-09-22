@@ -50,7 +50,7 @@ window.MathJax = {
 };
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.6/lib/marked.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.11/purify.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.13/purify.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-chtml-full.js" async></script>
 
 <!-- OpenReview sets its note text in Noto Sans. -->
@@ -714,7 +714,7 @@ window.MathJax = {
 </header>
 
 <div class="statsbar">
-  <span class="charchip" id="charChip"><span class="fill" id="charFill"></span><span class="txt" id="charStat">0 / 5,000 characters</span></span>
+  <span class="charchip" id="charChip" title="Counted like OpenReview’s own counter: length after trimming leading/trailing whitespace"><span class="fill" id="charFill"></span><span class="txt" id="charStat">0 / 5,000 characters</span></span>
   <span id="wordStat">0 words</span>
   <span id="mathStat">0 math spans</span>
   <span id="hazStat" class="good">0 hazards</span>
@@ -736,6 +736,8 @@ window.MathJax = {
         <tr><th>You want MathJax to see</th><th>Type this</th><th>Why</th></tr>
         <tr><td>row break <code>\\</code> in a matrix or <code>aligned</code></td><td><code>\\\\</code></td><td>CommonMark halves backslash pairs</td></tr>
         <tr><td>literal braces <code>\{ \}</code></td><td><code>\\{ \\}</code></td><td>CommonMark deletes <code>\</code> before punctuation</td></tr>
+        <tr><td>spacing and symbols <code>\, \; \: \! \&gt; \# \% \&amp;</code></td><td><code>\\, \\; …</code></td><td>same rule; a single <code>\[ \( \* \~</code> inside math is fine, since MathJax wants the bare character</td></tr>
+        <tr><td>tilde accent over <code>a</code></td><td><code>\tilde{a}</code></td><td><code>\~</code> is a text-mode accent MathJax doesn’t define in math</td></tr>
         <tr><td><code>_</code> next to <code>}</code>, <code>)</code> or a space</td><td><code>\_</code></td><td>the escape stops italics pairing; markdown hands a bare <code>_</code> to MathJax</td></tr>
         <tr><td><code>*</code> or <code>~</code> used as bare TeX characters</td><td><code>\*</code> or <code>\~</code></td><td>stops GFM emphasis/strikethrough; the slash is intentionally removed</td></tr>
         <tr><td>display math written as <code>\[ … \]</code></td><td><code>$$ … $$</code></td><td>simplest option; alternatively double the delimiter slashes as <code>\\[ … \\]</code></td></tr>
@@ -758,7 +760,7 @@ window.MathJax = {
 </main>
 
 <footer>
-  Pipeline mirror: Marked 15.0.6 in GFM mode with OpenReview’s HTML/image/checkbox renderers → DOMPurify → MathJax 3.2.2 <code>tex-chtml-full</code> with <code>ui/safe</code>. Preview styling mirrors <code>.note-content .markdown-rendered</code> from the live openreview.net stylesheet — Noto Sans 12px/18px, 8px block gaps, rule-only tables — so at 100% zoom it is 1:1 with the site. Line <em>wrapping</em> still depends on the reader’s window width and reply depth, which no previewer can pin down. This follows the current <a href="https://github.com/openreview/openreview-web" target="_blank" rel="noopener">openreview-web implementation</a>; the live service can change, so give the posted comment one last glance. Drafts autosave only on this device.
+  Pipeline mirror: Marked 15.0.6 in GFM mode with OpenReview’s HTML/image/checkbox renderers → DOMPurify 3.4.13 with OpenReview’s tag allowlist → MathJax 3.2.2 <code>tex-chtml-full</code> with <code>ui/safe</code>. Preview styling mirrors <code>.note-content .markdown-rendered</code> from the live openreview.net stylesheet — Noto Sans 12px/18px, 8px block gaps, rule-only tables — so at 100% zoom it is 1:1 with the site. Line <em>wrapping</em> still depends on the reader’s window width and reply depth, which no previewer can pin down. This follows the current <a href="https://github.com/openreview/openreview-web" target="_blank" rel="noopener">openreview-web implementation</a>; the live service can change, so give the posted comment one last glance. Drafts autosave only on this device.
 </footer>
 
 <div class="toast" id="toast" role="status"></div>
@@ -769,8 +771,9 @@ window.MathJax = {
 /* ================= pure analysis ================= */
 
 var PUNCT = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~';
-function isPunct(c) { return c !== '' && PUNCT.indexOf(c) !== -1; }
+function isPunct(c) { return !!c && c.length === 1 && PUNCT.indexOf(c) !== -1; }
 function isAlnum(c) { return /[A-Za-z0-9]/.test(c || ''); }
+function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 function computeLineStarts(src) {
   var starts = [0];
@@ -790,14 +793,6 @@ function countBackslashesBefore(src, idx) {
   var n = 0;
   for (var i = idx - 1; i >= 0 && src[i] === '\\'; i--) n++;
   return n;
-}
-
-/* Markdown turns each pair of source backslashes into one. If an odd source
-   backslash remains before ASCII punctuation, that final slash escapes the
-   punctuation and is removed. MathJax therefore sees floor(n / 2) slashes
-   immediately before a dollar sign. */
-function dollarIsMathDelimiter(src, idx) {
-  return Math.floor(countBackslashesBefore(src, idx) / 2) % 2 === 0;
 }
 
 function makeMask(length, ranges) {
@@ -822,55 +817,116 @@ function mergeSimpleRanges(ranges) {
 }
 
 /* Locate Marked tokens back in the original source. Marked tokens expose their
-   raw source, so sequential searches are reliable for ordinary rebuttal text
-   and give us much lower-noise linting than character heuristics. */
+   raw source, so sequential searches are reliable for ordinary rebuttal text.
+   Besides token ranges this records the leaf blocks (paragraphs, headings,
+   list-item text, escaped HTML blocks, table cells): MathJax scans each one as
+   a separate string and never pairs delimiters across two of them.
+   Returns null when the parser is unavailable. */
 function collectMarkedRanges(src) {
   var api = (typeof window !== 'undefined') ? window.marked : null;
   var lexer = api && typeof api.lexer === 'function' ? api.lexer : null;
-  if (!lexer) return [];
+  if (!lexer) return null;
 
   var root;
-  try { root = lexer.call(api, src); } catch (e) { return []; }
-  var ranges = [];
+  try { root = lexer.call(api, src); } catch (e) { return null; }
+  var ranges = [], leaves = [], dropped = [];
 
   function locate(raw, cursor, regionStart, regionEnd) {
     if (!raw) return null;
-    var at = src.indexOf(raw, cursor);
-    if (at < regionStart || at < 0 || at + raw.length > regionEnd) at = src.indexOf(raw, regionStart);
-    if (at < regionStart || at < 0 || at + raw.length > regionEnd) return null;
-    return { start: at, end: at + raw.length };
+    var from = [cursor, regionStart], k, at;
+    for (k = 0; k < from.length; k++) {
+      at = src.indexOf(raw, from[k]);
+      if (at >= regionStart && at + raw.length <= regionEnd) return { start: at, end: at + raw.length };
+    }
+    /* Inside lists and block quotes Marked strips the container's indentation
+       and "> " markers before lexing; let them reappear at every line start.
+       And when an indented line continues a paragraph, Marked glues it on with
+       an extra "\n", so an empty raw line may match no source line at all. */
+    if (raw.indexOf('\n') === -1) return null;
+    var lines = raw.split('\n'), pat = escRe(lines[0]);
+    for (k = 1; k < lines.length; k++) {
+      if (k === lines.length - 1 && !lines[k]) pat += '\\n';
+      else if (!lines[k]) pat += '(?:\\n[ \\t>]*)?';
+      else pat += '\\n[ \\t>]*' + escRe(lines[k]);
+    }
+    var re = new RegExp(pat, 'g');
+    for (k = 0; k < from.length; k++) {
+      re.lastIndex = from[k];
+      var m = re.exec(src);
+      if (m && m.index + m[0].length <= regionEnd) return { start: m.index, end: m.index + m[0].length };
+    }
+    return null;
   }
 
-  function visitCells(cells, regionStart, regionEnd, depth) {
-    if (!Array.isArray(cells)) return;
-    cells.forEach(function (cell) {
-      if (cell && Array.isArray(cell.tokens)) visit(cell.tokens, regionStart, regionEnd, depth);
+  /* GFM splits a row at every pipe preceded by an even number of backslashes,
+     trims each cell, and drops the empty cells that edge pipes leave behind. */
+  function rowCells(a, b) {
+    while (a < b && /[ \t>]/.test(src[a])) a++;
+    var cuts = [a - 1];
+    for (var p = a; p < b; p++) {
+      if (src[p] === '|' && countBackslashesBefore(src, p) % 2 === 0) cuts.push(p);
+    }
+    cuts.push(b);
+    var cells = [];
+    for (var k = 0; k + 1 < cuts.length; k++) {
+      var s = cuts[k] + 1, e = cuts[k + 1];
+      while (s < e && /\s/.test(src[s])) s++;
+      while (e > s && /\s/.test(src[e - 1])) e--;
+      cells.push({ start: s, end: e });
+    }
+    if (cells.length && cells[0].start === cells[0].end) cells.shift();
+    if (cells.length && cells[cells.length - 1].start === cells[cells.length - 1].end) cells.pop();
+    return cells;
+  }
+
+  function visitTable(tok, pos, depth) {
+    var rows = [tok.header].concat(tok.rows || []);
+    var width = Array.isArray(tok.header) ? tok.header.length : 0;
+    var lineStart = pos.start, r = 0;
+    src.slice(pos.start, pos.end).split('\n').forEach(function (line, idx) {
+      var a = lineStart, b = lineStart + line.length;
+      lineStart = b + 1;
+      if (idx === 1 || !line.trim()) return; /* delimiter row, trailing newline */
+      var cells = rowCells(a, b), tokCells = rows[r++] || [];
+      cells.forEach(function (c, ci) {
+        /* Marked silently drops cells beyond the header's width. They are kept
+           as leaves only so a formula split by a stray | can be recovered;
+           nothing in them is ever typeset. */
+        leaves.push({ start: c.start, end: c.end, exact: true, cell: true, row: a, dropped: ci >= width });
+        if (ci >= width) return;
+        var tc = tokCells[ci];
+        if (tc && Array.isArray(tc.tokens)) visit(tc.tokens, c.start, c.end, depth + 1, true);
+      });
+      if (width && cells.length > width) dropped.push({ start: cells[width].start, end: cells[cells.length - 1].end });
     });
   }
 
-  function visit(tokens, regionStart, regionEnd, depth) {
+  var LEAF = { paragraph: 1, heading: 1, text: 1, html: 1 };
+
+  function visit(tokens, regionStart, regionEnd, depth, inline) {
     if (!Array.isArray(tokens)) return;
     var cursor = regionStart;
     tokens.forEach(function (tok) {
       if (!tok || typeof tok !== 'object') return;
-      var raw = typeof tok.raw === 'string' ? tok.raw : '';
-      var pos = locate(raw, cursor, regionStart, regionEnd);
+      var type = tok.type || '';
+      var pos = locate(typeof tok.raw === 'string' ? tok.raw : '', cursor, regionStart, regionEnd);
       var childStart = regionStart, childEnd = regionEnd;
       if (pos) {
-        ranges.push({ type: tok.type || '', start: pos.start, end: pos.end, token: tok, depth: depth });
+        ranges.push({ type: type, start: pos.start, end: pos.end, token: tok, depth: depth, inline: inline });
         cursor = Math.max(cursor, pos.end);
         childStart = pos.start;
         childEnd = pos.end;
       }
-      if (Array.isArray(tok.tokens)) visit(tok.tokens, childStart, childEnd, depth + 1);
-      if (Array.isArray(tok.items)) visit(tok.items, childStart, childEnd, depth + 1);
-      visitCells(tok.header, childStart, childEnd, depth + 1);
-      if (Array.isArray(tok.rows)) tok.rows.forEach(function (row) { visitCells(row, childStart, childEnd, depth + 1); });
+      /* A leaf that cannot be located falls back to its container's range. */
+      if (!inline && LEAF[type]) leaves.push({ start: childStart, end: childEnd, exact: !!pos });
+      if (type === 'table') { if (pos) visitTable(tok, pos, depth); return; }
+      if (Array.isArray(tok.tokens)) visit(tok.tokens, childStart, childEnd, depth + 1, inline || !!LEAF[type]);
+      if (Array.isArray(tok.items)) visit(tok.items, childStart, childEnd, depth + 1, false);
     });
   }
 
-  visit(root, 0, src.length, 0);
-  return ranges;
+  visit(root, 0, src.length, 0, false);
+  return { ranges: ranges, leaves: leaves, dropped: dropped };
 }
 
 /* Fallback masking for when the CDN parser is unavailable. The live page uses
@@ -905,7 +961,7 @@ function fallbackCodeRanges(src) {
     var L = lines[li2], st = starts[li2];
     var en = st + L.length + (li2 < lines.length - 1 ? 1 : 0);
     if (fenceMask[st]) { prevBlank = true; continue; }
-    var blank = /^[ \\t]*$/.test(L);
+    var blank = /^[ \t]*$/.test(L);
     var indented = /^(?: {4}| {0,3}\t)/.test(L);
     if (inIndent && !blank && !indented) {
       ranges.push({ start: indentStart, end: st });
@@ -945,144 +1001,298 @@ function fallbackCodeRanges(src) {
   return mergeSimpleRanges(ranges);
 }
 
-function codeRangesFrom(src, markedRanges) {
-  var exact = markedRanges.filter(function (r) { return r.type === 'code' || r.type === 'codespan'; });
-  var simple = exact.map(function (r) { return { start: r.start, end: r.end }; });
-  return markedRanges.length ? mergeSimpleRanges(simple) : fallbackCodeRanges(src);
+/* Without the parser, treat blank-line-separated chunks as the leaf blocks. */
+function fallbackLeaves(src) {
+  var leaves = [], re = /\n(?:[ \t]*\n)+/g, m, last = 0;
+  while ((m = re.exec(src))) {
+    leaves.push({ start: last, end: m.index, exact: true });
+    last = m.index + m[0].length;
+  }
+  leaves.push({ start: last, end: src.length, exact: true });
+  return leaves;
 }
 
-function slashDelimiterSurvivesMarkdown(run) {
-  return Math.floor(run / 2) % 2 === 1;
+/* The strings MathJax searches: each leaf block, cut wherever a code span or
+   code block sits (MathJax skips <code>) and at blank lines. */
+function buildRegions(src, leaves, codeMask) {
+  var taken = new Uint8Array(src.length), regions = [];
+  function add(a, b, leaf) {
+    if (b > a) regions.push({ start: a, end: b, cell: !!leaf.cell, row: leaf.row, dropped: !!leaf.dropped, leaf: leaf });
+  }
+  function addRun(a, b, leaf) {
+    var re = /\n(?:[ \t]*\n)+/g, m, s = a, chunk = src.slice(a, b);
+    while ((m = re.exec(chunk))) {
+      add(s, a + m.index, leaf);
+      s = a + m.index + m[0].length;
+    }
+    add(s, b, leaf);
+  }
+  var ordered = leaves.filter(function (l) { return l.exact; })
+    .concat(leaves.filter(function (l) { return !l.exact; }));
+  ordered.forEach(function (leaf) {
+    var runStart = -1;
+    for (var i = leaf.start; i <= leaf.end; i++) {
+      var usable = i < leaf.end && !codeMask[i] && !taken[i];
+      if (usable && runStart < 0) runStart = i;
+      if (!usable && runStart >= 0) { addRun(runStart, i, leaf); runStart = -1; }
+    }
+    for (var j = leaf.start; j < leaf.end; j++) taken[j] = 1;
+  });
+  regions.sort(function (x, y) { return x.start - y.start; });
+  regions.forEach(function (r, k) { r.id = k; });
+  return regions;
 }
 
-function scanMathSpans(src, codeRanges) {
-  var codeMask = makeMask(src.length, codeRanges);
-  var occupied = new Uint8Array(src.length);
-  var spans = [], unpaired = [];
-
-  function usableDollar(i) {
-    return i >= 0 && i < src.length && src[i] === '$' && !codeMask[i] && !occupied[i] && dollarIsMathDelimiter(src, i);
+/* The text MathJax receives for src[a, b): Markdown turns each "\\" into one
+   backslash, drops the backslash of "\X" before ASCII punctuation X, and turns
+   a final odd backslash before a newline into <br>, which MathJax reads back
+   as a plain newline (br is one of its includeHtmlTags). For every character
+   MathJax sees, from/to give its source extent and at the source character. */
+function mathJaxView(src, a, b) {
+  var text = '', from = [], to = [], at = [];
+  function put(ch, s, e, p) { text += ch; from.push(s); to.push(e); at.push(p); }
+  for (var i = a; i < b;) {
+    if (i > a && src[i - 1] === '\n') {
+      /* Continuation lines lose their container prefix ("> " in a quote). */
+      var q = i;
+      while (q < b && /[ \t]/.test(src[q])) q++;
+      if (src[q] === '>') { while (q < b && /[ \t>]/.test(src[q])) q++; i = q; continue; }
+    }
+    if (src[i] === ' ') {
+      var sp = i;
+      while (sp < b && src[sp] === ' ') sp++;
+      if (sp - i >= 2 && src[sp] === '\n') { i = sp; continue; } /* "  \n" hard break */
+    }
+    if (src[i] !== '\\') { put(src[i], i, i + 1, i); i++; continue; }
+    var j = i;
+    while (j < b && src[j] === '\\') j++;
+    var n = j - i, next = j < b ? src[j] : '';
+    for (var k = 0; k + 1 < n; k += 2) put('\\', i + k, i + k + 2, i + k);
+    if (n % 2) {
+      if (isPunct(next)) { put(next, j - 1, j + 1, j); j++; }
+      else if (next === '\n' && /\S/.test(src.slice(j + 1, b))) { /* <br>; the newline follows */ }
+      else put('\\', j - 1, j, j - 1);
+    }
+    i = j;
   }
-  function mark(a, b) { for (var i = a; i < b; i++) occupied[i] = 1; }
+  return { text: text, from: from, to: to, at: at };
+}
 
-  /* Match display delimiters first, matching MathJax's delimiter precedence. */
-  for (var i = 0; i < src.length;) {
-    if (usableDollar(i) && usableDollar(i + 1)) {
-      var close = -1;
-      for (var j = i + 2; j < src.length - 1; j++) {
-        if (usableDollar(j) && usableDollar(j + 1)) { close = j; break; }
-      }
-      if (close >= 0) {
-        var dsp = { start: i, end: close + 2, innerStart: i + 2, innerEnd: close, display: true, delimiter: 'dollar' };
-        spans.push(dsp);
-        mark(dsp.start, dsp.end);
-        i = dsp.end;
-      } else {
-        unpaired.push({ start: i, end: i + 2, display: true, delimiter: 'dollar' });
-        mark(i, i + 2);
-        i += 2;
-      }
+/* A port of MathJax 3.2's FindTeX with OpenReview's delimiters, processEscapes
+   and processEnvironments: one left-to-right pass, "$$" tried before "$", a
+   closing delimiter only counts at brace depth 0, and "\X" is skipped as a
+   unit inside math. Stray closers are reported too (MathJax shows them as text). */
+var MJ_START = /(\$\$|\\\[|\\\(|\$)|\\begin\s*\{([^}]*)\}|\\[\\$]|\\([\])])|\\end\s*\{([^}]*)\}/g;
+var MJ_OPEN = { '$': ['$', false], '$$': ['$$', true], '\\(': ['\\)', false], '\\[': ['\\]', true] };
+var MJ_END = {
+  '$': /\$|\\(?:[a-zA-Z]|.)|[{}]/g,
+  '$$': /\$\$|\\(?:[a-zA-Z]|.)|[{}]/g,
+  '\\)': /\\\)|\\(?:[a-zA-Z]|.)|[{}]/g,
+  '\\]': /\\\]|\\(?:[a-zA-Z]|.)|[{}]/g
+};
+
+function mjFindEnd(text, from, close, re) {
+  re.lastIndex = from;
+  var m, braces = 0, blocked = null;
+  while ((m = re.exec(text))) {
+    if ((m[1] || m[0]) === close) {
+      if (braces === 0) return { match: m, blocked: null };
+      if (!blocked) blocked = m;
+    } else if (m[0] === '{') {
+      braces++;
+    } else if (m[0] === '}' && braces) {
+      braces--;
+    }
+  }
+  return { match: null, blocked: blocked };
+}
+
+function mjFind(text) {
+  var found = [], lone = [];
+  var re = new RegExp(MJ_START.source, 'g'), m;
+  while ((m = re.exec(text))) {
+    var kind = null, close = null, endRe = null, display = true;
+    if (m[1]) {
+      kind = m[1];
+      close = MJ_OPEN[kind][0];
+      endRe = MJ_END[close];
+      display = MJ_OPEN[kind][1];
+    } else if (m[2] !== undefined) {
+      kind = 'env';
+      close = '{' + m[2] + '}';
+      endRe = new RegExp('\\\\end\\s*(\\{' + escRe(m[2]) + '\\})|\\\\(?:[a-zA-Z]|.)|[{}]', 'g');
+    } else if (m[3]) {
+      lone.push({ at: m.index, len: 2, kind: '\\' + m[3] });
+      continue;
+    } else if (m[4] !== undefined) {
+      lone.push({ at: m.index, len: m[0].length, kind: 'end', env: m[4] });
+      continue;
     } else {
-      i++;
+      continue; /* a processEscapes escape (\\ or \$), shown as text */
     }
+    var res = mjFindEnd(text, m.index + m[0].length, close, endRe);
+    var hit = res.match || res.blocked;
+    if (hit) {
+      found.push({
+        open: m.index, openLen: m[0].length, close: hit.index, closeLen: hit[0].length,
+        display: display, kind: kind, env: m[2], braces: !res.match
+      });
+    }
+    /* MathJax resumes after the closer, or right after an opener it gave up on. */
+    if (res.match) re.lastIndex = res.match.index + res.match[0].length;
+    else if (!hit) lone.push({ at: m.index, len: m[0].length, kind: kind, env: m[2] });
+  }
+  return { found: found, lone: lone };
+}
+
+var DELIM_KIND = { '$': 'dollar', '$$': 'dollar', '\\(': 'slash', '\\[': 'slash', env: 'env' };
+var PARTNER = { '$': '$', '$$': '$$', '\\(': '\\)', '\\[': '\\]', env: 'end' };
+var DISPLAY_KIND = { '$$': 1, '\\[': 1, env: 1 };
+
+/* Prose between two currency signs, e.g. "$450 of compute at $1.9" or
+   "$5-$10", as opposed to math that starts with a number, e.g. "$5$ seeds" or
+   "$2x $". This one drives an autofix, so it wants a real prose word. */
+function looksLikeCurrencyPair(inner, after) {
+  if (/[\\^_{}=]/.test(inner)) return false;
+  if (/^\d[\d,.]*[kKmMbB]?\s*[-–—\/~]\s*$/.test(inner) && /^\d/.test(after || '')) return true;
+  return /^\d[\d,.]*[kKmMbB]?\s+/.test(inner) && /(?:^|\s)[A-Za-z]{2,}(?=[\s,.;:!?)]|$)/.test(inner);
+}
+
+/* Looser: text that starts with a bare amount ("5 | ", "1.9 per"), as opposed
+   to a formula that merely starts with a digit ("2x|y"). Used only to decline
+   pairing two leftover dollars across blocks or table cells, where a wrong
+   pairing would lead to a cell-merging or paragraph-merging fix. */
+function looksLikePrice(inner) {
+  return /^\d[\d,.]*[kKmMbB%]?(?:\s|$)/.test(inner) && !/[\\^_{}=]/.test(inner);
+}
+
+/* Real spans are exactly what MathJax will typeset (before inline Markdown
+   such as emphasis cuts them). Lone delimiters left over are then paired
+   across block boundaries when that explains the breakage: a display formula
+   split by a blank line, a formula split by a list marker, or a bare | that
+   cut a formula into two table cells. Those spans are marked `recovered`. */
+function scanMath(src, regions, codeMask) {
+  var spans = [], lone = [];
+  regions.forEach(function (rg) {
+    var v = mathJaxView(src, rg.start, rg.end);
+    var r = mjFind(v.text);
+    if (rg.dropped) r.found = []; /* MathJax never sees a dropped table cell */
+    r.found.forEach(function (f) {
+      var sp = {
+        start: v.from[f.open], end: v.to[f.close + f.closeLen - 1],
+        innerStart: v.to[f.open + f.openLen - 1], innerEnd: v.from[f.close],
+        display: f.display, kind: f.kind, env: f.env, delimiter: DELIM_KIND[f.kind],
+        openAt: v.at[f.open], closeAt: v.at[f.close],
+        recovered: f.braces, why: f.braces ? 'braces' : '',
+        /* the TeX MathJax receives (for an environment, including \begin…\end) */
+        tex: f.kind === 'env' ? v.text.slice(f.open, f.close + f.closeLen) : v.text.slice(f.open + f.openLen, f.close)
+      };
+      if (f.kind === 'env') { sp.innerStart = sp.start; sp.innerEnd = sp.end; }
+      spans.push(sp);
+    });
+    r.lone.forEach(function (l) {
+      lone.push({ start: v.from[l.at], end: v.to[l.at + l.len - 1], at: v.at[l.at], kind: l.kind, env: l.env, region: rg });
+    });
+  });
+
+  function recoverWhy(L, R) {
+    if (L.region === R.region) return '';
+    var inner = src.slice(L.end, R.start);
+    var currency = L.kind === '$' && looksLikePrice(inner);
+    var gaps = (inner.match(/\n(?:[ \t]*\n)+/g) || []).length;
+    /* Same block, cut apart by an inline code span: "$x + `y`$". */
+    if (L.region.leaf === R.region.leaf && !gaps) return currency ? '' : 'code';
+    for (var i = L.end; i < R.start; i++) if (codeMask[i]) return '';
+    if (L.region.cell || R.region.cell) {
+      if (!L.region.cell || !R.region.cell || L.region.row !== R.region.row || currency) return '';
+      return 'table';
+    }
+    if (!gaps) return currency ? '' : 'block';
+    return DISPLAY_KIND[L.kind] && gaps <= 3 ? 'blank' : '';
   }
 
-  /* Then match remaining single-dollar inline spans. */
-  for (var p = 0; p < src.length;) {
-    if (!usableDollar(p)) { p++; continue; }
-    var closeInline = -1;
-    for (var q = p + 1; q < src.length; q++) {
-      if (usableDollar(q)) { closeInline = q; break; }
-    }
-    if (closeInline >= 0) {
-      var inl = { start: p, end: closeInline + 1, innerStart: p + 1, innerEnd: closeInline, display: false, delimiter: 'dollar' };
-      spans.push(inl);
-      mark(inl.start, inl.end);
-      p = inl.end;
-    } else {
-      unpaired.push({ start: p, end: p + 1, display: false, delimiter: 'dollar' });
-      mark(p, p + 1);
-      p++;
-    }
-  }
-
-  /* Finally scan the backslash delimiters that survive Markdown. This covers
-     source \\( ... \\) and \\[ ... \\] without treating the broken
-     one-slash forms as math. Dollar spans already claimed above are left alone. */
-  function scanSlashDelimited(openChar, closeChar, display) {
-    for (var a = 0; a < src.length;) {
-      if (codeMask[a] || occupied[a] || src[a] !== '\\') { a++; continue; }
-      var b = a;
-      while (b < src.length && src[b] === '\\') b++;
-      var openRun = b - a;
-      if (src[b] === closeChar && slashDelimiterSurvivesMarkdown(openRun)) {
-        unpaired.push({
-          start: a,
-          end: b + 1,
-          display: display,
-          delimiter: 'slashClose',
-          openChar: openChar,
-          closeChar: closeChar
-        });
-        mark(a, b + 1);
-        a = b + 1;
-        continue;
-      }
-      if (src[b] !== openChar || !slashDelimiterSurvivesMarkdown(openRun)) { a = Math.max(b, a + 1); continue; }
-
-      var closeStart = -1, closeCharAt = -1;
-      for (var c = b + 1; c < src.length;) {
-        if (occupied[c]) break; /* do not manufacture overlapping/nested spans */
-        if (codeMask[c] || src[c] !== '\\') { c++; continue; }
-        var d = c;
-        while (d < src.length && src[d] === '\\') d++;
-        var closeRun = d - c;
-        if (src[d] === closeChar && slashDelimiterSurvivesMarkdown(closeRun)) {
-          closeStart = c;
-          closeCharAt = d;
-          break;
-        }
-        c = Math.max(d, c + 1);
-      }
-
-      if (closeStart >= 0) {
-        var slashSpan = {
-          start: a,
-          end: closeCharAt + 1,
-          innerStart: b + 1,
-          innerEnd: closeStart,
-          display: display,
-          delimiter: 'slash'
+  var stack = [];
+  lone.sort(function (a, b) { return a.start - b.start; });
+  lone.forEach(function (it) {
+    var top = stack[stack.length - 1];
+    if (top && PARTNER[top.kind] === it.kind && (it.kind !== 'end' || it.env === top.env)) {
+      var why = recoverWhy(top, it);
+      if (why) {
+        stack.pop();
+        top.used = it.used = true;
+        var sp = {
+          start: top.start, end: it.end, innerStart: top.end, innerEnd: it.start,
+          display: !!DISPLAY_KIND[top.kind], kind: top.kind, env: top.env, delimiter: DELIM_KIND[top.kind],
+          openAt: top.at, closeAt: it.at, recovered: true, why: why
         };
-        spans.push(slashSpan);
-        mark(slashSpan.start, slashSpan.end);
-        a = slashSpan.end;
-      } else {
-        unpaired.push({
-          start: a,
-          end: b + 1,
-          display: display,
-          delimiter: 'slash',
-          openChar: openChar,
-          closeChar: closeChar
-        });
-        mark(a, b + 1);
-        a = b + 1;
+        if (top.kind === 'env') { sp.innerStart = sp.start; sp.innerEnd = sp.end; }
+        spans.push(sp);
+        return;
       }
     }
-  }
-  scanSlashDelimited('[', ']', true);
-  scanSlashDelimited('(', ')', false);
+    if (PARTNER[it.kind]) stack.push(it);
+  });
 
+  /* A recovered pair nested in another one (e.g. \begin … \end inside $$ … $$)
+     tells the same story twice. */
+  var outer = spans.filter(function (s) { return s.recovered && s.why !== 'braces'; });
+  spans = spans.filter(function (s) {
+    return !(s.recovered && s.why !== 'braces' && outer.some(function (o) {
+      return o !== s && o.start <= s.start && o.end >= s.end;
+    }));
+  });
   spans.sort(function (a, b) { return a.start - b.start; });
-  unpaired.sort(function (a, b) { return a.start - b.start; });
-  return { spans: spans, unpaired: unpaired, codeMask: codeMask };
+  return { spans: spans, lone: lone.filter(function (l) { return !l.used; }) };
 }
 
 function rangeOverlaps(a, b) { return a.start < b.end && b.start < a.end; }
 function rangeWraps(r, sp) { return r.start <= sp.start && r.end >= sp.end; }
 
 function bs(n) { return n > 0 ? new Array(n + 1).join('\\') : ''; }
+
+/* Punctuation X for which MathJax 3 defines "\X" in math (besides \$ and \\,
+   which have their own handling, and \_, which as a Markdown shield is by far
+   the more common intent). */
+var TEX_CTRL_SYMBOLS = '!#%&,:;>{|}';
+
+/* Environments whose rows are separated by \\ , and commands whose argument
+   is set in text mode (where "\ " and \~ mean what they mean in prose). */
+var ROW_ENV_NAME = /^(?:[pbBvV]?matrix\*?|smallmatrix|align(?:ed|at|edat)?\*?|x{1,2}alignat\*?|flalign\*?|eqnarray\*?|gather(?:ed)?\*?|split|multline\*?|multlined|[dr]?cases\*?|array|darray|subarray|CD)$/;
+var TEXT_CMD = /^(?:text(?:rm|it|bf|sf|tt|up|md|sl|sc|normal)?|mbox|hbox|fbox)$/;
+
+/* Where in a formula src[a…] position i sits: inside a row-based environment
+   (or \substack) where \\ separates rows, and/or in text mode. Braces count
+   only when MathJax sees them as braces (not as an escaped \{ or \}). */
+function texContextAt(src, a, i) {
+  var s = src.slice(a, i), stack = [], pending = null, pendingEnd = -1, m;
+  var re = /\\+(begin|end)\s*\{([^}]*)\}|\\+([a-zA-Z]+)|(\\*)([{}])/g;
+  while ((m = re.exec(s))) {
+    if (m[1] === 'begin') {
+      stack.push(ROW_ENV_NAME.test(m[2].trim()) ? 'row' : 'math');
+    } else if (m[1] === 'end') {
+      if (stack.length) stack.pop();
+    } else if (m[3]) {
+      pending = TEXT_CMD.test(m[3]) ? 'text' : m[3] === 'substack' ? 'row' : null;
+      pendingEnd = re.lastIndex;
+      continue;
+    } else if (Math.floor(m[4].length / 2) % 2 === 0) {
+      if (m[5] === '{') {
+        var opensArg = pending && /^\s*$/.test(s.slice(pendingEnd, m.index + m[4].length));
+        stack.push(opensArg ? pending : 'group');
+      } else if (stack.length) {
+        stack.pop();
+      }
+    }
+    pending = null;
+  }
+  var row = false;
+  for (var k = stack.length - 1; k >= 0; k--) {
+    if (stack[k] === 'group') continue;
+    row = stack[k] === 'row';
+    break;
+  }
+  return { row: row, text: stack.indexOf('text') !== -1 };
+}
 
 function analyze(src) {
   var issues = [];
@@ -1129,109 +1339,163 @@ function analyze(src) {
     ]);
   }
 
-  var markedRanges = collectMarkedRanges(src);
-  var codeRanges = codeRangesFrom(src, markedRanges);
-  var scan = scanMathSpans(src, codeRanges);
-  var spans = scan.spans;
-  var codeMask = scan.codeMask;
-  var mathMask = makeMask(src.length, spans);
+  /* Rewrite the backslash run in front of the $ at `p` so that MathJax receives
+     an odd number of backslashes (a literal dollar). Every fix that touches this
+     dollar produces this same edit, so Fix all can never stack two of them. */
+  function literalDollar(p) {
+    var n = countBackslashesBefore(src, p), m = n;
+    while (Math.floor(m / 2) % 2 !== 1) m++;
+    return edit(p - n, p + 1, bs(m) + '$');
+  }
 
-  /* 1. Unpaired dollars, with the especially common single-backslash trap called out. */
-  scan.unpaired.slice(0, 12).forEach(function (u) {
-    if (u.delimiter === 'slash' || u.delimiter === 'slashClose') {
-      var isClose = u.delimiter === 'slashClose';
-      push('warn', (isClose ? 'Stray \\' + u.closeChar : 'Unpaired \\' + u.openChar) + ' delimiter',
-        isClose
-          ? 'This closing MathJax delimiter survives Markdown but has no matching <code>\\' + u.openChar + '</code>.'
-          : 'This MathJax delimiter survives Markdown but has no matching <code>\\' + u.closeChar + '</code>. Close it, or use <code>' + (u.display ? '$$ … $$' : '$ … $') + '</code> instead.',
+  var model = collectMarkedRanges(src);
+  var markedRanges = model ? model.ranges : [];
+  var codeRanges = model
+    ? mergeSimpleRanges(markedRanges.filter(function (r) { return r.type === 'code' || r.type === 'codespan'; }))
+    : fallbackCodeRanges(src);
+  var codeMask = makeMask(src.length, codeRanges);
+  var regions = buildRegions(src, model ? model.leaves : fallbackLeaves(src), codeMask);
+  var scan = scanMath(src, regions, codeMask);
+  var spans = scan.spans;
+  var mathMask = makeMask(src.length, spans);
+  var tables = markedRanges.filter(function (r) { return r.type === 'table'; });
+  function inTable(i) { return tables.some(function (t) { return i >= t.start && i < t.end; }); }
+
+  /* 1. Delimiters MathJax cannot pair within their own paragraph. */
+  scan.lone.slice(0, 12).forEach(function (u) {
+    if (u.kind === '\\)' || u.kind === '\\]') {
+      push('warn', 'Stray ' + u.kind + ' delimiter',
+        'This closing MathJax delimiter survives Markdown but has no matching <code>\\' + (u.kind === '\\)' ? '(' : '[') + '</code> in its paragraph, so it shows up as literal text.',
         u.start, u.end);
       return;
     }
-    var slashRun = countBackslashesBefore(src, u.start);
-    if (!u.display && slashRun % 4 === 1) {
+    if (u.kind === '\\(' || u.kind === '\\[') {
+      var disp = u.kind === '\\[';
+      push('warn', 'Unpaired ' + u.kind + ' delimiter',
+        'This MathJax delimiter survives Markdown but has no matching <code>\\' + (disp ? ']' : ')') + '</code> in its paragraph, so the TeX stays visible as plain text. Close it, or use <code>' + (disp ? '$$ … $$' : '$ … $') + '</code> instead.',
+        u.start, u.end);
+      return;
+    }
+    if (u.kind === 'env' || u.kind === 'end') {
+      push('note', u.kind === 'env' ? '\\begin{' + u.env + '} has no matching \\end' : 'Stray \\end{' + u.env + '}',
+        'MathJax typesets a bare <code>\\begin{…} … \\end{…}</code> pair even without dollar signs, but only when both halves sit in the same paragraph. As it stands this TeX shows as plain text.',
+        u.start, u.end);
+      return;
+    }
+    var slashRun = countBackslashesBefore(src, u.at);
+    if (u.kind === '$' && slashRun % 4 === 1) {
       push('err', '\\$ is not protected after Markdown',
         'Markdown consumes the final source backslash, leaving an even number before <code>$</code>; MathJax therefore still sees a delimiter. For a literal currency sign type <code>\\\\$</code>.',
-        u.start - slashRun, u.end,
-        fix('\\\\$', [edit(u.start - slashRun, u.start, bs(slashRun + 1))]));
+        u.at - slashRun, u.at + 1,
+        fix('\\\\$', [literalDollar(u.at)]));
     } else {
-      push('warn', u.display ? 'Unpaired $$' : 'Unpaired $',
-        'This delimiter has no partner after Markdown escaping is accounted for. It may absorb later prose into math or leave TeX visible. Pair it, or use <code>\\\\$</code> for a literal dollar sign.',
-        u.start, u.end);
+      var currency = u.kind === '$' && /\d/.test(src[u.at + 1] || '');
+      push('warn', u.kind === '$$' ? 'Unpaired $$' : 'Unpaired $',
+        'MathJax finds no partner for this delimiter in its paragraph, so for now it shows as literal text — but any later <code>' + u.kind + '</code> in the same paragraph would pair with it and turn the prose in between into math. ' +
+        (currency ? 'For a literal dollar sign type <code>\\\\$</code>.' : 'Add the missing closing delimiter, or type <code>\\\\$</code> for a literal dollar sign.'),
+        u.start, u.end,
+        currency ? fix('\\\\$', [literalDollar(u.at)]) : null);
     }
   });
 
   spans.forEach(function (sp) {
-    if (sp.delimiter !== 'dollar') return;
-    [sp.start, sp.innerEnd].forEach(function (at) {
+    if (sp.delimiter !== 'dollar' || sp.display) return;
+    [sp.openAt, sp.closeAt].forEach(function (at) {
       var slashRun = countBackslashesBefore(src, at);
       if (slashRun % 4 === 1) {
         push('err', 'Backslash does not protect this $',
           'Markdown removes the final source backslash, and the remaining slash count is even, so MathJax still treats this <code>$</code> as a delimiter. Type <code>\\\\$</code> for a literal dollar sign.',
           at - slashRun, at + 1,
-          fix('\\\\$', [edit(at - slashRun, at, bs(slashRun + 1))]));
+          fix('\\\\$', [literalDollar(at)]));
       }
     });
   });
 
-  /* 2. Common \(...\) and \[...\] source delimiters that one Markdown slash destroys. */
+  /* 2. \(...\) and \[...\] typed with one backslash: Markdown strips it, so
+        MathJax sees plain brackets. Only TeX-looking contents are flagged, so
+        escaped citation brackets such as \[12\] stay quiet. */
+  function looksLikeTeX(inner) {
+    return /[\\^_{}=+<>]/.test(inner) || /^\s*[A-Za-z]\s*$/.test(inner);
+  }
   function warnDegradedPair(openChar, closeChar, display) {
-    var stack = [];
-    for (var i = 0; i < src.length - 1; i++) {
-      if (codeMask[i] || mathMask[i] || src[i] !== '\\') continue;
-      var j = i;
-      while (src[j] === '\\') j++;
-      var run = j - i, next = src[j] || '';
-      if (run === 1 && next === openChar) stack.push(i);
-      if (run === 1 && next === closeChar && stack.length) {
-        var at = stack.pop();
-        var delim = display ? '$$' : '$';
-        push('warn', '\\' + openChar + ' … \\' + closeChar + ' loses its MathJax delimiters',
-          'A single backslash before punctuation is a Markdown escape and disappears before MathJax runs. Prefer <code>' + (display ? '$$ … $$' : '$ … $') + '</code>, or type <code>\\\\' + openChar + ' … \\\\' + closeChar + '</code> so one backslash survives on each side.',
-          at, at + 2,
-          fix(delim + ' … ' + delim, [edit(at, at + 2, delim), edit(i, i + 2, delim)]));
+    /* Pairing may continue into the next block, as with a blank line inside
+       \[ … \] (display only), but never past code or out of a table cell. */
+    var stack = [], prev = null;
+    regions.forEach(function (rg) {
+      if (prev) {
+        var blanks = (src.slice(prev.end, rg.start).match(/\n(?:[ \t]*\n)+/g) || []).length;
+        var coded = false;
+        for (var c = prev.end; c < rg.start && !coded; c++) coded = !!codeMask[c];
+        if (rg.cell || prev.cell || coded || (blanks && (!display || blanks > 3))) stack = [];
       }
-      i = j - 1;
-    }
+      prev = rg;
+      for (var i = rg.start; i < rg.end; i++) {
+        if (mathMask[i] || src[i] !== '\\') continue;
+        var j = i;
+        while (j < rg.end && src[j] === '\\') j++;
+        var run = j - i, next = src[j] || '';
+        if (run === 1 && next === openChar) stack.push(i);
+        else if (run === 1 && next === closeChar && stack.length) {
+          var at = stack.pop();
+          if (looksLikeTeX(src.slice(at + 2, i))) {
+            var delim = display ? '$$' : '$';
+            push('warn', '\\' + openChar + ' … \\' + closeChar + ' loses its MathJax delimiters',
+              'A single backslash before punctuation is a Markdown escape and disappears before MathJax runs. Prefer <code>' + (display ? '$$ … $$' : '$ … $') + '</code>, or type <code>\\\\' + openChar + ' … \\\\' + closeChar + '</code> so one backslash survives on each side.',
+              at, at + 2,
+              fix(delim + ' … ' + delim, [edit(at, at + 2, delim), edit(i, i + 2, delim)]));
+          }
+        }
+        i = j - 1;
+      }
+    });
   }
   warnDegradedPair('(', ')', false);
   warnDegradedPair('[', ']', true);
 
-  /* 3. Per-formula escape checks. Safe Markdown shields \_, \*, and \~ are
-        intentionally silent: Marked removes the slash and MathJax receives the
-        desired bare TeX character. */
+  /* 3. Per-formula escape checks. Only punctuation that MathJax defines as a
+        control symbol in math is flagged. Every other "\X" (\_, \*, \~, \[,
+        \( ...) is a correct Markdown shield: Marked removes the slash and
+        MathJax receives the bare character, which is what TeX wants there. */
   spans.forEach(function (sp) {
     var inner = src.slice(sp.innerStart, sp.innerEnd);
-    var rowLike = /(?:begin\s*\{\s*(?:align\*?|aligned|alignedat|array|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|cases|gather\*?|gathered|split|multline\*?|smallmatrix)\s*\}|substack\s*\{|subarray\s*\{)/.test(inner);
 
     for (var i = sp.innerStart; i < sp.innerEnd;) {
-      if (src[i] !== '\\') { i++; continue; }
+      if (src[i] !== '\\' || codeMask[i]) { i++; continue; }
       var j = i;
       while (j < sp.innerEnd && src[j] === '\\') j++;
       var run = j - i, next = src[j] || '';
+      /* Only where \\ really separates rows: inside a row environment and not
+         in \text{…}, where "\\ " is a legitimate control space. */
+      var ctx = (run <= 3 && (next === '\n' || next === '' || /\s/.test(next) || next === '[' || next === '~'))
+        ? texContextAt(src, sp.innerStart, i) : { row: false, text: false };
+      var rowLike = ctx.row && !ctx.text;
 
-      if (next === '\n' && run % 2 === 1) {
-        push('err', 'Markdown hard break inside math',
-          'The final unpaired backslash plus newline becomes an HTML <code>&lt;br&gt;</code> before MathJax runs, splitting the formula. Remove it, or use exactly <code>\\\\\\\\</code> source backslashes for a TeX row break.',
+      if (rowLike && next === '\n' && run % 2 === 1) {
+        /* One lone slash may not have been meant as a row break at all, so only
+           a run of three (clearly a row break plus a stray) is rewritten. */
+        push(run === 1 ? 'warn' : 'err', 'Line-end backslash becomes a Markdown line break',
+          'Markdown turns a final odd backslash at the end of a line into <code>&lt;br&gt;</code>, which MathJax reads as a plain newline, so no row break reaches MathJax here. For a row break type exactly <code>\\\\\\\\</code> so MathJax receives <code>\\\\</code>.',
           i, j,
-          rowLike
-            ? fix('\\\\\\\\ row break', [edit(i, j, bs(4))])
-            : fix('drop the backslash', [edit(i, j, '')]));
-      } else if (rowLike && run === 2 && (next === '\n' || next === '[')) {
+          run === 1 ? null : fix('\\\\\\\\ row break', [edit(i, j, bs(4))]));
+      } else if (rowLike && run === 2 && (next === '' || /\s/.test(next) || next === '[')) {
+        /* Not before a letter: "\\alpha" correctly reaches MathJax as \alpha. */
         push('err', 'TeX row break collapses to one backslash',
-          'Inside a row-based TeX environment, two source backslashes become only one after Markdown. Type <code>\\\\\\\\</code> so MathJax receives <code>\\\\</code>' + (next === '[' ? ' before the optional row spacing' : '') + '.',
+          'Inside a row-based TeX environment, two source backslashes become only one after Markdown, and MathJax reads <code>\\' + (next === '[' ? '[' : '&nbsp;') + '</code> instead of a row break. Type <code>\\\\\\\\</code> so MathJax receives <code>\\\\</code>' + (next === '[' ? ' before the optional row spacing' : '') + '.',
           i, j,
           fix('\\\\\\\\', [edit(i, j, bs(4))]));
-      } else if (run === 1 && isPunct(next)) {
-        if (next === '~' && src[j + 1] === '{') {
-          push('warn', '\\~{…} loses the TeX accent command',
-            'A single slash is consumed by Markdown, so MathJax receives a bare <code>~</code>. Type <code>\\\\~{…}</code> when you intend the TeX accent command; plain <code>\\~</code> remains the correct shield for a bare tilde.',
-            i, Math.min(sp.innerEnd, j + 2),
-            fix('\\\\~', [edit(i, j, bs(2))]));
-        } else if (next === '_' || next === '*' || next === '~') {
-          /* Correct Markdown shields; deliberately no issue. */
-        } else if (next === '$') {
-          /* Dollar pairing/parity is handled by scanMathSpans. */
-        } else if (next === '|' && markedRanges.some(function (r) { return r.type === 'table' && i >= r.start && i < r.end; })) {
+      } else if (next === '~' && src[j + 1] === '{' && ctx.text && run === 1) {
+        /* In \text{…} the accent is \~{…} (textmacros), and it needs two slashes. */
+        push('warn', '\\~ is consumed by Markdown',
+          'Markdown strips the single slash, so MathJax receives <code>~{…}</code> (a non-breaking space) instead of the text accent. Inside <code>\\text{…}</code> type <code>\\\\~{…}</code>.',
+          i, Math.min(sp.innerEnd, j + 2),
+          fix('\\\\~', [edit(i, j, bs(2))]));
+      } else if (next === '~' && src[j + 1] === '{' && !ctx.text && run <= 2) {
+        push('warn', '\\~{…} is not a math accent',
+          'Markdown strips a single slash, so MathJax receives <code>~{…}</code> (a non-breaking space), and even a surviving <code>\\~</code> is a text-mode accent MathJax does not define in math. Use <code>\\tilde{…}</code> (or <code>\\widetilde{…}</code>).',
+          i, Math.min(sp.innerEnd, j + 2),
+          fix('\\tilde{…}', [edit(i, j + 1, '\\tilde')]));
+      } else if (run === 1 && TEX_CTRL_SYMBOLS.indexOf(next) !== -1) {
+        if (next === '|' && inTable(i)) {
           /* Correct shield for a GFM table cell separator; MathJax receives |. */
         } else {
           push('warn', '\\' + next + ' is consumed by Markdown',
@@ -1243,7 +1507,7 @@ function analyze(src) {
       i = Math.max(j, i + 1);
     }
 
-    if (/\n[ \\t]*\n/.test(inner)) {
+    if (sp.why === 'blank') {
       var blankEdits = [];
       var blankRe = /\n(?:[ \t]*\n)+/g, bm;
       while ((bm = blankRe.exec(inner))) {
@@ -1251,27 +1515,38 @@ function analyze(src) {
       }
       push('err', 'Blank line splits a math span into separate blocks',
         'Markdown starts a new paragraph at the blank line. MathJax cannot match delimiters across those HTML blocks, even though the source delimiters look paired. Remove the blank line.',
-        sp.start, sp.start + (sp.display ? 2 : 1),
+        sp.start, sp.start + (sp.kind === 'env' ? 6 : sp.kind.length),
         fix('close the gap', blankEdits));
     }
 
-    if (sp.delimiter === 'dollar' && !sp.display && /^\s*\d[\d,.]*(?:\s|$)/.test(inner) && !/[\\^_{}=]/.test(inner)) {
-      push('note', 'Currency dollars pair into a formula',
+    if (sp.why === 'braces') {
+      push('warn', 'MathJax cannot find the end of this formula',
+        'MathJax only accepts a closing delimiter at brace depth 0, and after Markdown this formula has an unmatched <code>{</code>. The usual cause is <code>\\{</code> typed with one backslash, which Markdown turns into a bare brace; type <code>\\\\{</code> for a literal brace.',
+        sp.start, sp.start + (sp.kind === 'env' ? 6 : sp.kind.length));
+    }
+
+    if (sp.delimiter === 'dollar' && !sp.display && !sp.recovered && looksLikeCurrencyPair(inner, src[sp.end])) {
+      /* In "costs $5 and $$x$$" MathJax closes on the first half of the $$;
+         escaping only the currency sign gives the display formula back. */
+      var closesOnDisplay = src[sp.closeAt + 1] === '$';
+      push('warn', 'Currency dollars pair into a formula',
         'This looks like prose between two currency signs, but MathJax receives it as one inline formula. For each literal dollar sign type <code>\\\\$</code> (which reaches MathJax as <code>\\$</code>).',
         sp.start, sp.end,
-        fix('escape both $', [edit(sp.start, sp.start + 1, bs(2) + '$'), edit(sp.innerEnd, sp.innerEnd + 1, bs(2) + '$')]));
+        closesOnDisplay
+          ? fix('escape the $', [literalDollar(sp.openAt)])
+          : fix('escape both $', [literalDollar(sp.openAt), literalDollar(sp.closeAt)]));
     }
   });
 
   /* 4. Parser-confirmed structural hazards. These are emitted only when Marked
-        actually formed a token that cuts through a $...$ / $$...$$ range. */
+        actually formed a token that cuts through a formula. (A Markdown hard
+        break is harmless here: MathJax reads <br> inside math as a newline.) */
   var risky = {
     em: ['Markdown emphasis splits this formula', 'Escape the Markdown delimiter that formed the emphasis (usually <code>\\_</code> or <code>\\*</code>) so MathJax receives the TeX character instead.'],
     strong: ['Markdown strong emphasis splits this formula', 'Escape the Markdown delimiter that formed the bold span so it remains part of the TeX source.'],
     del: ['GFM strikethrough splits this formula', 'Marked treats paired <code>~</code> / <code>~~</code> as strikethrough. Write <code>\\~</code> where the tilde is meant for TeX.'],
     link: ['Markdown link or autolink splits this formula', 'Marked creates an <code>&lt;a&gt;</code> element before MathJax. Rewrite the link-like text, or escape the Markdown punctuation so the entire formula remains one text run.'],
     codespan: ['Inline code interrupts this formula', 'MathJax skips <code>&lt;code&gt;</code>. Remove the backticks or move the code span outside the math delimiters.'],
-    br: ['Hard line break interrupts this formula', 'Marked inserts <code>&lt;br&gt;</code> before MathJax. Remove the Markdown hard break; use the correctly escaped TeX row separator when a row break is intended.'],
     image: ['Image syntax interrupts this formula', 'OpenReview renders unsupported image syntax as text, and the Markdown tokenization can split the surrounding formula. Rewrite or escape the brackets and parentheses.']
   };
 
@@ -1281,14 +1556,10 @@ function analyze(src) {
       var sp = spans[s];
       if (!rangeOverlaps(r, sp) || rangeWraps(r, sp)) continue;
       var raw = src.slice(r.start, r.end);
-      var offset = 0;
-      if (r.type === 'link' || r.type === 'image') offset = Math.max(0, raw.indexOf('['));
-      else if (r.type === 'br') offset = Math.max(0, raw.search(/[\\ \n]/));
+      var offset = (r.type === 'link' || r.type === 'image') ? Math.max(0, raw.indexOf('[')) : 0;
       var hs = r.start + offset;
-      var he = Math.min(r.end, hs + Math.max(1, r.type === 'strong' ? 2 : 1));
-      var autofix = null;
-      if (r.type === 'em' || r.type === 'strong' || r.type === 'del') autofix = emphasisFix(r);
-      else if (r.type === 'br' && src[r.end - 1] === '\n' && r.end - 1 > r.start) autofix = fix('drop the break', [edit(r.start, r.end - 1, '')]);
+      var he = Math.min(r.end, hs + (r.type === 'strong' ? 2 : 1));
+      var autofix = (r.type === 'em' || r.type === 'strong' || r.type === 'del') ? emphasisFix(r) : null;
       push('err', risky[r.type][0], risky[r.type][1], hs, he, autofix);
       break;
     }
@@ -1296,23 +1567,26 @@ function analyze(src) {
 
   var blockTypes = { paragraph: 1, heading: 1, blockquote: 1, list: 1, list_item: 1, table: 1, code: 1, hr: 1, def: 1 };
   spans.forEach(function (sp) {
-    if (/\n[ \t]*\n/.test(src.slice(sp.innerStart, sp.innerEnd))) return;
+    if (sp.why !== 'block') return;
     var cuts = markedRanges.filter(function (r) {
-      return blockTypes[r.type] && rangeOverlaps(r, sp) && !rangeWraps(r, sp);
-    }).sort(function (a, b) {
-      return a.start - b.start || (b.depth || 0) - (a.depth || 0);
+      return !r.inline && blockTypes[r.type] && rangeOverlaps(r, sp) && !rangeWraps(r, sp);
     });
-    if (!cuts.length) return;
-    var cut = cuts[0];
+    /* Name the construct that interrupted the formula, not the paragraph it left. */
+    var inside = cuts.filter(function (r) { return r.start > sp.start && r.type !== 'paragraph'; });
+    var pool = inside.length ? inside : cuts;
+    pool.sort(function (a, b) { return a.start - b.start || (a.depth || 0) - (b.depth || 0); });
+    var cut = pool[0];
     push('err', 'Markdown block structure splits this formula',
-      'Marked creates a <code>' + escHtml(cut.type) + '</code> block inside or across these delimiters, and MathJax does not match math through separate block elements. Keep the complete formula inside one paragraph/block and escape any line-start Markdown marker.',
-      Math.max(sp.start, cut.start), Math.min(sp.end, Math.max(cut.start + 1, cut.end)));
+      'Marked creates ' + (cut ? 'a <code>' + escHtml(cut.type) + '</code> block' : 'a new block') + ' inside or across these delimiters, and MathJax does not match math through separate block elements. Keep the complete formula inside one paragraph/block and escape any line-start Markdown marker.',
+      cut ? Math.max(sp.start, cut.start) : sp.start,
+      cut ? Math.min(sp.end, Math.max(cut.start + 1, cut.end)) : sp.start + 1);
   });
 
-  /* Actual (not hypothetical) prose emphasis caused by multiplication stars. */
+  /* Actual (not hypothetical) prose emphasis caused by multiplication stars.
+     An emphasis run that merely contains a whole formula still ate the stars. */
   markedRanges.forEach(function (r) {
     if (r.type !== 'em' && r.type !== 'strong') return;
-    if (spans.some(function (sp) { return rangeOverlaps(r, sp); })) return;
+    if (spans.some(function (sp) { return rangeOverlaps(r, sp) && !rangeWraps(r, sp); })) return;
     var n = r.type === 'strong' ? 2 : 1;
     if (src[r.start] === '*' && isAlnum(src[r.start - 1]) && isAlnum(src[r.start + n])) {
       push('warn', 'Multiplication asterisks became Markdown emphasis',
@@ -1322,7 +1596,7 @@ function analyze(src) {
   });
 
   /* 5. GFM table cell separators are parsed before MathJax. */
-  markedRanges.filter(function (r) { return r.type === 'table'; }).forEach(function (table) {
+  tables.forEach(function (table) {
     spans.forEach(function (sp) {
       if (sp.start < table.start || sp.end > table.end) return;
       for (var i = sp.innerStart; i < sp.innerEnd; i++) {
@@ -1337,40 +1611,51 @@ function analyze(src) {
       }
     });
   });
+  (model ? model.dropped : []).forEach(function (d) {
+    push('warn', 'Table row has more cells than its header',
+      'Marked silently drops every cell beyond the header row’s width, so this text never appears on OpenReview. A bare <code>|</code> inside math is the usual cause.',
+      d.start, d.end);
+  });
 
-  /* 6. Fallback for link syntax if token-to-source mapping ever misses it. */
-  spans.forEach(function (sp) {
+  /* 6. Link syntax inside math when the parser is unavailable (with Marked,
+        section 4 reports the actual link tokens). Escaped brackets are fine. */
+  if (!model) spans.forEach(function (sp) {
     var inner = src.slice(sp.innerStart, sp.innerEnd);
     var lm = inner.match(/\[[^\]\n]*\]\([^\)\n]*\)/);
-    if (lm && !issues.some(function (x) { return x.title.indexOf('link') !== -1 && x.start >= sp.start && x.start < sp.end; })) {
+    if (lm && countBackslashesBefore(src, sp.innerStart + lm.index) % 2 === 0) {
       push('err', '[ … ]( … ) becomes a hyperlink inside math',
         'Marked converts this sequence into an anchor before MathJax runs. Insert a space between <code>]</code> and <code>(</code>, or escape the Markdown punctuation.',
         sp.innerStart + lm.index, sp.innerStart + lm.index + lm[0].length);
     }
   });
 
-  /* 7. Exact indented-code warning from Marked when available. */
+  /* 7. Indented text that Marked turns into a code block. Only TeX-looking
+        blocks are flagged, and only unmistakable TeX (a control word) gets the
+        unindent fix, so a deliberate shell snippet with $HOME is left alone. */
+  var TEXISH = /\$[^$\n]+\$|\\[a-zA-Z]{2,}/;
+  var TEXWORD = /\\[a-zA-Z]{2,}/;
   var sawExactIndented = false;
   markedRanges.forEach(function (r) {
     if (r.type !== 'code' || !r.token || r.token.codeBlockStyle !== 'indented') return;
     sawExactIndented = true;
-    if (/[$\\]/.test(src.slice(r.start, r.end))) {
-      var unindent = [], pos = r.start, lines = src.slice(r.start, r.end).split('\n');
-      for (var k = 0; k < lines.length; k++) {
-        var lead = lines[k].match(/^(?: {1,4}|\t)/);
-        if (lead) unindent.push(edit(pos, pos + lead[0].length, ''));
-        pos += lines[k].length + 1;
-      }
-      push('warn', 'Indented text became a code block',
-        'Marked treats this indentation as code, and MathJax skips code blocks. Remove the leading indentation when the TeX should render.',
-        r.start, Math.min(r.end, r.start + 8),
-        fix('unindent', unindent));
+    var body = src.slice(r.start, r.end);
+    if (!TEXISH.test(body)) return;
+    var unindent = [], pos = r.start, lines = body.split('\n');
+    for (var k = 0; k < lines.length; k++) {
+      var lead = lines[k].match(/^(?: {1,4}|\t)/);
+      if (lead) unindent.push(edit(pos, pos + lead[0].length, ''));
+      pos += lines[k].length + 1;
     }
+    var surelyTeX = TEXWORD.test(body);
+    push(surelyTeX ? 'warn' : 'note', 'Indented text became a code block',
+      'Marked treats this indentation as code, and MathJax skips code blocks. Remove the leading indentation when the TeX should render.',
+      r.start, Math.min(r.end, r.start + 8),
+      surelyTeX ? fix('unindent', unindent) : null);
   });
-  if (!sawExactIndented && !markedRanges.length) {
+  if (!sawExactIndented && !model) {
     fallbackCodeRanges(src).forEach(function (r) {
       var raw = src.slice(r.start, r.end);
-      if (/^(?: {4}|\t)/.test(raw) && /[$\\]/.test(raw)) {
+      if (/^(?: {4}|\t)/.test(raw) && TEXISH.test(raw)) {
         push('warn', 'Indented text may be a code block',
           'Markdown can treat this indentation as code, which MathJax skips. Remove the leading indentation when the TeX should render.',
           r.start, Math.min(r.end, r.start + 8));
@@ -1379,7 +1664,58 @@ function analyze(src) {
   }
 
   issues.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
-  return { issues: issues, spans: spans };
+  return {
+    issues: issues,
+    spans: spans,
+    mathCount: spans.filter(function (sp) { return !sp.recovered; }).length
+  };
+}
+
+/* ---- autofix application (pure: the page and the test suite share it) ---- */
+
+function applyEditsToText(text, edits) {
+  var sorted = edits.slice().sort(function (a, b) { return a.start - b.start || a.end - b.end; });
+  var out = '', cursor = 0;
+  for (var i = 0; i < sorted.length; i++) {
+    var e = sorted[i];
+    if (e.start < cursor) continue;
+    out += text.slice(cursor, e.start) + e.text;
+    cursor = e.end;
+  }
+  return out + text.slice(cursor);
+}
+
+function editsStillValid(text, edits) {
+  return edits.every(function (e) {
+    return e.end <= text.length && text.slice(e.start, e.end) === e.was;
+  });
+}
+
+function editsOverlap(edits, taken) {
+  return edits.some(function (e) {
+    return taken.some(function (t) { return e.start < t.end && t.start < e.end; });
+  });
+}
+
+/* Fixes can uncover fixes (turning \[ … \] into $$ … $$ exposes the escapes
+   inside), so re-analyze and repeat until a round changes nothing. */
+function fixAllText(text) {
+  var applied = 0;
+  for (var round = 0; round < 8; round++) {
+    var res = analyze(text);
+    var taken = [], roundCount = 0;
+    res.issues.forEach(function (iss) {
+      if (!iss.fix) return;
+      if (!editsStillValid(text, iss.fix.edits)) return;
+      if (editsOverlap(iss.fix.edits, taken)) return;
+      taken = taken.concat(iss.fix.edits);
+      roundCount++;
+    });
+    if (!roundCount) break;
+    text = applyEditsToText(text, taken);
+    applied += roundCount;
+  }
+  return { text: text, applied: applied };
 }
 
 function escHtml(s) {
@@ -1438,11 +1774,29 @@ function setupOpenReviewMarked() {
 }
 
 var MARKED_READY = setupOpenReviewMarked();
+
+/* OpenReview's DOMPurify setup (app/AppInit.js): a tag allowlist, links opened
+   in a new tab, and style/action/formaction attributes stripped. */
+var OR_ALLOWED_TAGS = [
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'div', 'span', 'blockquote', 'pre', 'hr', 'section', 'article',
+  'header', 'footer', 'figure', 'figcaption', 'details', 'summary',
+  'a', 'b', 'i', 'em', 'strong', 'u', 's', 'strike', 'del', 'ins', 'sub', 'sup', 'small', 'mark', 'code',
+  'kbd', 'samp', 'var', 'abbr', 'cite', 'q', 'br', 'wbr',
+  'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+  'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'colgroup', 'col',
+  'img'
+];
+if (purifier && typeof purifier.setConfig === 'function') purifier.setConfig({ ALLOWED_TAGS: OR_ALLOWED_TAGS });
 if (purifier && typeof purifier.addHook === 'function') {
   purifier.addHook('afterSanitizeAttributes', function (node) {
     if (node && node.tagName === 'A') {
       node.setAttribute('target', '_blank');
       node.setAttribute('rel', 'noopener noreferrer');
+    }
+    if (node && typeof node.removeAttribute === 'function') {
+      node.removeAttribute('style');
+      node.removeAttribute('action');
+      node.removeAttribute('formaction');
     }
   });
 }
@@ -1558,6 +1912,8 @@ function saveDraftNow() {
 
 var lineStarts = [0];
 var currentIssues = [];
+var analyzedText = '';   /* the text currentIssues were computed from */
+var userEdited = false;  /* typed before the saved draft finished loading */
 
 var EXAMPLE = [
   '**Response to Reviewer aBcD — Part 1/2**',
@@ -1603,6 +1959,23 @@ function setMathStatus(text, kind) {
   mjStatus.className = kind || '';
 }
 
+/* The full MathJax build loads noerrors and noundefined: a TeX error still
+   becomes <mjx-merror>, but an undefined macro (\Expect, \~ in math) is shown
+   as red text, so it is found in MathJax's internal tree instead. */
+function texProblems() {
+  var errors = preview.querySelectorAll('mjx-merror').length, undef = 0;
+  try {
+    MathJax.startup.document.getMathItemsWithin(preview).forEach(function (item) {
+      if (!item.root || typeof item.root.walkTree !== 'function') return;
+      item.root.walkTree(function (node) {
+        if (node.isKind('mtext') && node.attributes.get('mathcolor') === 'red' &&
+            typeof node.getText === 'function' && node.getText().charAt(0) === '\\') undef++;
+      });
+    });
+  } catch (e) {}
+  return { errors: errors, undef: undef };
+}
+
 function clearOldMath() {
   if (window.MJ_READY && window.MathJax && typeof MathJax.typesetClear === 'function') {
     try { MathJax.typesetClear([preview]); } catch (e) {}
@@ -1641,8 +2014,11 @@ function renderPreview() {
 
   if (window.MJ_READY && window.MathJax && typeof MathJax.typesetPromise === 'function') {
     MathJax.typesetPromise([preview]).then(function () {
-      var nerr = preview.querySelectorAll('mjx-merror').length;
-      if (nerr) setMathStatus('MathJax: ' + nerr + ' TeX error' + (nerr === 1 ? '' : 's'), 'err');
+      var p = texProblems();
+      var parts = [];
+      if (p.errors) parts.push(p.errors + ' TeX error' + (p.errors === 1 ? '' : 's'));
+      if (p.undef) parts.push(p.undef + ' undefined macro' + (p.undef === 1 ? '' : 's'));
+      if (parts.length) setMathStatus('MathJax: ' + parts.join(', '), 'err');
       else setMathStatus('MathJax ready', 'good');
       done();
     }).catch(function (e) {
@@ -1671,13 +2047,15 @@ function fmt(n) { return n.toLocaleString('en-US'); }
 
 function updateAll() {
   var text = ta.value;
+  analyzedText = text;
   lineStarts = computeLineStarts(text);
 
   var res = analyze(text);
   currentIssues = res.issues;
 
-  /* stats */
-  var chars = Array.from(text).length;
+  /* stats — counted like OpenReview's own counter (TextAreaWidget.js):
+     value.trim().length, i.e. UTF-16 units after trimming. */
+  var chars = text.trim().length;
   var words = (text.trim().match(/\S+/g) || []).length;
   var limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
 
@@ -1688,7 +2066,7 @@ function updateAll() {
   charChip.classList.toggle('near', limit > 0 && chars <= limit && chars >= 0.85 * limit);
 
   wordStat.textContent = fmt(words) + ' words';
-  mathStat.textContent = fmt(res.spans.length) + ' math span' + (res.spans.length === 1 ? '' : 's');
+  mathStat.textContent = fmt(res.mathCount) + ' math span' + (res.mathCount === 1 ? '' : 's');
 
   var n = currentIssues.length;
   var hasErr = currentIssues.some(function (x) { return x.sev === 'err'; });
@@ -1734,30 +2112,6 @@ function updateAll() {
 var UNDO_HINT = /Mac|iPod|iPhone|iPad/.test((navigator.platform || '') + ' ' + (navigator.userAgent || '')) ? '⌘Z' : 'Ctrl+Z';
 fixAllBtn.title = 'Rewrite every hazard that has a mechanical fix. One ' + UNDO_HINT + ' undoes the whole pass.';
 
-function applyEditsToText(text, edits) {
-  var sorted = edits.slice().sort(function (a, b) { return a.start - b.start || a.end - b.end; });
-  var out = '', cursor = 0;
-  for (var i = 0; i < sorted.length; i++) {
-    var e = sorted[i];
-    if (e.start < cursor) continue;
-    out += text.slice(cursor, e.start) + e.text;
-    cursor = e.end;
-  }
-  return out + text.slice(cursor);
-}
-
-function editsStillValid(text, edits) {
-  return edits.every(function (e) {
-    return e.end <= text.length && text.slice(e.start, e.end) === e.was;
-  });
-}
-
-function editsOverlap(edits, taken) {
-  return edits.some(function (e) {
-    return taken.some(function (t) { return e.start < t.end && t.start < e.end; });
-  });
-}
-
 /* Replace the whole value through execCommand so the browser's own undo stack
    keeps working: one Ctrl+Z reverts a fix, or an entire fix-all pass. */
 function setSourceText(next, selStart, selEnd) {
@@ -1774,10 +2128,35 @@ function setSourceText(next, selStart, selEnd) {
   }
 }
 
+/* The editor soft-wraps, so a line number says little about where a character
+   sits. Lay the text out in a hidden twin of the textarea and measure it. */
+var caretMirror = null;
+function caretTop(offset) {
+  if (!caretMirror) {
+    caretMirror = document.createElement('div');
+    caretMirror.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(caretMirror);
+  }
+  var cs = getComputedStyle(ta), st = caretMirror.style;
+  ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight', 'tabSize',
+    'textTransform', 'wordSpacing', 'whiteSpace', 'overflowWrap', 'wordBreak',
+    'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'].forEach(function (p) { st[p] = cs[p]; });
+  st.position = 'absolute';
+  st.visibility = 'hidden';
+  st.left = '-99999px';
+  st.top = '0';
+  st.border = '0';
+  st.boxSizing = 'border-box';
+  st.width = ta.clientWidth + 'px';
+  caretMirror.textContent = ta.value.slice(0, offset);
+  var mark = document.createElement('span');
+  mark.textContent = '\u200b';
+  caretMirror.appendChild(mark);
+  return mark.offsetTop;
+}
+
 function revealOffset(offset) {
-  var lc = lineColOf(computeLineStarts(ta.value), offset);
-  var lh = parseFloat(getComputedStyle(ta).lineHeight) || 21;
-  ta.scrollTop = Math.max(0, (lc.line - 1) * lh - ta.clientHeight / 3);
+  ta.scrollTop = Math.max(0, caretTop(offset) - ta.clientHeight / 3);
 }
 
 function afterSourceChange() {
@@ -1789,7 +2168,8 @@ function afterSourceChange() {
 function applyIssueFix(iss) {
   if (!iss || !iss.fix) return;
   var text = ta.value;
-  if (!editsStillValid(text, iss.fix.edits)) {
+  /* Matching bytes are not enough: the same "\{" may now sit inside code. */
+  if (text !== analyzedText || !editsStillValid(text, iss.fix.edits)) {
     updateAll();
     showToast('The draft moved on — hazards refreshed, try again');
     return;
@@ -1801,27 +2181,10 @@ function applyIssueFix(iss) {
   showToast('Fixed — ' + UNDO_HINT + ' undoes it');
 }
 
-/* Fixes can uncover fixes (turning \[ … \] into $$ … $$ exposes the escapes
-   inside), so re-analyze and repeat until a round changes nothing. */
 function applyAllFixes() {
-  var text = ta.value;
-  var startText = text;
-  var applied = 0;
-
-  for (var round = 0; round < 8; round++) {
-    var res = analyze(text);
-    var taken = [], roundCount = 0;
-    res.issues.forEach(function (iss) {
-      if (!iss.fix) return;
-      if (!editsStillValid(text, iss.fix.edits)) return;
-      if (editsOverlap(iss.fix.edits, taken)) return;
-      taken = taken.concat(iss.fix.edits);
-      roundCount++;
-    });
-    if (!roundCount) break;
-    text = applyEditsToText(text, taken);
-    applied += roundCount;
-  }
+  var startText = ta.value;
+  var result = fixAllText(startText);
+  var text = result.text, applied = result.applied;
 
   if (text === startText) { showToast('Nothing left that can be fixed mechanically'); return; }
 
@@ -1836,6 +2199,11 @@ function applyAllFixes() {
 }
 
 function jumpToIssue(iss) {
+  if (ta.value !== analyzedText) {
+    updateAll();
+    showToast('The draft moved on — hazards refreshed, try again');
+    return;
+  }
   ta.focus();
   ta.setSelectionRange(iss.start, iss.end);
   revealOffset(iss.start);
@@ -1872,8 +2240,11 @@ function schedule() {
   timer = setTimeout(function () { updateAll(); renderPreview(); }, 220);
 }
 
-ta.addEventListener('input', function () { saveDraftSoon(); schedule(); });
-window.addEventListener('beforeunload', function () { fallbackSet(DRAFT_KEY, ta.value); });
+ta.addEventListener('input', function () { userEdited = true; saveDraftSoon(); schedule(); });
+/* beforeunload is not delivered reliably (mobile, bfcache); pagehide is. */
+function flushDraft() { fallbackSet(DRAFT_KEY, ta.value); }
+window.addEventListener('beforeunload', flushDraft);
+window.addEventListener('pagehide', flushDraft);
 limitInput.addEventListener('input', function () {
   prefs.limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
   savePrefs();
@@ -1926,17 +2297,20 @@ function fallbackCopy(ok) {
   try { document.execCommand('copy'); ok(); } catch (e) { showToast('Copy failed — select and copy manually'); }
 }
 
+/* Both go through setSourceText so the browser's undo stack can bring the
+   previous draft back even after the autosave has been overwritten. */
 document.getElementById('exampleBtn').addEventListener('click', function () {
-  if (ta.value && ta.value !== EXAMPLE && !window.confirm('Replace the current draft with the example? Your local autosave will also be replaced.')) return;
-  ta.value = EXAMPLE;
+  if (ta.value && ta.value !== EXAMPLE && !window.confirm('Replace the current draft with the example? Your local autosave will also be replaced (' + UNDO_HINT + ' in the editor brings it back).')) return;
+  setSourceText(EXAMPLE, 0);
+  ta.scrollTop = 0;
   updateAll();
   renderPreview();
   saveDraftNow();
 });
 
 document.getElementById('clearBtn').addEventListener('click', function () {
-  if (ta.value && !window.confirm('Clear the editor and its local autosave?')) return;
-  ta.value = '';
+  if (ta.value && !window.confirm('Clear the editor and its local autosave? (' + UNDO_HINT + ' in the editor brings it back.)')) return;
+  setSourceText('', 0);
   storeSet(DRAFT_KEY, '').then(function (persisted) {
     saveStateEl.textContent = persisted ? 'Blank draft saved' : 'Blank draft in memory only';
   });
@@ -1973,7 +2347,9 @@ storeGet(PREFS_KEY).then(function (v) {
   applyPrefs();
   return storeGet(DRAFT_KEY);
 }).then(function (draft) {
-  if (typeof draft === 'string') {
+  if (userEdited) {
+    /* The user started typing before storage answered; keep their text. */
+  } else if (typeof draft === 'string') {
     ta.value = draft;
     saveStateEl.textContent = draft ? 'Draft restored' : 'Blank draft restored';
   } else {
