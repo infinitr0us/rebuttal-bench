@@ -16,16 +16,32 @@ const BRANCH = 'master';
 const SNAPSHOT = fileURLToPath(new URL('../upstream/openreview-web.json', import.meta.url));
 
 /* The block that opens at the first `open` after `marker`, up to its matching
-   close. Delimiters inside strings and comments count too, which is good
-   enough for the excerpts below; an unbalanced cut fails loudly. */
+   close. Delimiters inside strings and line or block comments do not count,
+   so a brace in a string cannot end the excerpt early and hide a later
+   change. (Regular-expression literals are not recognized; none of the
+   excerpts has one. "//" after a colon is a URL, not a comment.) */
 export function block(text, marker, open = '{', close = '}') {
   const at = text.indexOf(marker);
   if (at < 0) throw new Error('marker not found: ' + marker);
   let i = text.indexOf(open, at), depth = 0;
   if (i < 0) throw new Error('no ' + open + ' after: ' + marker);
-  for (; i < text.length; i++) {
-    if (text[i] === open) depth++;
-    else if (text[i] === close && --depth === 0) return text.slice(at, i + 1);
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'" || ch === '`') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== ch && (ch === '`' || text[j] !== '\n')) j += text[j] === '\\' ? 2 : 1;
+      i = j + 1;
+    } else if (ch === '/' && text[i + 1] === '/' && text[i - 1] !== ':') {
+      const nl = text.indexOf('\n', i);
+      i = nl < 0 ? text.length : nl;
+    } else if (ch === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      i = end < 0 ? text.length : end + 2;
+    } else {
+      if (ch === open) depth++;
+      else if (ch === close && --depth === 0) return text.slice(at, i + 1);
+      i++;
+    }
   }
   throw new Error('unbalanced block after: ' + marker);
 }

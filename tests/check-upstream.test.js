@@ -19,6 +19,24 @@ test('block() cuts out a balanced block and fails loudly otherwise', async () =>
   assert.throws(() => block('var f = { a', 'var f'), /unbalanced/);
 });
 
+test('block() ignores braces in strings and comments', async () => {
+  const { block } = await load();
+  const fn = (gfm) => 'var setupMarked = function () { var s = "}"; marked.setOptions({gfm: ' + gfm + '}); }';
+  assert.equal(block(fn('true') + ' tail', 'var setupMarked'), fn('true'));
+  assert.notEqual(block(fn('true'), 'var setupMarked'), block(fn('false'), 'var setupMarked'));
+  assert.equal(block("a { x: '}'; /* } */ y: `\n}`; // }\n b: url(http://e.com/{x}.png); } z", 'a'),
+    "a { x: '}'; /* } */ y: `\n}`; // }\n b: url(http://e.com/{x}.png); }");
+});
+
+test('cutting the committed excerpts again changes nothing', async () => {
+  const { readSnapshot, EXCERPTS } = await load();
+  const snap = await readSnapshot();
+  for (const ex of EXCERPTS) {
+    if (ex.file === 'package-lock.json') continue; // its excerpt is a summary, not a cut
+    assert.equal(ex.pick(snap.excerpts[ex.id].text), snap.excerpts[ex.id].text, ex.id);
+  }
+});
+
 test('lineDiff counts repeated lines', async () => {
   const { lineDiff } = await load();
   assert.equal(lineDiff('a\nb', 'a\nb\nb'), '  + b');
