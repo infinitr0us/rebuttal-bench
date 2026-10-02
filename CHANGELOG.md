@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.1.0 (2026-10-02)
 
 From a review of 3.0.0 on 2026-10-01 (Claude and Codex, each finding reproduced against the real
 pipeline).
