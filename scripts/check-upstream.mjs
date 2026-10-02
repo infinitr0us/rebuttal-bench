@@ -3,35 +3,41 @@
 //   npm run check-upstream              compare the latest openreview-web against the snapshot
 //   npm run check-upstream -- --update  accept the latest as the new snapshot
 //
-// Exit code 1 means something changed upstream: read the diff, bring the page
-// (and tests/lib/pipeline.js) in line, run `npm test`, then --update.
+// Exit codes: 0 nothing changed (or the snapshot was written), 1 something
+// changed upstream: read the diff, bring the page (and tests/lib/pipeline.js)
+// in line, run `npm test`, then --update. 2 the check itself failed (network,
+// GitHub rate limit, a moved file or marker, an unreadable snapshot).
 import { readFile, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = 'openreview/openreview-web';
 const BRANCH = 'master';
 const SNAPSHOT = fileURLToPath(new URL('../upstream/openreview-web.json', import.meta.url));
 
-/* The block that opens at the first `open` after `marker`, up to its matching close. */
-function block(text, marker, open = '{', close = '}') {
+/* The block that opens at the first `open` after `marker`, up to its matching
+   close. Delimiters inside strings and comments count too, which is good
+   enough for the excerpts below; an unbalanced cut fails loudly. */
+export function block(text, marker, open = '{', close = '}') {
   const at = text.indexOf(marker);
   if (at < 0) throw new Error('marker not found: ' + marker);
   let i = text.indexOf(open, at), depth = 0;
+  if (i < 0) throw new Error('no ' + open + ' after: ' + marker);
   for (; i < text.length; i++) {
     if (text[i] === open) depth++;
     else if (text[i] === close && --depth === 0) return text.slice(at, i + 1);
   }
   throw new Error('unbalanced block after: ' + marker);
 }
-const lines = (text, re) => text.split('\n').filter((l) => re.test(l)).map((l) => l.trim()).join('\n');
-const between = (text, from, to) => {
+export const lines = (text, re) => text.split('\n').filter((l) => re.test(l)).map((l) => l.trim()).join('\n');
+export const between = (text, from, to) => {
   const a = text.indexOf(from), b = text.indexOf(to, a);
   if (a < 0 || b < 0) throw new Error('markers not found: ' + from + ' … ' + to);
   return text.slice(a, b + to.length);
 };
 
 // What the page mirrors, where it lives upstream, and how to cut it out.
-const EXCERPTS = [
+export const EXCERPTS = [
   { id: 'MathJax config', file: 'lib/mathjax-config.js', pick: (t) => t },
   { id: 'MathJax script URL', file: 'app/MathjaxScript.js', pick: (t) => lines(t, /src=/) },
   { id: 'Marked renderer + options', file: 'client/view.js', pick: (t) => block(t, 'var setupMarked = function') },
@@ -51,48 +57,83 @@ const EXCERPTS = [
   { id: 'Display-math styles', file: 'styles/components.scss', pick: (t) => block(t, '// Mathjax') },
 ];
 
+/* Lines removed (-) and added (+), counting repeats, so a duplicated or
+   dropped copy of a line shows up too. */
+export function lineDiff(a, b) {
+  const count = (text) => text.split('\n').reduce((m, l) => m.set(l, (m.get(l) || 0) + 1), new Map());
+  const A = count(a), B = count(b), out = [];
+  for (const [l, n] of A) for (let k = B.get(l) || 0; k < n; k++) out.push('  - ' + l);
+  for (const [l, n] of B) for (let k = A.get(l) || 0; k < n; k++) out.push('  + ' + l);
+  return out.length ? out.join('\n') : '  (line order only)';
+}
+
+/* The stored snapshot, or null when there is none yet. A snapshot that exists
+   but cannot be read is an error: replacing it silently would lose the drift
+   it records. */
+export async function readSnapshot(file = SNAPSHOT) {
+  let text;
+  try {
+    text = await readFile(file, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return null;
+    throw e;
+  }
+  const snap = JSON.parse(text);
+  if (!snap || typeof snap.commit !== 'string' || !snap.excerpts || typeof snap.excerpts !== 'object') {
+    throw new Error('not a snapshot (expected "commit" and "excerpts")');
+  }
+  return snap;
+}
+
 async function get(url, json) {
   const res = await fetch(url, { headers: { 'User-Agent': 'rebuttal-bench-check-upstream' } });
   if (!res.ok) throw new Error(res.status + ' ' + res.statusText + ' for ' + url);
   return json ? res.json() : res.text();
 }
 
-function lineDiff(a, b) {
-  const A = a.split('\n'), B = b.split('\n'), out = [];
-  const setA = new Set(A), setB = new Set(B);
-  A.forEach((l) => { if (!setB.has(l)) out.push('  - ' + l); });
-  B.forEach((l) => { if (!setA.has(l)) out.push('  + ' + l); });
-  return out.length ? out.join('\n') : '  (whitespace or line order only)';
+async function main(argv) {
+  const update = argv.includes('--update');
+  let snapshot = null;
+  try {
+    snapshot = await readSnapshot();
+  } catch (e) {
+    if (!update) throw new Error(`cannot read ${SNAPSHOT}: ${e.message} (repair it, or replace it with --update)`);
+  }
+
+  const head = await get(`https://api.github.com/repos/${REPO}/commits/${BRANCH}`, true);
+  const current = { commit: head.sha, date: head.commit.committer.date, excerpts: {} };
+  for (const ex of EXCERPTS) {
+    const text = await get(`https://raw.githubusercontent.com/${REPO}/${head.sha}/${ex.file}`);
+    current.excerpts[ex.id] = { file: ex.file, text: ex.pick(text).replace(/\r\n/g, '\n') };
+  }
+
+  if (update || !snapshot) {
+    await writeFile(SNAPSHOT, JSON.stringify(current, null, 2) + '\n');
+    console.log(`Snapshot ${snapshot ? 'updated' : 'created'} at ${REPO}@${head.sha.slice(0, 7)} (${current.date}).`);
+    return 0;
+  }
+
+  const changed = EXCERPTS.filter((ex) => snapshot.excerpts[ex.id]?.text !== current.excerpts[ex.id].text);
+  console.log(`Snapshot: ${REPO}@${snapshot.commit.slice(0, 7)} (${snapshot.date})`);
+  console.log(`Latest:   ${REPO}@${head.sha.slice(0, 7)} (${current.date})`);
+  if (!changed.length) {
+    console.log('\nNo change in anything the page mirrors.');
+    return 0;
+  }
+  for (const ex of changed) {
+    console.log(`\nCHANGED: ${ex.id}  (${ex.file})`);
+    console.log(lineDiff(snapshot.excerpts[ex.id]?.text || '', current.excerpts[ex.id].text));
+  }
+  console.log(`\nCompare: https://github.com/${REPO}/compare/${snapshot.commit}...${head.sha}`);
+  console.log('Update the page and tests/lib/pipeline.js to match, run `npm test`, then `npm run check-upstream -- --update`.');
+  return 1;
 }
 
-const update = process.argv.includes('--update');
-const head = await get(`https://api.github.com/repos/${REPO}/commits/${BRANCH}`, true);
-const current = { commit: head.sha, date: head.commit.committer.date, excerpts: {} };
-for (const ex of EXCERPTS) {
-  const text = await get(`https://raw.githubusercontent.com/${REPO}/${head.sha}/${ex.file}`);
-  current.excerpts[ex.id] = { file: ex.file, text: ex.pick(text).replace(/\r\n/g, '\n') };
+// Run only as a script, so the tests can import the helpers above.
+const self = fileURLToPath(import.meta.url).toLowerCase();
+if (process.argv[1] && resolve(process.argv[1]).toLowerCase() === self) {
+  main(process.argv.slice(2)).then(
+    (code) => process.exit(code),
+    (e) => { console.error('check-upstream failed: ' + (e && e.message ? e.message : e)); process.exit(2); },
+  );
 }
-
-let snapshot = null;
-try { snapshot = JSON.parse(await readFile(SNAPSHOT, 'utf8')); } catch { /* first run */ }
-
-if (update || !snapshot) {
-  await writeFile(SNAPSHOT, JSON.stringify(current, null, 2) + '\n');
-  console.log(`Snapshot ${snapshot ? 'updated' : 'created'} at ${REPO}@${head.sha.slice(0, 7)} (${current.date}).`);
-  process.exit(0);
-}
-
-const changed = EXCERPTS.filter((ex) => snapshot.excerpts[ex.id]?.text !== current.excerpts[ex.id].text);
-console.log(`Snapshot: ${REPO}@${snapshot.commit.slice(0, 7)} (${snapshot.date})`);
-console.log(`Latest:   ${REPO}@${head.sha.slice(0, 7)} (${current.date})`);
-if (!changed.length) {
-  console.log('\nNo change in anything the page mirrors.');
-  process.exit(0);
-}
-for (const ex of changed) {
-  console.log(`\nCHANGED: ${ex.id}  (${ex.file})`);
-  console.log(lineDiff(snapshot.excerpts[ex.id]?.text || '', current.excerpts[ex.id].text));
-}
-console.log(`\nCompare: https://github.com/${REPO}/compare/${snapshot.commit}...${head.sha}`);
-console.log('Update the page and tests/lib/pipeline.js to match, run `npm test`, then `npm run check-upstream -- --update`.');
-process.exit(1);
