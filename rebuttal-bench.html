@@ -1410,6 +1410,12 @@ function analyze(src) {
   var mathMask = makeMask(src.length, spans);
   var tables = markedRanges.filter(function (r) { return r.type === 'table'; });
   function inTable(i) { return tables.some(function (t) { return i >= t.start && i < t.end; }); }
+  /* Only indentation and block quote markers precede position i on its line. */
+  function atLineStart(i) {
+    var k = i;
+    while (k > 0 && /[ \t>]/.test(src[k - 1])) k--;
+    return k === 0 || src[k - 1] === '\n';
+  }
 
   /* 1. Delimiters MathJax cannot pair within their own paragraph. */
   scan.lone.slice(0, 12).forEach(function (u) {
@@ -1463,9 +1469,18 @@ function analyze(src) {
 
   /* 2. \(...\) and \[...\] typed with one backslash: Markdown strips it, so
         MathJax sees plain brackets. Only TeX-looking contents are flagged, so
-        escaped citation brackets such as \[12\] stay quiet. */
-  function looksLikeTeX(inner) {
-    return /[\\^_{}=+<>]/.test(inner) || /^\s*[A-Za-z]\s*$/.test(inner);
+        escaped citation brackets such as \[12\] stay quiet. Escaped brackets
+        are common in prose too (Markdown exporters write "\[A\]", "\[k=5\]"),
+        so only unmistakable TeX there gets the rewrite; escaped parentheses
+        have no use in prose, so anything TeX-like does, except a lone letter,
+        which may be a list label. Returns 'fix', 'warn' or null. */
+  function degradedVerdict(inner, display) {
+    if (display) {
+      if (/[\\^_{]/.test(inner)) return 'fix';
+      return /[}=+<>]/.test(inner) ? 'warn' : null;
+    }
+    if (/^\s*[A-Za-z]\s*$/.test(inner)) return 'warn';
+    return /[\\^_{}=+<>]/.test(inner) ? 'fix' : null;
   }
   function warnDegradedPair(openChar, closeChar, display) {
     /* Pairing may continue into the next block, as with a blank line inside
@@ -1487,12 +1502,14 @@ function analyze(src) {
         if (run === 1 && next === openChar) stack.push(i);
         else if (run === 1 && next === closeChar && stack.length) {
           var at = stack.pop();
-          if (looksLikeTeX(src.slice(at + 2, i))) {
+          var verdict = degradedVerdict(src.slice(at + 2, i), display);
+          if (verdict) {
             var delim = display ? '$$' : '$';
             push('warn', '\\' + openChar + ' … \\' + closeChar + ' loses its MathJax delimiters',
-              'A single backslash before punctuation is a Markdown escape and disappears before MathJax runs. Prefer <code>' + (display ? '$$ … $$' : '$ … $') + '</code>, or type <code>\\\\' + openChar + ' … \\\\' + closeChar + '</code> so one backslash survives on each side.',
+              'A single backslash before punctuation is a Markdown escape and disappears before MathJax runs. Prefer <code>' + (display ? '$$ … $$' : '$ … $') + '</code>, or type <code>\\\\' + openChar + ' … \\\\' + closeChar + '</code> so one backslash survives on each side.' +
+              (verdict === 'fix' ? '' : ' If the brackets are meant literally, leave them as they are.'),
               at, at + 2,
-              fix(delim + ' … ' + delim, [edit(at, at + 2, delim), edit(i, i + 2, delim)]));
+              verdict === 'fix' ? fix(delim + ' … ' + delim, [edit(at, at + 2, delim), edit(i, i + 2, delim)]) : null);
           }
         }
         i = j - 1;
@@ -1545,8 +1562,9 @@ function analyze(src) {
           i, Math.min(sp.innerEnd, j + 2),
           fix('\\tilde{…}', [edit(i, j + 1, '\\tilde')]));
       } else if (run === 1 && TEX_CTRL_SYMBOLS.indexOf(next) !== -1) {
-        if (next === '|' && inTable(i)) {
-          /* Correct shield for a GFM table cell separator; MathJax receives |. */
+        if ((next === '|' && inTable(i)) || (next === '>' && atLineStart(i))) {
+          /* Correct shields: a GFM table cell separator, or a block quote
+             marker at the start of a line. MathJax receives the bare | or >. */
         } else {
           push('warn', '\\' + next + ' is consumed by Markdown',
             'A single backslash before ASCII punctuation is removed before MathJax runs, so MathJax receives <code>' + escHtml(next) + '</code>. If you intended the TeX control symbol <code>\\' + escHtml(next) + '</code>, type <code>\\\\' + escHtml(next) + '</code>.',
@@ -1636,12 +1654,15 @@ function analyze(src) {
   });
 
   /* Actual (not hypothetical) prose emphasis caused by multiplication stars.
-     An emphasis run that merely contains a whole formula still ate the stars. */
+     An emphasis run that merely contains a whole formula still ate the stars.
+     Both stars must sit inside a word ("a*b*c"): a closing star at the end of
+     a word is ordinary intraword emphasis ("pre*training*"). */
   markedRanges.forEach(function (r) {
     if (r.type !== 'em' && r.type !== 'strong') return;
     if (spans.some(function (sp) { return rangeOverlaps(r, sp) && !rangeWraps(r, sp); })) return;
     var n = r.type === 'strong' ? 2 : 1;
-    if (src[r.start] === '*' && isAlnum(src[r.start - 1]) && isAlnum(src[r.start + n])) {
+    if (src[r.start] === '*' && isAlnum(src[r.start - 1]) && isAlnum(src[r.start + n]) &&
+        isAlnum(src[r.end - n - 1]) && isAlnum(src[r.end])) {
       push('warn', 'Multiplication asterisks became Markdown emphasis',
         'Marked actually paired this intraword asterisk with a later one and removed both delimiters. Write <code>\\*</code> in prose or use <code>×</code>.',
         r.start, r.start + n, emphasisFix(r));
@@ -1687,19 +1708,21 @@ function analyze(src) {
         unindent fix, so a deliberate shell snippet with $HOME is left alone. */
   var TEXISH = /\$[^$\n]+\$|\\[a-zA-Z]{2,}/;
   var TEXWORD = /\\[a-zA-Z]{2,}/;
+  /* Windows paths are not TeX: C:\data, \\server\share, src\utils\run.py. */
+  var WINPATH = /[A-Za-z]:\\[^\s"'`]*|\\\\[^\s"'`\\]+\\[^\s"'`]*|[\w.-]+(?:\\[\w.-]+)+\.[A-Za-z0-9]{1,5}\b/g;
   var sawExactIndented = false;
   markedRanges.forEach(function (r) {
     if (r.type !== 'code' || !r.token || r.token.codeBlockStyle !== 'indented') return;
     sawExactIndented = true;
-    var body = src.slice(r.start, r.end);
-    if (!TEXISH.test(body)) return;
+    var body = src.slice(r.start, r.end), texBody = body.replace(WINPATH, ' ');
+    if (!TEXISH.test(texBody)) return;
     var unindent = [], pos = r.start, lines = body.split('\n');
     for (var k = 0; k < lines.length; k++) {
       var lead = lines[k].match(/^(?: {1,4}|\t)/);
       if (lead) unindent.push(edit(pos, pos + lead[0].length, ''));
       pos += lines[k].length + 1;
     }
-    var surelyTeX = TEXWORD.test(body);
+    var surelyTeX = TEXWORD.test(texBody);
     push(surelyTeX ? 'warn' : 'note', 'Indented text became a code block',
       'Marked treats this indentation as code, and MathJax skips code blocks. Remove the leading indentation when the TeX should render.',
       r.start, Math.min(r.end, r.start + 8),
@@ -1708,7 +1731,7 @@ function analyze(src) {
   if (!sawExactIndented && !model) {
     fallbackCodeRanges(src).forEach(function (r) {
       var raw = src.slice(r.start, r.end);
-      if (/^(?: {4}|\t)/.test(raw) && TEXISH.test(raw)) {
+      if (/^(?: {4}|\t)/.test(raw) && TEXISH.test(raw.replace(WINPATH, ' '))) {
         push('warn', 'Indented text may be a code block',
           'Markdown can treat this indentation as code, which MathJax skips. Remove the leading indentation when the TeX should render.',
           r.start, Math.min(r.end, r.start + 8));

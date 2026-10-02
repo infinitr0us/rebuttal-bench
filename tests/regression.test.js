@@ -37,6 +37,14 @@ const CASES = {
   'literal braces typed correctly': { src: 'The set $\\\\{x_i\\\\}_{i=1}^N$ is fixed.', issues: [], fixed: null },
   'text-mode accent inside \\text': { src: '$\\text{Se\\\\~{n}or}$', issues: [], fixed: null },
   'control space in \\text next to a matrix': { src: '$\\text{a\\\\ b}+\\begin{matrix}x\\end{matrix}$', issues: [], fixed: null },
+  'escaped brackets around labels in prose': { src: 'See \\[A\\], issues \\[a\\] and \\[b\\], and \\[R1\\].', issues: [], fixed: null },
+  'indented Windows commands': {
+    src: 'Run:\n\n    dir C:\\data\n    copy \\\\srv\\share\\x.txt src\\utils\\run.py\n\nDone.',
+    issues: [],
+    fixed: null,
+  },
+  'block quote shield inside math': { src: '$a\n\\> b$', issues: [], fixed: null },
+  'intraword emphasis': { src: 'Our pre*training* stage.', issues: [], fixed: null },
   'references to a tagged equation': { src: '$$x=1\\tag{1}\\label{eq:bound}$$\n\nSee \\eqref{eq:bound} and $\\ref{eq:bound}$.', issues: [], fixed: null },
   'numbers with a unit inside math': {
     src: 'Latency is $50 ms$, memory $16 GB$, over $100 epochs$ and $3 seeds$, a $2 times$ speedup, and $2 xy$.',
@@ -113,6 +121,13 @@ const CASES = {
   },
   'one-slash \\[ … \\] split by a blank line': { src: '\\[x^2\n\ny^2\\]', issues: ['\\[ … \\] loses its MathJax delimiters'], fixed: ['D:x^2\ny^2'] },
   'one-slash \\( … \\)': { src: 'Let \\(x + y\\) be.', issues: ['\\( … \\) loses its MathJax delimiters'], fixed: ['I:x + y'] },
+  'escaped brackets that may be prose: warning only': {
+    src: 'Default setting \\[k=5\\] and a gain of \\[+2.1\\].',
+    issues: ['\\[ … \\] loses its MathJax delimiters', '\\[ … \\] loses its MathJax delimiters'],
+    fixed: null,
+  },
+  'escaped parentheses around one letter: warning only': { src: 'Item \\(a\\) comes first.', issues: ['\\( … \\) loses its MathJax delimiters'], fixed: null },
+  'thick space consumed by Markdown': { src: 'Here $a\\;b$ holds.', issues: ['\\; is consumed by Markdown'], fixed: ['I:a\\;b'] },
   'emphasis inside math': { src: 'Here $a*b*c$ is bad.', issues: ['Markdown emphasis splits this formula'], fixed: ['I:a*b*c'] },
   'emphasis across shielded-bar formulas in a table cell': {
     src: '| Reg. | Value |\n| --- | --- |\n| $\\|\\theta\\|_{2}$ vs $\\|\\theta\\|_{1}$ | 0.1 |',
