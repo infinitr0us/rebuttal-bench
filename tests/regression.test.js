@@ -44,6 +44,7 @@ const CASES = {
     fixed: null,
   },
   'block quote shield inside math': { src: '$a\n\\> b$', issues: [], fixed: null },
+  'text accents typed correctly': { src: 'By $\\text{Schr\\\\"{o}dinger}$ and $\\text{Schrödinger}$.', issues: [], fixed: null },
   'intraword emphasis': { src: 'Our pre*training* stage.', issues: [], fixed: null },
   'references to a tagged equation': { src: '$$x=1\\tag{1}\\label{eq:bound}$$\n\nSee \\eqref{eq:bound} and $\\ref{eq:bound}$.', issues: [], fixed: null },
   'numbers with a unit inside math': {
@@ -127,6 +128,16 @@ const CASES = {
     fixed: null,
   },
   'escaped parentheses around one letter: warning only': { src: 'Item \\(a\\) comes first.', issues: ['\\( … \\) loses its MathJax delimiters'], fixed: null },
+  'text accent consumed by Markdown': {
+    src: 'By $\\text{Schr\\"{o}dinger}$.',
+    issues: ['\\" is consumed by Markdown'],
+    fixed: ['I:\\text{Schr\\"{o}dinger}'],
+  },
+  'more than twelve unpaired delimiters': {
+    src: 'a \\\\) b\n\n'.repeat(13) + 'It costs $5 per run.',
+    issues: Array(13).fill('Stray \\) delimiter').concat('Unpaired $'),
+    fixed: [],
+  },
   'thick space consumed by Markdown': { src: 'Here $a\\;b$ holds.', issues: ['\\; is consumed by Markdown'], fixed: ['I:a\\;b'] },
   'emphasis inside math': { src: 'Here $a*b*c$ is bad.', issues: ['Markdown emphasis splits this formula'], fixed: ['I:a*b*c'] },
   'emphasis across shielded-bar formulas in a table cell': {

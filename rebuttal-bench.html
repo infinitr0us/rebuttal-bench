@@ -1303,6 +1303,9 @@ function bs(n) { return n > 0 ? new Array(n + 1).join('\\') : ''; }
    which have their own handling, and \_, which as a Markdown shield is by far
    the more common intent). */
 var TEX_CTRL_SYMBOLS = '!#%&,:;>{|}';
+/* Punctuation X for which "\X" is a text accent in \text{…} (textmacros);
+   \~ has its own check. */
+var TEXT_ACCENTS = '"\'`^=.';
 
 /* Environments whose rows are separated by \\ , and commands whose argument
    is set in text mode (where "\ " and \~ mean what they mean in prose). */
@@ -1418,7 +1421,7 @@ function analyze(src) {
   }
 
   /* 1. Delimiters MathJax cannot pair within their own paragraph. */
-  scan.lone.slice(0, 12).forEach(function (u) {
+  scan.lone.forEach(function (u) {
     if (u.kind === '\\)' || u.kind === '\\]') {
       push('warn', 'Stray ' + u.kind + ' delimiter',
         'This closing MathJax delimiter survives Markdown but has no matching <code>\\' + (u.kind === '\\)' ? '(' : '[') + '</code> in its paragraph, so it shows up as literal text.',
@@ -1533,7 +1536,8 @@ function analyze(src) {
       var run = j - i, next = src[j] || '';
       /* Only where \\ really separates rows: inside a row environment and not
          in \text{…}, where "\\ " is a legitimate control space. */
-      var ctx = (run <= 3 && (next === '\n' || next === '' || /\s/.test(next) || next === '[' || next === '~'))
+      var ctx = (run <= 3 && (next === '\n' || next === '' || /\s/.test(next) || next === '[' || next === '~' ||
+          (next && TEXT_ACCENTS.indexOf(next) !== -1)))
         ? texContextAt(src, sp.innerStart, i) : { row: false, text: false };
       var rowLike = ctx.row && !ctx.text;
 
@@ -1561,6 +1565,11 @@ function analyze(src) {
           'Markdown strips a single slash, so MathJax receives <code>~{…}</code> (a non-breaking space), and even a surviving <code>\\~</code> is a text-mode accent MathJax does not define in math. Use <code>\\tilde{…}</code> (or <code>\\widetilde{…}</code>).',
           i, Math.min(sp.innerEnd, j + 2),
           fix('\\tilde{…}', [edit(i, j + 1, '\\tilde')]));
+      } else if (run === 1 && ctx.text && next && TEXT_ACCENTS.indexOf(next) !== -1) {
+        push('warn', '\\' + next + ' is consumed by Markdown',
+          'Markdown strips the single slash, so inside <code>\\text{…}</code> MathJax receives a plain <code>' + escHtml(next) + '</code> instead of the accent. Type <code>\\\\' + escHtml(next) + '</code>.',
+          i, Math.min(sp.innerEnd, j + 1),
+          fix('\\\\' + next, [edit(i, j, bs(2))]));
       } else if (run === 1 && TEX_CTRL_SYMBOLS.indexOf(next) !== -1) {
         if ((next === '|' && inTable(i)) || (next === '>' && atLineStart(i))) {
           /* Correct shields: a GFM table cell separator, or a block quote
