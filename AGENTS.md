@@ -75,9 +75,10 @@ limit, a moved file or marker, an unreadable snapshot; it never overwrites one w
 `npm run smoke`: it drives the installed Chrome/Edge headlessly (DevTools protocol, no
 dependencies) and checks Fix all + single-step undo, undoable *Clear* and *Load example*, the
 status bar's TeX-error and undefined-macro counts, a fresh TeX state per preview (no duplicate
-`\label` errors, deleted `\newcommand`s forgotten), jumping to a hazard on a long soft-wrapped
-line, refusing a stale one-click fix, draft persistence across a reload (also with a stubbed
-asynchronous `window.storage`), `/images/` attributes, the theme toggle, and that no page errors
+`\label` errors, deleted `\newcommand`s and `\definecolor`s forgotten), jumping to a hazard on a
+long soft-wrapped line, refusing a stale one-click fix, draft persistence across a reload (also
+with a stubbed asynchronous `window.storage`: keystrokes before a reload, a draft saved elsewhere,
+leaving before the restore), `/images/` attributes, the theme toggle, and that no page errors
 were thrown. Add a check there for any new browser-only behavior.
 
 Still by eye: zoom and editor-size controls, dark-mode colors, the layout below 920 px width.

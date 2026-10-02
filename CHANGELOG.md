@@ -6,15 +6,16 @@ From a review of 3.0.0 on 2026-10-01 (Claude and Codex, each finding reproduced 
 pipeline).
 
 ### Fix all no longer damages correct text
-- A number followed by a word inside math (`$16 GB$`, `$100 epochs$`, `$2 xy$`) was taken for
-  prose between two prices and turned into literal text.
-- In "It costs $5 per run, and $x$ is the input." both dollar signs were escaped and `$x$` was
-  lost with them; only the currency sign is escaped now.
+- A number followed by a word inside math (`$16 GB$`, `$16 GB $`, `$100 epochs$`, `$2 xy$`) was
+  taken for prose between two prices and turned into literal text.
+- In "It costs $5 per run, and $x$ is the input." (or `$2x$`, `$-x$`) both dollar signs were
+  escaped and the formula was lost with them; only the currency sign is escaped now.
 - Negative amounts in two table cells (`| $-5 | $-10 |`) were paired across the `|` and the
-  cells merged.
+  cells merged; ``$2 - `x`$`` was taken for two prices instead of math cut by inline code.
 - Escaped brackets in prose (`\[A\]`, `\[k=5\]`, `\[+2.1\]`) became display math. Brackets are
   rewritten only around unmistakable TeX; `\(a\)` (one letter) gets a warning only.
-- An indented command with a Windows path (`C:\data`) counted as TeX and was unindented.
+- An indented command with a Windows path (`C:\data`, `src\utils`) counted as TeX and was
+  unindented; the fix now needs a control word with an argument, sub- or superscript.
 - `\>` at the start of a line inside math, where it keeps `>` from starting a block quote, was
   doubled into a TeX space.
 - Deliberate intraword emphasis (`pre*training*`) lost its asterisks.
@@ -22,15 +23,16 @@ pipeline).
 
 ### The analyzer models OpenReview more closely
 - In a table cell that uses `\|`, emphasis splitting a formula went unreported (Marked unescapes
-  the pipe before lexing the cell, so its tokens were not found in the source).
+  the pipe before lexing the cell, so its tokens were not found in the source); the same for
+  `\[ \]` in a link label.
 - `\ref{…}` and `\eqref{…}` outside math are typeset by MathJax (processRefs, on by default);
   a stray `\end{…}` no longer hides a formula inside its braces.
 - Character references (`&#36;`), link syntax (only a link's label is text) and HTML blocks
   (shown as typed, adjacent ones in one text node) are modeled.
 
 ### Checks
-- New: a `\ref`/`\eqref` without a `\label` in a tagged formula of the same comment, which
-  OpenReview shows as `(???)` (typically copied from the paper).
+- New: a `\ref`/`\eqref` without a `\label` in a tagged formula (or `align` row) of the same
+  comment, which OpenReview shows as `(???)` (typically copied from the paper).
 - New: text accents `\"` `\'` `` \` `` `\^` `\=` `\.` inside `\text{…}` whose backslash Markdown
   removes.
 - Every unpaired delimiter is reported (only the first 12 were).
@@ -38,17 +40,20 @@ pipeline).
 ### Page
 - Each preview starts from a fresh TeX state: no false "Label multiply defined" from the second
   render on, and deleted `\newcommand` / `\def` / `\newenvironment` / `\DeclareMathOperator`
-  definitions are forgotten, as on a freshly loaded OpenReview page.
+  definitions and `\definecolor` colors are forgotten, as on a freshly loaded OpenReview page.
 - With an asynchronous store (`window.storage`), text typed just before closing the page now wins
-  over the older stored draft.
+  over the older stored draft, but not over one saved elsewhere since; leaving before the draft
+  was restored no longer replaces it with an empty one.
 - Images under `/images/` get their alt and title text exactly as upstream builds them.
 
 ### Project
 - `npm run check-upstream` validates the snapshot before going online, never replaces an
-  unreadable one without `--update`, exits 2 when the check itself fails, and shows duplicated
-  lines in its diff; its helpers have offline tests.
-- More regression cases (each with a nearby correct input), fuzz atoms for references,
-  character references and HTML blocks, and six new smoke checks.
+  unreadable one without `--update`, exits 2 when the check itself fails, shows duplicated lines
+  in its diff, and no longer ends an excerpt at a brace inside a string or comment; its helpers
+  have offline tests.
+- More regression cases (each with a nearby correct input, some pinning the exact source after
+  Fix all), fuzz atoms for references, character references and HTML blocks, and ten new
+  smoke checks.
 
 ## 3.0.0 — 2026-09-22
 
