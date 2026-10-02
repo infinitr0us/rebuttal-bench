@@ -5,6 +5,8 @@
 //           ([] means correct input that must stay silent).
 //   fixed:  what OpenReview's MathJax must typeset after "Fix all"
 //           (null means Fix all must leave the text untouched).
+//   text:   optionally, the exact source after Fix all, where the shape of the
+//           rest (table cells, code, prose) matters as much as the math.
 //
 // Every change to a check or an autofix should add a case here, in both
 // directions: the broken input it repairs, and nearby correct input it must
@@ -55,6 +57,7 @@ const CASES = {
     issues: [],
     fixed: null,
   },
+  'number with a unit and a space before the closing $': { src: 'It needs $16 GB $ of memory.', issues: [], fixed: null },
   'norm with a subscript in a table cell': { src: '| a | b |\n| --- | --- |\n| $\\|\\theta\\|_{2}$ | 0.1 |', issues: [], fixed: null },
   'code span with a shielded pipe in a table cell': { src: '| A |\n| - |\n| `$\\{x\\}\\|y$` |', issues: [], fixed: null },
 
@@ -67,19 +70,44 @@ const CASES = {
     src: 'It costs $5 per run, and $x$ is the input.',
     issues: ['Currency dollars pair into a formula', 'Unpaired $'],
     fixed: ['I:x'],
+    text: 'It costs \\\\$5 per run, and $x$ is the input.',
   },
   'a price, then a control-word formula': {
     src: 'Each run costs $2 on average; we define $\\alpha$ as the rate.',
     issues: ['Currency dollars pair into a formula', 'Unpaired $'],
     fixed: ['I:\\alpha'],
   },
+  'a price, then a formula that starts with a digit': {
+    src: 'It costs $5 per run, and $2x$ is the bound.',
+    issues: ['Currency dollars pair into a formula', 'Unpaired $'],
+    fixed: ['I:2x'],
+    text: 'It costs \\\\$5 per run, and $2x$ is the bound.',
+  },
+  'a price, then a formula that starts with a minus': {
+    src: 'It costs $5 per run, and $-x$ is the bound.',
+    issues: ['Currency dollars pair into a formula', 'Unpaired $'],
+    fixed: ['I:-x'],
+  },
+  'three prices in one sentence': {
+    src: 'It costs $5 per hour, $10 per day, and $50 per week.',
+    issues: ['Currency dollars pair into a formula', 'Unpaired $'],
+    fixed: [],
+    text: 'It costs \\\\$5 per hour, \\\\$10 per day, and \\\\$50 per week.',
+  },
   'a price typed as a character reference, then a formula': {
     src: 'It costs &#36;5 per run, and $x$ is the input.',
     issues: ['Currency dollars pair into a formula', 'Unpaired $'],
     fixed: ['I:x'],
+    text: 'It costs \\\\$5 per run, and $x$ is the input.',
   },
-  'negative amounts in two table cells': { src: '| A | B |\n| - | - |\n| $-5 | $-10 |', issues: ['Unpaired $', 'Unpaired $'], fixed: [] },
+  'negative amounts in two table cells': {
+    src: '| A | B |\n| - | - |\n| $-5 | $-10 |',
+    issues: ['Unpaired $', 'Unpaired $'],
+    fixed: [],
+    text: '| A | B |\n| - | - |\n| \\\\$-5 | \\\\$-10 |',
+  },
   'digit-leading formula cut by inline code': { src: 'So $2 + `x`$ here.', issues: ['Inline code interrupts this formula'], fixed: null },
+  'subtraction cut by inline code': { src: 'So $2 - `x`$ here.', issues: ['Inline code interrupts this formula'], fixed: null },
   'currency escaped with one slash': {
     src: 'costs \\$5 and \\$10 total',
     issues: ['Backslash does not protect this $', 'Backslash does not protect this $', 'Currency dollars pair into a formula'],
@@ -152,6 +180,13 @@ const CASES = {
     src: '| Reg. | Value |\n| --- | --- |\n| $\\|\\theta\\|_{2}$ vs $\\|\\theta\\|_{1}$ | 0.1 |',
     issues: ['Markdown emphasis splits this formula'],
     fixed: ['I:|\\theta|_{2}', 'I:|\\theta|_{1}'],
+    text: '| Reg. | Value |\n| --- | --- |\n| $\\|\\theta\\|\\_{2}$ vs $\\|\\theta\\|\\_{1}$ | 0.1 |',
+  },
+  'consumed escape next to a code span in a link label': {
+    src: '[`\\[x\\]` and $a\\,b$](https://example.com)',
+    issues: ['\\, is consumed by Markdown'],
+    fixed: ['I:a\\,b'],
+    text: '[`\\[x\\]` and $a\\\\,b$](https://example.com)',
   },
   'inline code inside math': { src: 'We have $x + `y`$ here.', issues: ['Inline code interrupts this formula'], fixed: null },
   'equation reference copied from the paper': {
@@ -162,6 +197,16 @@ const CASES = {
   'reference to an untagged label': {
     src: '\\begin{equation}x\\label{a}\\end{equation}\n\nSee \\eqref{a}.',
     issues: ['\\eqref has no target: OpenReview shows (???)'],
+    fixed: null,
+  },
+  'reference to the untagged row of an align': {
+    src: '$$\n\\begin{align}\nx &= 1 \\label{a} \\\\\\\\\ny &= 2 \\tag{2}\\label{b}\n\\end{align}\n$$\n\nSee \\eqref{a} and \\eqref{b}.',
+    issues: ['\\eqref has no target: OpenReview shows (???)'],
+    fixed: null,
+  },
+  'indented relative path: a note, no fix': {
+    src: 'Run:\n\n    dir src\\utils\n\nDone.',
+    issues: ['Indented text became a code block'],
     fixed: null,
   },
   'unbalanced brace from \\{': {
@@ -183,5 +228,6 @@ for (const [name, c] of Object.entries(CASES)) {
     const out = A.fixAllText(c.src).text;
     if (c.fixed === null) assert.equal(out, c.src, 'Fix all must leave this text alone');
     else assert.deepEqual(typeset(out), c.fixed, 'MathJax output after Fix all of ' + JSON.stringify(out));
+    if (c.text !== undefined) assert.equal(out, c.text, 'source after Fix all');
   });
 }

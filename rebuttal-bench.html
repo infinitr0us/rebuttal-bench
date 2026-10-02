@@ -829,7 +829,10 @@ function collectMarkedRanges(src) {
 
   var root;
   try { root = lexer.call(api, src); } catch (e) { return null; }
-  var ranges = [], leaves = [], dropped = [], unlocated = [], hidden = [], inCell = false;
+  /* Characters whose escapes Marked removed before lexing the current tokens:
+     GFM unescapes "\|" in a table cell, and a link label loses the backslash
+     of "\[" and "\]". Such a token's raw text shows the bare character. */
+  var ranges = [], leaves = [], dropped = [], unlocated = [], hidden = [], unescaped = '';
 
   function locate(raw, cursor, regionStart, regionEnd) {
     if (!raw) return null;
@@ -838,18 +841,17 @@ function collectMarkedRanges(src) {
       at = src.indexOf(raw, from[k]);
       if (at >= regionStart && at + raw.length <= regionEnd) return { start: at, end: at + raw.length };
     }
-    /* GFM unescapes "\|" before it lexes a table cell, so a cell token's raw
-       text can show a bare | where the source has \|. */
-    if (inCell && raw.indexOf('|') !== -1) {
-      var cellRe = new RegExp(raw.split('|').map(escRe).join('\\\\?\\|'), 'g');
+    if (unescaped && new RegExp('[' + escRe(unescaped) + ']').test(raw)) {
+      var pattern = '';
+      for (var r = 0; r < raw.length; r++) pattern += (unescaped.indexOf(raw[r]) !== -1 ? '\\\\?' : '') + escRe(raw[r]);
+      var tolerant = new RegExp(pattern, 'g');
       for (k = 0; k < from.length; k++) {
-        cellRe.lastIndex = from[k];
-        var cm = cellRe.exec(src);
-        if (cm && cm.index >= regionStart && cm.index + cm[0].length <= regionEnd) {
-          return { start: cm.index, end: cm.index + cm[0].length };
+        tolerant.lastIndex = from[k];
+        var tm = tolerant.exec(src);
+        if (tm && tm.index >= regionStart && tm.index + tm[0].length <= regionEnd) {
+          return { start: tm.index, end: tm.index + tm[0].length };
         }
       }
-      return null;
     }
     /* Inside lists and block quotes Marked strips the container's indentation
        and "> " markers before lexing; let them reappear at every line start.
@@ -909,10 +911,10 @@ function collectMarkedRanges(src) {
         if (ci >= width) return;
         var tc = tokCells[ci];
         if (tc && Array.isArray(tc.tokens)) {
-          var wasInCell = inCell;
-          inCell = true;
+          var outer = unescaped;
+          unescaped += '|';
           visit(tc.tokens, c.start, c.end, depth + 1, true);
-          inCell = wasInCell;
+          unescaped = outer;
         }
       });
       if (width && cells.length > width) dropped.push({ start: cells[width].start, end: cells[cells.length - 1].end });
@@ -982,7 +984,12 @@ function collectMarkedRanges(src) {
       if (type !== 'html' && type !== 'space') lastHtml = null;
       if (!pos && type === 'codespan') unlocated.push({ start: regionStart, end: regionEnd });
       if (type === 'table') { if (pos) visitTable(tok, pos, depth); return; }
-      if (Array.isArray(tok.tokens)) visit(tok.tokens, childStart, childEnd, depth + 1, inline || !!LEAF[type]);
+      if (Array.isArray(tok.tokens)) {
+        var outer = unescaped;
+        if (type === 'link') unescaped += '[]';
+        visit(tok.tokens, childStart, childEnd, depth + 1, inline || !!LEAF[type]);
+        unescaped = outer;
+      }
       if (Array.isArray(tok.items)) visit(tok.items, childStart, childEnd, depth + 1, false);
     });
   }
@@ -1262,15 +1269,26 @@ var DELIM_KIND = { '$': 'dollar', '$$': 'dollar', '\\(': 'slash', '\\[': 'slash'
 var PARTNER = { '$': '$', '$$': '$$', '\\(': '\\)', '\\[': '\\]', env: 'end' };
 var DISPLAY_KIND = { '$$': 1, '\\[': 1, env: 1 };
 
+/* What follows a "$": the next amount ("$10", "$-5", "$.5"), something the
+   sign opens (a formula: "$x$", "$\alpha$", "$(a+b)$"), or nothing, as after
+   a closing delimiter (a space, punctuation, the end). */
+function afterDollar(s) {
+  if (/^[-+−]?\.?\d/.test(s)) return 'amount';
+  return s && /^[^\s.,;:!?)\]}'"]/.test(s) ? 'opens' : 'closes';
+}
+
 /* Prose between two currency signs, e.g. "$450 of compute at $1.9" or
    "$5-$10", as opposed to math that starts with a number, e.g. "$5$ seeds" or
-   "$2x $". This one drives an autofix, so it wants a real prose word, and
-   prose that runs on to the next sign: it ends in a space, or the next amount
-   follows at once. "$16 GB$" or "$100 epochs$" end in a word: math with a unit. */
+   "$2x $". This one drives an autofix, so it wants a real prose word, and a
+   second sign that leads into something: the next amount, or (after prose
+   that ends in a space) a formula, as in "$5 per run, and $x$". "$16 GB$" and
+   "$16 GB $ of" end on a closing delimiter: math with a unit.
+   `after` is the text right after the second sign. */
 function looksLikeCurrencyPair(inner, after) {
   if (/[\\^_{}=]/.test(inner)) return false;
-  if (/^\d[\d,.]*[kKmMbB]?\s*[-–—\/~]\s*$/.test(inner) && /^\d/.test(after || '')) return true;
-  if (!/\s$/.test(inner) && !/^\d/.test(after || '')) return false;
+  var next = afterDollar(after || '');
+  if (/^\d[\d,.]*[kKmMbB]?\s*[-–—\/~]\s*$/.test(inner) && next === 'amount') return true;
+  if (next === 'closes' || (next === 'opens' && !/\s$/.test(inner))) return false;
   return /^\d[\d,.]*[kKmMbB]?\s+/.test(inner) && /(?:^|\s)[A-Za-z]{2,}(?=[\s,.;:!?)]|$)/.test(inner);
 }
 
@@ -1333,8 +1351,13 @@ function scanMath(src, regions, codeMask) {
     var inner = src.slice(L.end, R.start);
     var currency = L.kind === '$' && looksLikePrice(inner);
     var gaps = (inner.match(/\n(?:[ \t]*\n)+/g) || []).length;
-    /* Same block, cut apart by an inline code span: "$x + `y`$". */
-    if (L.region.leaf === R.region.leaf && !gaps) return currency ? '' : 'code';
+    /* Same block, cut apart by an inline code span: "$x + `y`$". Prices have
+       prose words between them, outside the code: "$5 in `run.sh` and $3". */
+    if (L.region.leaf === R.region.leaf && !gaps) {
+      var prose = '';
+      for (var c = L.end; c < R.start; c++) if (!codeMask[c]) prose += src[c];
+      return currency && /[A-Za-z]{2,}/.test(prose) ? '' : 'code';
+    }
     for (var i = L.end; i < R.start; i++) if (codeMask[i]) return '';
     if (L.region.cell || R.region.cell) {
       if (!L.region.cell || !R.region.cell || L.region.row !== R.region.row || currency) return '';
@@ -1692,13 +1715,18 @@ function analyze(src) {
         sp.start, sp.start + (sp.kind === 'env' ? 6 : sp.kind.length));
     }
 
-    if (sp.delimiter === 'dollar' && !sp.display && !sp.recovered && !sp.literal && looksLikeCurrencyPair(inner, src[sp.end])) {
+    var after = src.slice(sp.end, sp.end + 3);
+    if (sp.delimiter === 'dollar' && !sp.display && !sp.recovered && !sp.literal && looksLikeCurrencyPair(inner, after)) {
       /* In "costs $5 and $$x$$" MathJax closes on the first half of the $$, and
          in "costs $5 per run, and $x$ is" on the opening sign of a formula.
-         Escaping only the currency sign gives that formula back. The closing
-         sign is a second price only when an amount follows it. */
-      var after = src.slice(sp.end, sp.end + 2);
-      var closesOnFormula = after.charAt(0) === '$' || /^[A-Za-z\\{(]/.test(after);
+         Escaping only the currency sign gives that formula back. An amount may
+         open a formula too ("and $2x$ is"): the text up to the next $ tells a
+         formula from the next price. */
+      var closesOnFormula = afterDollar(after) === 'opens';
+      if (!closesOnFormula) {
+        var rest = src.slice(sp.end).split(/\n[ \t]*\n/)[0], nextSign = rest.indexOf('$');
+        closesOnFormula = nextSign > 0 && !looksLikePrice(rest.slice(0, nextSign));
+      }
       push('warn', 'Currency dollars pair into a formula',
         'This looks like prose between two currency signs, but MathJax receives it as one inline formula. For each literal dollar sign type <code>\\\\$</code> (which reaches MathJax as <code>\\$</code>).',
         sp.start, sp.end,
@@ -1803,10 +1831,12 @@ function analyze(src) {
   });
 
   /* 7. Indented text that Marked turns into a code block. Only TeX-looking
-        blocks are flagged, and only unmistakable TeX (a control word) gets the
-        unindent fix, so a deliberate shell snippet with $HOME is left alone. */
+        blocks are flagged, and only unmistakable TeX gets the unindent fix, so
+        a deliberate shell snippet with $HOME or a Windows path is left alone. */
   var TEXISH = /\$[^$\n]+\$|\\[a-zA-Z]{2,}/;
-  var TEXWORD = /\\[a-zA-Z]{2,}/;
+  /* Positive evidence for the fix: a control word taking an argument, a
+     subscript or a superscript, or one inside $…$ ("dir src\utils" is not). */
+  var TEXWORD = /\\[a-zA-Z]{2,}\s*[{_^]|\$[^$\n]*\\[a-zA-Z]{2,}[^$\n]*\$/;
   /* Windows paths are not TeX: C:\data, \\server\share, src\utils\run.py. */
   var WINPATH = /[A-Za-z]:\\[^\s"'`]*|\\\\[^\s"'`\\]+\\[^\s"'`]*|[\w.-]+(?:\\[\w.-]+)+\.[A-Za-z0-9]{1,5}\b/g;
   var sawExactIndented = false;
@@ -1843,9 +1873,13 @@ function analyze(src) {
         also carries a \tag{…}; any other reference shows as (???) or ???. */
   var tagged = Object.create(null);
   spans.forEach(function (sp) {
-    if (sp.recovered || !sp.tex || !/\\tag\*?\s*\{/.test(sp.tex)) return;
-    var lm, lre = /\\label\s*\{([^}]*)\}/g;
-    while ((lm = lre.exec(sp.tex))) tagged[lm[1]] = true;
+    if (sp.recovered || !sp.tex) return;
+    /* A tag numbers its own row only: "\\" separates the rows of an align. */
+    sp.tex.split(/\\\\/).forEach(function (row) {
+      if (!/\\tag\*?\s*\{/.test(row)) return;
+      var lm, lre = /\\label\s*\{([^}]*)\}/g;
+      while ((lm = lre.exec(row))) tagged[lm[1]] = true;
+    });
   });
   spans.forEach(function (sp) {
     if (sp.recovered) return;
