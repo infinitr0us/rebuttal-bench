@@ -2133,10 +2133,12 @@ function savePrefs() {
 /* ---- draft autosave ---- */
 /* Drafts go to localStorage at once and to the asynchronous store (when the
    page runs where there is one) in the background. pagehide cannot wait for
-   the latter, so the last keystrokes are flushed locally and marked as the
-   newer copy, which then wins at the next start. */
+   the latter, so the last keystrokes are flushed locally and marked pending,
+   together with the stored draft they were based on. At the next start the
+   pending copy wins, unless the store has changed since (another device). */
 var DRAFT_PENDING_KEY = 'rebuttal-bench-draft-pending';
 var remoteDraft = null;  /* the draft the asynchronous store last confirmed */
+var draftReady = false;  /* the saved draft has been restored */
 var draftTimer = null;
 function storeDraft(value) {
   var localOk = fallbackSet(DRAFT_KEY, value);
@@ -2148,13 +2150,22 @@ function storeDraft(value) {
   }).catch(function () { return localOk; });
 }
 function loadDraft() {
-  var local = fallbackGet(DRAFT_KEY);
-  if (canArtifactStore && fallbackGet(DRAFT_PENDING_KEY) === '1' && typeof local === 'string') {
-    return Promise.resolve({ value: local, pending: true });
+  var local = fallbackGet(DRAFT_KEY), pending = null;
+  try { pending = JSON.parse(fallbackGet(DRAFT_PENDING_KEY) || 'null'); } catch (e) {}
+  if (!canArtifactStore || !pending || typeof local !== 'string') {
+    return storeGet(DRAFT_KEY).then(function (value) {
+      if (canArtifactStore && typeof value === 'string') remoteDraft = value;
+      return { value: value, pending: false };
+    });
   }
-  return storeGet(DRAFT_KEY).then(function (value) {
-    if (canArtifactStore && typeof value === 'string') remoteDraft = value;
-    return { value: value, pending: false };
+  return window.storage.get(DRAFT_KEY, false).then(function (r) {
+    var remote = r ? r.value : null;
+    if (remote === null || remote === pending.base) return { value: local, pending: true };
+    fallbackDel(DRAFT_PENDING_KEY); /* saved elsewhere since: that draft is newer */
+    remoteDraft = remote;
+    return { value: remote, pending: false };
+  }, function () {
+    return { value: local, pending: true };
   });
 }
 function saveDraftSoon() {
@@ -2256,6 +2267,10 @@ function resetTeXState() {
         var m = handlers.retrieve(name);
         if (m && m.map && typeof m.map.clear === 'function') m.map.clear();
       });
+      /* and \definecolor its colors in the color package's model */
+      var color = jax.parseOptions.packageData && jax.parseOptions.packageData.get('color');
+      var userColors = color && color.model && color.model.userColors;
+      if (userColors && typeof userColors.clear === 'function') userColors.clear();
     });
   } catch (e) {}
 }
@@ -2522,8 +2537,9 @@ function schedule() {
 ta.addEventListener('input', function () { userEdited = true; saveDraftSoon(); schedule(); });
 /* beforeunload is not delivered reliably (mobile, bfcache); pagehide is. */
 function flushDraft() {
+  if (!draftReady && !userEdited) return; /* nothing restored or typed yet: keep the saved draft */
   fallbackSet(DRAFT_KEY, ta.value);
-  if (canArtifactStore && ta.value !== remoteDraft) fallbackSet(DRAFT_PENDING_KEY, '1');
+  if (canArtifactStore && ta.value !== remoteDraft) fallbackSet(DRAFT_PENDING_KEY, JSON.stringify({ base: remoteDraft }));
 }
 window.addEventListener('beforeunload', flushDraft);
 window.addEventListener('pagehide', flushDraft);
@@ -2629,6 +2645,7 @@ storeGet(PREFS_KEY).then(function (v) {
   applyPrefs();
   return loadDraft();
 }).then(function (draft) {
+  draftReady = true;
   if (userEdited) {
     /* The user started typing before storage answered; keep their text. */
   } else if (typeof draft.value === 'string') {

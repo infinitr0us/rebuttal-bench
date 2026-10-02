@@ -172,6 +172,13 @@ try {
     setSourceText('$\\\\RBa$ $\\\\RBb$', 0); updateAll(); renderPreview(); await wait(2000);
     return defined && /2 undefined macros/.test(mjStatus.textContent) || { defined, status: mjStatus.textContent };`);
 
+  await check('a deleted color definition is forgotten', `
+    setSourceText('$\\\\definecolor{red}{RGB}{0,0,255}\\\\color{red}x$', 0); updateAll(); renderPreview(); await wait(2000);
+    setSourceText('$\\\\color{red}x$', 0); updateAll(); renderPreview(); await wait(2000);
+    const el = document.querySelector('#preview mjx-container [style*="color"]');
+    const style = el ? el.getAttribute('style') : 'no colored element';
+    return /red/i.test(style) || style;`);
+
   await check('allowed images keep their alt and title text as upstream', `
     setSourceText('![A &amp; B](/images/x.png "C &amp; D")', 0); updateAll(); renderPreview(); await wait(500);
     const img = document.querySelector('#preview img');
@@ -193,10 +200,10 @@ try {
     return ta.value === 'Set \`\\\\{x\\\\}\` here.' || ta.value;`);
 
   // Last, as it applies to every later navigation: an asynchronous store like
-  // a hosted artifact's window.storage (answers after 50 ms, kept in
-  // localStorage under its own prefix so that it survives reloads).
+  // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
+  // kept in localStorage under its own prefix so that it survives reloads).
   await send('Page.addScriptToEvaluateOnNewDocument', { source: `
-    const later = (f) => new Promise((r) => setTimeout(() => r(f()), 50));
+    const later = (f) => new Promise((r) => setTimeout(() => r(f()), +(localStorage.getItem('stub:delay') || 50)));
     window.storage = {
       get: (k) => later(() => { const v = localStorage.getItem('stub:' + k); return v === null ? null : { value: v }; }),
       set: (k, v) => later(() => { localStorage.setItem('stub:' + k, v); }),
@@ -210,6 +217,20 @@ try {
   await load(); /* reload before the 700 ms autosave can reach the store */
   await check('text typed just before a reload wins over the older stored draft', `
     return ta.value === 'New $y$.' || ta.value.slice(0, 80);`);
+  await inPage(`await wait(300); /* the restored draft has reached the store */
+    setSourceText('Mine $a$.', 0); ta.dispatchEvent(new Event('input'));
+    localStorage.setItem('stub:rebuttal-bench-draft', 'Theirs $b$.'); /* saved on another device */
+    return true;`);
+  await load();
+  await check('a draft saved elsewhere since wins over a stale local copy', `
+    return ta.value === 'Theirs $b$.' || ta.value.slice(0, 80);`);
+  await inPage(`localStorage.setItem('stub:delay', '4000'); return true;`);
+  await send('Page.navigate', { url: PAGE }, sessionId);
+  await sleep(800); /* leave again before the slow store has answered */
+  await inPage(`localStorage.setItem('stub:delay', '50'); return true;`);
+  await load();
+  await check('leaving before the stored draft arrives does not replace it', `
+    return ta.value === 'Theirs $b$.' || ta.value.slice(0, 80);`);
 
   results.push([errors.length === 0, 'no uncaught page errors', errors.join(' | ')]);
 } catch (e) {
