@@ -15,6 +15,8 @@ const KNOWN = [
   '\\\\$\\|\n    }\\begin{m}\n\n| h | k |\n| - | - |\n\\\\ || $\\)$a',
   // an indented continuation line: Marked's token raw gains an extra "\n"
   '\\)a$\n    \\\\($$\n| --- | --- |\n$$\n    `q`\n  - ',
+  // a code span with a shielded pipe in a table cell: GFM unescapes \| first
+  '| cmd | k |\n| - | - |\n| `echo $A \\| grep $B` | 1 |',
 ];
 const { renderLikeOpenReview } = require('./lib/pipeline');
 KNOWN.forEach((src, k) => {

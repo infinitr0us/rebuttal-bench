@@ -829,7 +829,7 @@ function collectMarkedRanges(src) {
 
   var root;
   try { root = lexer.call(api, src); } catch (e) { return null; }
-  var ranges = [], leaves = [], dropped = [];
+  var ranges = [], leaves = [], dropped = [], unlocated = [], inCell = false;
 
   function locate(raw, cursor, regionStart, regionEnd) {
     if (!raw) return null;
@@ -837,6 +837,19 @@ function collectMarkedRanges(src) {
     for (k = 0; k < from.length; k++) {
       at = src.indexOf(raw, from[k]);
       if (at >= regionStart && at + raw.length <= regionEnd) return { start: at, end: at + raw.length };
+    }
+    /* GFM unescapes "\|" before it lexes a table cell, so a cell token's raw
+       text can show a bare | where the source has \|. */
+    if (inCell && raw.indexOf('|') !== -1) {
+      var cellRe = new RegExp(raw.split('|').map(escRe).join('\\\\?\\|'), 'g');
+      for (k = 0; k < from.length; k++) {
+        cellRe.lastIndex = from[k];
+        var cm = cellRe.exec(src);
+        if (cm && cm.index >= regionStart && cm.index + cm[0].length <= regionEnd) {
+          return { start: cm.index, end: cm.index + cm[0].length };
+        }
+      }
+      return null;
     }
     /* Inside lists and block quotes Marked strips the container's indentation
        and "> " markers before lexing; let them reappear at every line start.
@@ -895,7 +908,12 @@ function collectMarkedRanges(src) {
         leaves.push({ start: c.start, end: c.end, exact: true, cell: true, row: a, dropped: ci >= width });
         if (ci >= width) return;
         var tc = tokCells[ci];
-        if (tc && Array.isArray(tc.tokens)) visit(tc.tokens, c.start, c.end, depth + 1, true);
+        if (tc && Array.isArray(tc.tokens)) {
+          var wasInCell = inCell;
+          inCell = true;
+          visit(tc.tokens, c.start, c.end, depth + 1, true);
+          inCell = wasInCell;
+        }
       });
       if (width && cells.length > width) dropped.push({ start: cells[width].start, end: cells[cells.length - 1].end });
     });
@@ -917,8 +935,11 @@ function collectMarkedRanges(src) {
         childStart = pos.start;
         childEnd = pos.end;
       }
-      /* A leaf that cannot be located falls back to its container's range. */
+      /* A leaf that cannot be located falls back to its container's range. A
+         code span that cannot be located protects its whole container, so no
+         check ever reads (or a fix ever edits) code as if it were math. */
       if (!inline && LEAF[type]) leaves.push({ start: childStart, end: childEnd, exact: !!pos });
+      if (!pos && type === 'codespan') unlocated.push({ start: regionStart, end: regionEnd });
       if (type === 'table') { if (pos) visitTable(tok, pos, depth); return; }
       if (Array.isArray(tok.tokens)) visit(tok.tokens, childStart, childEnd, depth + 1, inline || !!LEAF[type]);
       if (Array.isArray(tok.items)) visit(tok.items, childStart, childEnd, depth + 1, false);
@@ -926,7 +947,7 @@ function collectMarkedRanges(src) {
   }
 
   visit(root, 0, src.length, 0, false);
-  return { ranges: ranges, leaves: leaves, dropped: dropped };
+  return { ranges: ranges, leaves: leaves, dropped: dropped, unlocated: unlocated };
 }
 
 /* Fallback masking for when the CDN parser is unavailable. The live page uses
@@ -1351,7 +1372,8 @@ function analyze(src) {
   var model = collectMarkedRanges(src);
   var markedRanges = model ? model.ranges : [];
   var codeRanges = model
-    ? mergeSimpleRanges(markedRanges.filter(function (r) { return r.type === 'code' || r.type === 'codespan'; }))
+    ? mergeSimpleRanges(markedRanges.filter(function (r) { return r.type === 'code' || r.type === 'codespan'; })
+      .concat(model.unlocated))
     : fallbackCodeRanges(src);
   var codeMask = makeMask(src.length, codeRanges);
   var regions = buildRegions(src, model ? model.leaves : fallbackLeaves(src), codeMask);

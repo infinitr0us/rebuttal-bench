@@ -37,6 +37,8 @@ const CASES = {
   'literal braces typed correctly': { src: 'The set $\\\\{x_i\\\\}_{i=1}^N$ is fixed.', issues: [], fixed: null },
   'text-mode accent inside \\text': { src: '$\\text{Se\\\\~{n}or}$', issues: [], fixed: null },
   'control space in \\text next to a matrix': { src: '$\\text{a\\\\ b}+\\begin{matrix}x\\end{matrix}$', issues: [], fixed: null },
+  'norm with a subscript in a table cell': { src: '| a | b |\n| --- | --- |\n| $\\|\\theta\\|_{2}$ | 0.1 |', issues: [], fixed: null },
+  'code span with a shielded pipe in a table cell': { src: '| A |\n| - |\n| `$\\{x\\}\\|y$` |', issues: [], fixed: null },
 
   // ---- broken input: Fix all must produce the intended TeX ----
   'currency in one paragraph, math in the next': { src: 'It costs $5 per run.\n\nWe define $x$ as the input.', issues: ['Unpaired $'], fixed: ['I:x'] },
@@ -93,6 +95,11 @@ const CASES = {
   'one-slash \\[ … \\] split by a blank line': { src: '\\[x^2\n\ny^2\\]', issues: ['\\[ … \\] loses its MathJax delimiters'], fixed: ['D:x^2\ny^2'] },
   'one-slash \\( … \\)': { src: 'Let \\(x + y\\) be.', issues: ['\\( … \\) loses its MathJax delimiters'], fixed: ['I:x + y'] },
   'emphasis inside math': { src: 'Here $a*b*c$ is bad.', issues: ['Markdown emphasis splits this formula'], fixed: ['I:a*b*c'] },
+  'emphasis across shielded-bar formulas in a table cell': {
+    src: '| Reg. | Value |\n| --- | --- |\n| $\\|\\theta\\|_{2}$ vs $\\|\\theta\\|_{1}$ | 0.1 |',
+    issues: ['Markdown emphasis splits this formula'],
+    fixed: ['I:|\\theta|_{2}', 'I:|\\theta|_{1}'],
+  },
   'inline code inside math': { src: 'We have $x + `y`$ here.', issues: ['Inline code interrupts this formula'], fixed: null },
   'unbalanced brace from \\{': {
     src: '$\\{x$ and more text $y$',
