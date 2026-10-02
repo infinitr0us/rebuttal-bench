@@ -17,6 +17,10 @@ const KNOWN = [
   '\\)a$\n    \\\\($$\n| --- | --- |\n$$\n    `q`\n  - ',
   // a code span with a shielded pipe in a table cell: GFM unescapes \| first
   '| cmd | k |\n| - | - |\n| `echo $A \\| grep $B` | 1 |',
+  // processRefs: a reference is typeset on its own, braces and all
+  'See \\ref{a$b} and $x$ here, \\eqref{c}.',
+  // a stray \end does not hide the formula inside its braces
+  '\\end{$x$}',
 ];
 const { renderLikeOpenReview } = require('./lib/pipeline');
 KNOWN.forEach((src, k) => {

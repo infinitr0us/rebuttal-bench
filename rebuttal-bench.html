@@ -1099,11 +1099,13 @@ function mathJaxView(src, a, b) {
   return { text: text, from: from, to: to, at: at };
 }
 
-/* A port of MathJax 3.2's FindTeX with OpenReview's delimiters, processEscapes
-   and processEnvironments: one left-to-right pass, "$$" tried before "$", a
-   closing delimiter only counts at brace depth 0, and "\X" is skipped as a
-   unit inside math. Stray closers are reported too (MathJax shows them as text). */
-var MJ_START = /(\$\$|\\\[|\\\(|\$)|\\begin\s*\{([^}]*)\}|\\[\\$]|\\([\])])|\\end\s*\{([^}]*)\}/g;
+/* A port of MathJax 3.2's FindTeX with OpenReview's delimiters, processEscapes,
+   processEnvironments and processRefs (all MathJax defaults): one
+   left-to-right pass, "$$" tried before "$", a closing delimiter only counts at
+   brace depth 0, and "\X" is skipped as a unit inside math. Stray closers are
+   reported too (MathJax shows them as text); a stray \end{…} is matched as a
+   lookahead so the scan moves on exactly as FindTeX's does. */
+var MJ_START = /(\$\$|\\\[|\\\(|\$)|\\begin\s*\{([^}]*)\}|\\[\\$]|(\\(?:eq)?ref\s*\{[^}]*\})|\\([\])])|\\(?=(end\s*\{([^}]*)\}))/g;
 var MJ_OPEN = { '$': ['$', false], '$$': ['$$', true], '\\(': ['\\)', false], '\\[': ['\\]', true] };
 var MJ_END = {
   '$': /\$|\\(?:[a-zA-Z]|.)|[{}]/g,
@@ -1142,11 +1144,18 @@ function mjFind(text) {
       kind = 'env';
       close = '{' + m[2] + '}';
       endRe = new RegExp('\\\\end\\s*(\\{' + escRe(m[2]) + '\\})|\\\\(?:[a-zA-Z]|.)|[{}]', 'g');
-    } else if (m[3]) {
-      lone.push({ at: m.index, len: 2, kind: '\\' + m[3] });
+    } else if (m[3] !== undefined) {
+      /* \ref{…} or \eqref{…} outside math: typeset on its own, inline. */
+      found.push({
+        open: m.index, openLen: 0, close: m.index + m[0].length, closeLen: 0,
+        display: false, kind: 'ref', braces: false
+      });
       continue;
-    } else if (m[4] !== undefined) {
-      lone.push({ at: m.index, len: m[0].length, kind: 'end', env: m[4] });
+    } else if (m[4]) {
+      lone.push({ at: m.index, len: 2, kind: '\\' + m[4] });
+      continue;
+    } else if (m[5] !== undefined) {
+      lone.push({ at: m.index, len: 1 + m[5].length, kind: 'end', env: m[6] });
       continue;
     } else {
       continue; /* a processEscapes escape (\\ or \$), shown as text */
@@ -1166,7 +1175,7 @@ function mjFind(text) {
   return { found: found, lone: lone };
 }
 
-var DELIM_KIND = { '$': 'dollar', '$$': 'dollar', '\\(': 'slash', '\\[': 'slash', env: 'env' };
+var DELIM_KIND = { '$': 'dollar', '$$': 'dollar', '\\(': 'slash', '\\[': 'slash', env: 'env', ref: 'ref' };
 var PARTNER = { '$': '$', '$$': '$$', '\\(': '\\)', '\\[': '\\]', env: 'end' };
 var DISPLAY_KIND = { '$$': 1, '\\[': 1, env: 1 };
 
@@ -1199,21 +1208,35 @@ function looksLikePrice(inner) {
    cut a formula into two table cells. Those spans are marked `recovered`. */
 function scanMath(src, regions, codeMask) {
   var spans = [], lone = [];
+
+  /* \ref{…} and \eqref{…} in the TeX MathJax receives (view indices [a, b)),
+     as source ranges. "\\eqref" is a row break followed by letters. */
+  function refsIn(v, a, b) {
+    var out = [], s = v.text.slice(a, b), m;
+    var re = /\\(?:(eqref|ref)\s*\{([^}]*)\}|[a-zA-Z]+|[\s\S])/g;
+    while ((m = re.exec(s))) {
+      if (m[1]) out.push({ start: v.from[a + m.index], end: v.to[a + m.index + m[0].length - 1], cmd: m[1], key: m[2] });
+    }
+    return out;
+  }
+
   regions.forEach(function (rg) {
     var v = mathJaxView(src, rg.start, rg.end);
     var r = mjFind(v.text);
     if (rg.dropped) r.found = []; /* MathJax never sees a dropped table cell */
     r.found.forEach(function (f) {
+      /* an environment or a reference is its own TeX, delimiters included */
+      var whole = f.kind === 'env' || f.kind === 'ref';
+      var a = whole ? f.open : f.open + f.openLen, b = whole ? f.close + f.closeLen : f.close;
       var sp = {
         start: v.from[f.open], end: v.to[f.close + f.closeLen - 1],
         innerStart: v.to[f.open + f.openLen - 1], innerEnd: v.from[f.close],
         display: f.display, kind: f.kind, env: f.env, delimiter: DELIM_KIND[f.kind],
         openAt: v.at[f.open], closeAt: v.at[f.close],
         recovered: f.braces, why: f.braces ? 'braces' : '',
-        /* the TeX MathJax receives (for an environment, including \begin…\end) */
-        tex: f.kind === 'env' ? v.text.slice(f.open, f.close + f.closeLen) : v.text.slice(f.open + f.openLen, f.close)
+        tex: v.text.slice(a, b), refs: refsIn(v, a, b)
       };
-      if (f.kind === 'env') { sp.innerStart = sp.start; sp.innerEnd = sp.end; }
+      if (whole) { sp.innerStart = sp.start; sp.innerEnd = sp.end; }
       spans.push(sp);
     });
     r.lone.forEach(function (l) {
@@ -1692,6 +1715,25 @@ function analyze(src) {
       }
     });
   }
+
+  /* 8. \ref / \eqref. OpenReview leaves MathJax's equation tags at 'none', so a
+        reference resolves only to a \label in a formula of this comment that
+        also carries a \tag{…}; any other reference shows as (???) or ???. */
+  var tagged = Object.create(null);
+  spans.forEach(function (sp) {
+    if (sp.recovered || !sp.tex || !/\\tag\*?\s*\{/.test(sp.tex)) return;
+    var lm, lre = /\\label\s*\{([^}]*)\}/g;
+    while ((lm = lre.exec(sp.tex))) tagged[lm[1]] = true;
+  });
+  spans.forEach(function (sp) {
+    if (sp.recovered) return;
+    (sp.refs || []).forEach(function (rf) {
+      if (tagged[rf.key]) return;
+      push('warn', '\\' + rf.cmd + ' has no target: OpenReview shows ' + (rf.cmd === 'eqref' ? '(???)' : '???'),
+        'OpenReview does not number equations, so MathJax resolves a reference only to a <code>\\label</code> in a formula of this same comment that also carries a <code>\\tag{…}</code>. Write the number out (e.g. "Eq. (3)"), or tag the labelled equation.',
+        rf.start, rf.end);
+    });
+  });
 
   issues.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
   return {

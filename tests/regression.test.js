@@ -37,6 +37,7 @@ const CASES = {
   'literal braces typed correctly': { src: 'The set $\\\\{x_i\\\\}_{i=1}^N$ is fixed.', issues: [], fixed: null },
   'text-mode accent inside \\text': { src: '$\\text{Se\\\\~{n}or}$', issues: [], fixed: null },
   'control space in \\text next to a matrix': { src: '$\\text{a\\\\ b}+\\begin{matrix}x\\end{matrix}$', issues: [], fixed: null },
+  'references to a tagged equation': { src: '$$x=1\\tag{1}\\label{eq:bound}$$\n\nSee \\eqref{eq:bound} and $\\ref{eq:bound}$.', issues: [], fixed: null },
   'numbers with a unit inside math': {
     src: 'Latency is $50 ms$, memory $16 GB$, over $100 epochs$ and $3 seeds$, a $2 times$ speedup, and $2 xy$.',
     issues: [],
@@ -119,6 +120,16 @@ const CASES = {
     fixed: ['I:|\\theta|_{2}', 'I:|\\theta|_{1}'],
   },
   'inline code inside math': { src: 'We have $x + `y`$ here.', issues: ['Inline code interrupts this formula'], fixed: null },
+  'equation reference copied from the paper': {
+    src: 'As shown in Eq. \\eqref{eq:loss}, the bound $x$ holds by $\\ref{thm:1}$.',
+    issues: ['\\eqref has no target: OpenReview shows (???)', '\\ref has no target: OpenReview shows ???'],
+    fixed: null,
+  },
+  'reference to an untagged label': {
+    src: '\\begin{equation}x\\label{a}\\end{equation}\n\nSee \\eqref{a}.',
+    issues: ['\\eqref has no target: OpenReview shows (???)'],
+    fixed: null,
+  },
   'unbalanced brace from \\{': {
     src: '$\\{x$ and more text $y$',
     issues: ['MathJax cannot find the end of this formula', '\\{ is consumed by Markdown', 'Unpaired $'],

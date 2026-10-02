@@ -10,7 +10,8 @@ const { loadAnalyzer } = require('./page');
 const ALPHABETS = {
   // escapes, delimiters, environments, paragraphs, hard breaks, headings, code spans
   inline: ['$', '$', '$$', '\\', '\\', '\\\\', '{', '}', '(', ')', '[', ']', 'a', 'b', 'x1', ' ', ' ', '\n',
-    '\n\n', '\\begin{m}', '\\end{m}', '\\(', '\\)', '\\[', '\\]', '|', '- ', '# ', '`c`', '> ', '  \n', '&', '\\{', '\\}'],
+    '\n\n', '\\begin{m}', '\\end{m}', '\\(', '\\)', '\\[', '\\]', '|', '- ', '# ', '`c`', '> ', '  \n', '&', '\\{', '\\}',
+    '\\ref{a}', '\\eqref{', '\\end{'],
   // tables, nested lists, block quotes, indented code
   blocks: ['$', '$', '$$', '\\', '\\\\', '{', '}', 'a', 'x', ' ', '\n', '| ', ' |', '|', '\n| --- | --- |\n',
     '\n\n| h | k |\n| - | - |\n', '\n- ', '\n  - ', '\n1. ', '\n    ', '\n> ', '\n\n', '\\|', '\\(', '\\)',
