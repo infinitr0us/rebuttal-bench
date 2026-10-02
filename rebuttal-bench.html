@@ -1172,19 +1172,24 @@ var DISPLAY_KIND = { '$$': 1, '\\[': 1, env: 1 };
 
 /* Prose between two currency signs, e.g. "$450 of compute at $1.9" or
    "$5-$10", as opposed to math that starts with a number, e.g. "$5$ seeds" or
-   "$2x $". This one drives an autofix, so it wants a real prose word. */
+   "$2x $". This one drives an autofix, so it wants a real prose word, and
+   prose that runs on to the next sign: it ends in a space, or the next amount
+   follows at once. "$16 GB$" or "$100 epochs$" end in a word: math with a unit. */
 function looksLikeCurrencyPair(inner, after) {
   if (/[\\^_{}=]/.test(inner)) return false;
   if (/^\d[\d,.]*[kKmMbB]?\s*[-–—\/~]\s*$/.test(inner) && /^\d/.test(after || '')) return true;
+  if (!/\s$/.test(inner) && !/^\d/.test(after || '')) return false;
   return /^\d[\d,.]*[kKmMbB]?\s+/.test(inner) && /(?:^|\s)[A-Za-z]{2,}(?=[\s,.;:!?)]|$)/.test(inner);
 }
 
-/* Looser: text that starts with a bare amount ("5 | ", "1.9 per"), as opposed
-   to a formula that merely starts with a digit ("2x|y"). Used only to decline
-   pairing two leftover dollars across blocks or table cells, where a wrong
-   pairing would lead to a cell-merging or paragraph-merging fix. */
+/* Looser: text that starts with a bare amount ("5 | ", "-5 | ", "1.9 per"),
+   as opposed to a formula that merely starts with a digit ("2x|y", "2 + ").
+   Used only to decline pairing two leftover dollars across blocks or table
+   cells, where a wrong pairing would lead to a cell-merging or
+   paragraph-merging fix. */
 function looksLikePrice(inner) {
-  return /^\d[\d,.]*[kKmMbB%]?(?:\s|$)/.test(inner) && !/[\\^_{}=]/.test(inner);
+  return /^[-+−]?\d[\d,.]*[kKmMbB%]?(?:\s|$)/.test(inner) &&
+    !/[\\^_{}=+*<>]/.test(inner.replace(/^[-+−]/, ''));
 }
 
 /* Real spans are exactly what MathJax will typeset (before inline Markdown
@@ -1411,7 +1416,7 @@ function analyze(src) {
         u.at - slashRun, u.at + 1,
         fix('\\\\$', [literalDollar(u.at)]));
     } else {
-      var currency = u.kind === '$' && /\d/.test(src[u.at + 1] || '');
+      var currency = u.kind === '$' && /^[-+−]?\d/.test(src.slice(u.at + 1, u.at + 3));
       push('warn', u.kind === '$$' ? 'Unpaired $$' : 'Unpaired $',
         'MathJax finds no partner for this delimiter in its paragraph, so for now it shows as literal text — but any later <code>' + u.kind + '</code> in the same paragraph would pair with it and turn the prose in between into math. ' +
         (currency ? 'For a literal dollar sign type <code>\\\\$</code>.' : 'Add the missing closing delimiter, or type <code>\\\\$</code> for a literal dollar sign.'),
@@ -1548,13 +1553,16 @@ function analyze(src) {
     }
 
     if (sp.delimiter === 'dollar' && !sp.display && !sp.recovered && looksLikeCurrencyPair(inner, src[sp.end])) {
-      /* In "costs $5 and $$x$$" MathJax closes on the first half of the $$;
-         escaping only the currency sign gives the display formula back. */
-      var closesOnDisplay = src[sp.closeAt + 1] === '$';
+      /* In "costs $5 and $$x$$" MathJax closes on the first half of the $$, and
+         in "costs $5 per run, and $x$ is" on the opening sign of a formula.
+         Escaping only the currency sign gives that formula back. The closing
+         sign is a second price only when an amount follows it. */
+      var after = src.slice(sp.end, sp.end + 2);
+      var closesOnFormula = after.charAt(0) === '$' || /^[A-Za-z\\{(]/.test(after);
       push('warn', 'Currency dollars pair into a formula',
         'This looks like prose between two currency signs, but MathJax receives it as one inline formula. For each literal dollar sign type <code>\\\\$</code> (which reaches MathJax as <code>\\$</code>).',
         sp.start, sp.end,
-        closesOnDisplay
+        closesOnFormula
           ? fix('escape the $', [literalDollar(sp.openAt)])
           : fix('escape both $', [literalDollar(sp.openAt), literalDollar(sp.closeAt)]));
     }

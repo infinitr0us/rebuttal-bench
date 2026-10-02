@@ -37,6 +37,11 @@ const CASES = {
   'literal braces typed correctly': { src: 'The set $\\\\{x_i\\\\}_{i=1}^N$ is fixed.', issues: [], fixed: null },
   'text-mode accent inside \\text': { src: '$\\text{Se\\\\~{n}or}$', issues: [], fixed: null },
   'control space in \\text next to a matrix': { src: '$\\text{a\\\\ b}+\\begin{matrix}x\\end{matrix}$', issues: [], fixed: null },
+  'numbers with a unit inside math': {
+    src: 'Latency is $50 ms$, memory $16 GB$, over $100 epochs$ and $3 seeds$, a $2 times$ speedup, and $2 xy$.',
+    issues: [],
+    fixed: null,
+  },
   'norm with a subscript in a table cell': { src: '| a | b |\n| --- | --- |\n| $\\|\\theta\\|_{2}$ | 0.1 |', issues: [], fixed: null },
   'code span with a shielded pipe in a table cell': { src: '| A |\n| - |\n| `$\\{x\\}\\|y$` |', issues: [], fixed: null },
 
@@ -44,6 +49,19 @@ const CASES = {
   'currency in one paragraph, math in the next': { src: 'It costs $5 per run.\n\nWe define $x$ as the input.', issues: ['Unpaired $'], fixed: ['I:x'] },
   'currency before display math': { src: 'costs $5 and $$x$$ done', issues: ['Currency dollars pair into a formula', 'Unpaired $'], fixed: ['D:x'] },
   'currency range': { src: 'Budget between $5-$10 per run.', issues: ['Currency dollars pair into a formula'], fixed: [] },
+  'two prices in one sentence': { src: 'It costs $5 per hour and $10 per day.', issues: ['Currency dollars pair into a formula'], fixed: [] },
+  'a price, then a formula in the same sentence': {
+    src: 'It costs $5 per run, and $x$ is the input.',
+    issues: ['Currency dollars pair into a formula', 'Unpaired $'],
+    fixed: ['I:x'],
+  },
+  'a price, then a control-word formula': {
+    src: 'Each run costs $2 on average; we define $\\alpha$ as the rate.',
+    issues: ['Currency dollars pair into a formula', 'Unpaired $'],
+    fixed: ['I:\\alpha'],
+  },
+  'negative amounts in two table cells': { src: '| A | B |\n| - | - |\n| $-5 | $-10 |', issues: ['Unpaired $', 'Unpaired $'], fixed: [] },
+  'digit-leading formula cut by inline code': { src: 'So $2 + `x`$ here.', issues: ['Inline code interrupts this formula'], fixed: null },
   'currency escaped with one slash': {
     src: 'costs \\$5 and \\$10 total',
     issues: ['Backslash does not protect this $', 'Backslash does not protect this $', 'Currency dollars pair into a formula'],
