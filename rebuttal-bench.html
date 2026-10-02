@@ -829,7 +829,7 @@ function collectMarkedRanges(src) {
 
   var root;
   try { root = lexer.call(api, src); } catch (e) { return null; }
-  var ranges = [], leaves = [], dropped = [], unlocated = [], inCell = false;
+  var ranges = [], leaves = [], dropped = [], unlocated = [], hidden = [], inCell = false;
 
   function locate(raw, cursor, regionStart, regionEnd) {
     if (!raw) return null;
@@ -919,11 +919,40 @@ function collectMarkedRanges(src) {
     });
   }
 
+  /* Only a link's label is text, inside its own <a>: the brackets and the
+     destination ("](url "title")", "][ref]") never reach MathJax, nor do an
+     autolink's angle brackets. */
+  function hideLinkSyntax(pos) {
+    var raw = src.slice(pos.start, pos.end);
+    if (raw.charAt(0) === '<' && raw.charAt(raw.length - 1) === '>') {
+      hidden.push({ start: pos.start, end: pos.start + 1 }, { start: pos.end - 1, end: pos.end });
+      return;
+    }
+    if (raw.charAt(0) !== '[') return;
+    for (var p = 1, depth = 0; p < raw.length; p++) {
+      var ch = raw.charAt(p);
+      if (ch === '\\') { p++; continue; }
+      if (ch === '`') { /* a code span in the label may contain brackets */
+        var q = p;
+        while (raw.charAt(q) === '`') q++;
+        var closeAt = raw.indexOf(raw.slice(p, q), q);
+        p = closeAt < 0 ? q - 1 : closeAt + (q - p) - 1;
+        continue;
+      }
+      if (ch === '[') depth++;
+      else if (ch === ']' && depth) depth--;
+      else if (ch === ']') {
+        hidden.push({ start: pos.start, end: pos.start + 1 }, { start: pos.start + p, end: pos.end });
+        return;
+      }
+    }
+  }
+
   var LEAF = { paragraph: 1, heading: 1, text: 1, html: 1 };
 
   function visit(tokens, regionStart, regionEnd, depth, inline) {
     if (!Array.isArray(tokens)) return;
-    var cursor = regionStart;
+    var cursor = regionStart, lastHtml = null;
     tokens.forEach(function (tok) {
       if (!tok || typeof tok !== 'object') return;
       var type = tok.type || '';
@@ -934,11 +963,23 @@ function collectMarkedRanges(src) {
         cursor = Math.max(cursor, pos.end);
         childStart = pos.start;
         childEnd = pos.end;
+        if (type === 'link') hideLinkSyntax(pos);
       }
       /* A leaf that cannot be located falls back to its container's range. A
          code span that cannot be located protects its whole container, so no
-         check ever reads (or a fix ever edits) code as if it were math. */
-      if (!inline && LEAF[type]) leaves.push({ start: childStart, end: childEnd, exact: !!pos });
+         check ever reads (or a fix ever edits) code as if it were math.
+         OpenReview shows an HTML block as plain text, Markdown escapes and
+         all, and consecutive ones end up in a single text node. */
+      if (!inline && LEAF[type]) {
+        if (type === 'html' && pos && lastHtml && !/\S/.test(src.slice(lastHtml.end, childStart))) {
+          lastHtml.end = childEnd;
+        } else {
+          var leaf = { start: childStart, end: childEnd, exact: !!pos, html: type === 'html' };
+          leaves.push(leaf);
+          if (type === 'html' && pos) lastHtml = leaf;
+        }
+      }
+      if (type !== 'html' && type !== 'space') lastHtml = null;
       if (!pos && type === 'codespan') unlocated.push({ start: regionStart, end: regionEnd });
       if (type === 'table') { if (pos) visitTable(tok, pos, depth); return; }
       if (Array.isArray(tok.tokens)) visit(tok.tokens, childStart, childEnd, depth + 1, inline || !!LEAF[type]);
@@ -947,7 +988,7 @@ function collectMarkedRanges(src) {
   }
 
   visit(root, 0, src.length, 0, false);
-  return { ranges: ranges, leaves: leaves, dropped: dropped, unlocated: unlocated };
+  return { ranges: ranges, leaves: leaves, dropped: dropped, unlocated: unlocated, hidden: hidden };
 }
 
 /* Fallback masking for when the CDN parser is unavailable. The live page uses
@@ -1055,7 +1096,11 @@ function buildRegions(src, leaves, codeMask) {
     for (var i = leaf.start; i <= leaf.end; i++) {
       var usable = i < leaf.end && !codeMask[i] && !taken[i];
       if (usable && runStart < 0) runStart = i;
-      if (!usable && runStart >= 0) { addRun(runStart, i, leaf); runStart = -1; }
+      if (!usable && runStart >= 0) {
+        /* HTML blocks shown as text keep their blank lines in one text node. */
+        if (leaf.html) add(runStart, i, leaf); else addRun(runStart, i, leaf);
+        runStart = -1;
+      }
     }
     for (var j = leaf.start; j < leaf.end; j++) taken[j] = 1;
   });
@@ -1064,20 +1109,58 @@ function buildRegions(src, leaves, codeMask) {
   return regions;
 }
 
+/* Character references that Marked passes through and the browser decodes.
+   Names are limited to the characters that matter to MathJax's search plus
+   the common ones; any other reference stays as typed, which moves no
+   delimiter. Returns the decoded text and the reference's length. */
+var NAMED_REFS = {
+  dollar: '$', bsol: '\\', lbrace: '{', lcub: '{', rbrace: '}', rcub: '}', lpar: '(', rpar: ')',
+  lsqb: '[', lbrack: '[', rsqb: ']', rbrack: ']', verbar: '|', vert: '|', num: '#', percnt: '%',
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: '\'', nbsp: ' '
+};
+function charRef(src, i) {
+  var m = /^&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z][A-Za-z0-9]*));/.exec(src.slice(i, i + 40));
+  if (!m) return null;
+  if (m[3]) {
+    return Object.prototype.hasOwnProperty.call(NAMED_REFS, m[3]) ? { text: NAMED_REFS[m[3]], len: m[0].length } : null;
+  }
+  var cp = m[1] ? parseInt(m[1], 10) : parseInt(m[2], 16);
+  if (cp === 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;
+  var text = cp > 0xFFFF
+    ? String.fromCharCode(0xD800 + ((cp - 0x10000) >> 10), 0xDC00 + ((cp - 0x10000) & 0x3FF))
+    : String.fromCharCode(cp);
+  return { text: text, len: m[0].length };
+}
+
 /* The text MathJax receives for src[a, b): Markdown turns each "\\" into one
    backslash, drops the backslash of "\X" before ASCII punctuation X, and turns
    a final odd backslash before a newline into <br>, which MathJax reads back
-   as a plain newline (br is one of its includeHtmlTags). For every character
-   MathJax sees, from/to give its source extent and at the source character. */
-function mathJaxView(src, a, b) {
+   as a plain newline (br is one of its includeHtmlTags); the browser then
+   decodes character references. An HTML block (`literal`) is shown as typed.
+   For every character MathJax sees, from/to give its source extent and at the
+   source character. */
+function mathJaxView(src, a, b, literal) {
   var text = '', from = [], to = [], at = [];
   function put(ch, s, e, p) { text += ch; from.push(s); to.push(e); at.push(p); }
+  /* In an HTML block a line-start ">" is text, unless the block sits in a quote. */
+  var lineStart = a;
+  while (lineStart > 0 && src[lineStart - 1] !== '\n') lineStart--;
+  var stripQuotes = !literal || /^[ \t]*>/.test(src.slice(lineStart, a));
   for (var i = a; i < b;) {
-    if (i > a && src[i - 1] === '\n') {
+    if (i > a && src[i - 1] === '\n' && stripQuotes) {
       /* Continuation lines lose their container prefix ("> " in a quote). */
       var q = i;
       while (q < b && /[ \t]/.test(src[q])) q++;
       if (src[q] === '>') { while (q < b && /[ \t>]/.test(src[q])) q++; i = q; continue; }
+    }
+    if (literal) { put(src[i], i, i + 1, i); i++; continue; }
+    if (src[i] === '&') {
+      var ref = charRef(src, i);
+      if (ref && i + ref.len <= b) {
+        for (var u = 0; u < ref.text.length; u++) put(ref.text.charAt(u), i, i + ref.len, i);
+        i += ref.len;
+        continue;
+      }
     }
     if (src[i] === ' ') {
       var sp = i;
@@ -1221,7 +1304,8 @@ function scanMath(src, regions, codeMask) {
   }
 
   regions.forEach(function (rg) {
-    var v = mathJaxView(src, rg.start, rg.end);
+    var literal = !!(rg.leaf && rg.leaf.html);
+    var v = mathJaxView(src, rg.start, rg.end, literal);
     var r = mjFind(v.text);
     if (rg.dropped) r.found = []; /* MathJax never sees a dropped table cell */
     r.found.forEach(function (f) {
@@ -1234,13 +1318,13 @@ function scanMath(src, regions, codeMask) {
         display: f.display, kind: f.kind, env: f.env, delimiter: DELIM_KIND[f.kind],
         openAt: v.at[f.open], closeAt: v.at[f.close],
         recovered: f.braces, why: f.braces ? 'braces' : '',
-        tex: v.text.slice(a, b), refs: refsIn(v, a, b)
+        tex: v.text.slice(a, b), refs: refsIn(v, a, b), literal: literal
       };
       if (whole) { sp.innerStart = sp.start; sp.innerEnd = sp.end; }
       spans.push(sp);
     });
     r.lone.forEach(function (l) {
-      lone.push({ start: v.from[l.at], end: v.to[l.at + l.len - 1], at: v.at[l.at], kind: l.kind, env: l.env, region: rg });
+      lone.push({ start: v.from[l.at], end: v.to[l.at + l.len - 1], at: v.at[l.at], kind: l.kind, env: l.env, region: rg, literal: literal });
     });
   });
 
@@ -1272,7 +1356,7 @@ function scanMath(src, regions, codeMask) {
         var sp = {
           start: top.start, end: it.end, innerStart: top.end, innerEnd: it.start,
           display: !!DISPLAY_KIND[top.kind], kind: top.kind, env: top.env, delimiter: DELIM_KIND[top.kind],
-          openAt: top.at, closeAt: it.at, recovered: true, why: why
+          openAt: top.at, closeAt: it.at, recovered: true, why: why, literal: top.literal || it.literal
         };
         if (top.kind === 'env') { sp.innerStart = sp.start; sp.innerEnd = sp.end; }
         spans.push(sp);
@@ -1397,7 +1481,8 @@ function analyze(src) {
   function literalDollar(p) {
     var n = countBackslashesBefore(src, p), m = n;
     while (Math.floor(m / 2) % 2 !== 1) m++;
-    return edit(p - n, p + 1, bs(m) + '$');
+    var ref = src[p] === '$' ? null : charRef(src, p); /* "&#36;" is replaced whole */
+    return edit(p - n, ref ? p + ref.len : p + 1, bs(m) + '$');
   }
 
   var model = collectMarkedRanges(src);
@@ -1406,7 +1491,8 @@ function analyze(src) {
     ? mergeSimpleRanges(markedRanges.filter(function (r) { return r.type === 'code' || r.type === 'codespan'; })
       .concat(model.unlocated))
     : fallbackCodeRanges(src);
-  var codeMask = makeMask(src.length, codeRanges);
+  /* What MathJax never searches: code, and link syntax that is not text. */
+  var codeMask = makeMask(src.length, codeRanges.concat(model ? model.hidden : []));
   var regions = buildRegions(src, model ? model.leaves : fallbackLeaves(src), codeMask);
   var scan = scanMath(src, regions, codeMask);
   var spans = scan.spans;
@@ -1441,14 +1527,15 @@ function analyze(src) {
         u.start, u.end);
       return;
     }
+    /* In an HTML block shown as text there are no Markdown escapes to fix. */
     var slashRun = countBackslashesBefore(src, u.at);
-    if (u.kind === '$' && slashRun % 4 === 1) {
+    if (u.kind === '$' && !u.literal && slashRun % 4 === 1) {
       push('err', '\\$ is not protected after Markdown',
         'Markdown consumes the final source backslash, leaving an even number before <code>$</code>; MathJax therefore still sees a delimiter. For a literal currency sign type <code>\\\\$</code>.',
         u.at - slashRun, u.at + 1,
         fix('\\\\$', [literalDollar(u.at)]));
     } else {
-      var currency = u.kind === '$' && /^[-+−]?\d/.test(src.slice(u.at + 1, u.at + 3));
+      var currency = u.kind === '$' && !u.literal && /^[-+−]?\d/.test(src.slice(u.at + 1, u.at + 3));
       push('warn', u.kind === '$$' ? 'Unpaired $$' : 'Unpaired $',
         'MathJax finds no partner for this delimiter in its paragraph, so for now it shows as literal text — but any later <code>' + u.kind + '</code> in the same paragraph would pair with it and turn the prose in between into math. ' +
         (currency ? 'For a literal dollar sign type <code>\\\\$</code>.' : 'Add the missing closing delimiter, or type <code>\\\\$</code> for a literal dollar sign.'),
@@ -1458,7 +1545,7 @@ function analyze(src) {
   });
 
   spans.forEach(function (sp) {
-    if (sp.delimiter !== 'dollar' || sp.display) return;
+    if (sp.delimiter !== 'dollar' || sp.display || sp.literal) return;
     [sp.openAt, sp.closeAt].forEach(function (at) {
       var slashRun = countBackslashesBefore(src, at);
       if (slashRun % 4 === 1) {
@@ -1497,6 +1584,8 @@ function analyze(src) {
         if (rg.cell || prev.cell || coded || (blanks && (!display || blanks > 3))) stack = [];
       }
       prev = rg;
+      /* An HTML block is shown as typed: its \( and \[ reach MathJax intact. */
+      if (rg.leaf && rg.leaf.html) { stack = []; return; }
       for (var i = rg.start; i < rg.end; i++) {
         if (mathMask[i] || src[i] !== '\\') continue;
         var j = i;
@@ -1529,7 +1618,8 @@ function analyze(src) {
   spans.forEach(function (sp) {
     var inner = src.slice(sp.innerStart, sp.innerEnd);
 
-    for (var i = sp.innerStart; i < sp.innerEnd;) {
+    /* (An HTML block shown as text keeps its backslashes: nothing to check.) */
+    for (var i = sp.innerStart; !sp.literal && i < sp.innerEnd;) {
       if (src[i] !== '\\' || codeMask[i]) { i++; continue; }
       var j = i;
       while (j < sp.innerEnd && src[j] === '\\') j++;
@@ -1602,7 +1692,7 @@ function analyze(src) {
         sp.start, sp.start + (sp.kind === 'env' ? 6 : sp.kind.length));
     }
 
-    if (sp.delimiter === 'dollar' && !sp.display && !sp.recovered && looksLikeCurrencyPair(inner, src[sp.end])) {
+    if (sp.delimiter === 'dollar' && !sp.display && !sp.recovered && !sp.literal && looksLikeCurrencyPair(inner, src[sp.end])) {
       /* In "costs $5 and $$x$$" MathJax closes on the first half of the $$, and
          in "costs $5 per run, and $x$ is" on the opening sign of a formula.
          Escaping only the currency sign gives that formula back. The closing

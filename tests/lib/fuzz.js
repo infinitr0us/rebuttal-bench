@@ -8,14 +8,15 @@ const { renderLikeOpenReview } = require('./pipeline');
 const { loadAnalyzer } = require('./page');
 
 const ALPHABETS = {
-  // escapes, delimiters, environments, paragraphs, hard breaks, headings, code spans
+  // escapes, delimiters, environments, references, character references,
+  // paragraphs, hard breaks, headings, code spans
   inline: ['$', '$', '$$', '\\', '\\', '\\\\', '{', '}', '(', ')', '[', ']', 'a', 'b', 'x1', ' ', ' ', '\n',
     '\n\n', '\\begin{m}', '\\end{m}', '\\(', '\\)', '\\[', '\\]', '|', '- ', '# ', '`c`', '> ', '  \n', '&', '\\{', '\\}',
-    '\\ref{a}', '\\eqref{', '\\end{'],
-  // tables, nested lists, block quotes, indented code
+    '\\ref{a}', '\\eqref{', '\\end{', '&#36;', '&#92;', '&dollar;'],
+  // tables, nested lists, block quotes, indented code, HTML blocks
   blocks: ['$', '$', '$$', '\\', '\\\\', '{', '}', 'a', 'x', ' ', '\n', '| ', ' |', '|', '\n| --- | --- |\n',
     '\n\n| h | k |\n| - | - |\n', '\n- ', '\n  - ', '\n1. ', '\n    ', '\n> ', '\n\n', '\\|', '\\(', '\\)',
-    '\\\\(', '\\\\)', '`q`', '\\begin{m}', '\\end{m}'],
+    '\\\\(', '\\\\)', '`q`', '\\begin{m}', '\\end{m}', '\n<div>'],
 };
 
 // Inline Markdown elements (emphasis, links) split MathJax's strings for reasons

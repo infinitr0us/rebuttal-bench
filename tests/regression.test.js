@@ -46,6 +46,9 @@ const CASES = {
   'block quote shield inside math': { src: '$a\n\\> b$', issues: [], fixed: null },
   'text accents typed correctly': { src: 'By $\\text{Schr\\\\"{o}dinger}$ and $\\text{Schrödinger}$.', issues: [], fixed: null },
   'intraword emphasis': { src: 'Our pre*training* stage.', issues: [], fixed: null },
+  'character reference closing a formula': { src: 'So $5&#36; here.', issues: [], fixed: null },
+  'dollar in a link destination': { src: 'See [the log](https://example.com/run?id=$5) and $y$ here.', issues: [], fixed: null },
+  'TeX inside HTML blocks, shown as text': { src: '<div>$x\\,y$</div>\n\n<!-- TODO $\\{x\\}$ -->', issues: [], fixed: null },
   'references to a tagged equation': { src: '$$x=1\\tag{1}\\label{eq:bound}$$\n\nSee \\eqref{eq:bound} and $\\ref{eq:bound}$.', issues: [], fixed: null },
   'numbers with a unit inside math': {
     src: 'Latency is $50 ms$, memory $16 GB$, over $100 epochs$ and $3 seeds$, a $2 times$ speedup, and $2 xy$.',
@@ -69,6 +72,11 @@ const CASES = {
     src: 'Each run costs $2 on average; we define $\\alpha$ as the rate.',
     issues: ['Currency dollars pair into a formula', 'Unpaired $'],
     fixed: ['I:\\alpha'],
+  },
+  'a price typed as a character reference, then a formula': {
+    src: 'It costs &#36;5 per run, and $x$ is the input.',
+    issues: ['Currency dollars pair into a formula', 'Unpaired $'],
+    fixed: ['I:x'],
   },
   'negative amounts in two table cells': { src: '| A | B |\n| - | - |\n| $-5 | $-10 |', issues: ['Unpaired $', 'Unpaired $'], fixed: [] },
   'digit-leading formula cut by inline code': { src: 'So $2 + `x`$ here.', issues: ['Inline code interrupts this formula'], fixed: null },
