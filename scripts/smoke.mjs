@@ -161,6 +161,56 @@ try {
     themeBtn.click();
     return dark;`);
 
+  await check('a labelled equation re-renders without a duplicate-label error', `
+    setSourceText('\\\\begin{equation} a = b \\\\label{eq:main} \\\\end{equation}', 0); updateAll(); renderPreview(); await wait(2000);
+    setSourceText('\\\\begin{equation} a = b + c \\\\label{eq:main} \\\\end{equation}', 0); updateAll(); renderPreview(); await wait(2000);
+    return mjStatus.textContent === 'MathJax ready' || mjStatus.textContent;`);
+
+  await check('deleted macro definitions are forgotten', `
+    setSourceText('$\\\\newcommand{\\\\RBa}{x}\\\\RBa$ $\\\\DeclareMathOperator{\\\\RBb}{b}\\\\RBb$', 0); updateAll(); renderPreview(); await wait(2000);
+    const defined = mjStatus.textContent === 'MathJax ready';
+    setSourceText('$\\\\RBa$ $\\\\RBb$', 0); updateAll(); renderPreview(); await wait(2000);
+    return defined && /2 undefined macros/.test(mjStatus.textContent) || { defined, status: mjStatus.textContent };`);
+
+  await check('allowed images keep their alt and title text as upstream', `
+    setSourceText('![A &amp; B](/images/x.png "C &amp; D")', 0); updateAll(); renderPreview(); await wait(500);
+    const img = document.querySelector('#preview img');
+    return img && img.alt === 'A & B' && img.title === 'C & D' || (img ? { alt: img.alt, title: img.title } : 'no img');`);
+
+  await check('Load example is undoable', `
+    window.confirm = () => true;
+    setSourceText('My draft $x$.', 0); await wait(100);
+    document.getElementById('exampleBtn').click(); await wait(300);
+    const loaded = ta.value === EXAMPLE;
+    ta.focus(); document.execCommand('undo'); await wait(300);
+    return loaded && ta.value === 'My draft $x$.' || { loaded, chars: ta.value.length };`);
+
+  await check('a one-click fix is refused once the draft has moved on', `
+    setSourceText('Set $\\\\{x\\\\}$ here.', 0); updateAll(); await wait(100);
+    const btn = document.querySelector('#lintList .fixbtn');
+    setSourceText('Set \`\\\\{x\\\\}\` here.', 0); /* before the 220 ms refresh */
+    btn.click(); await wait(100);
+    return ta.value === 'Set \`\\\\{x\\\\}\` here.' || ta.value;`);
+
+  // Last, as it applies to every later navigation: an asynchronous store like
+  // a hosted artifact's window.storage (answers after 50 ms, kept in
+  // localStorage under its own prefix so that it survives reloads).
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: `
+    const later = (f) => new Promise((r) => setTimeout(() => r(f()), 50));
+    window.storage = {
+      get: (k) => later(() => { const v = localStorage.getItem('stub:' + k); return v === null ? null : { value: v }; }),
+      set: (k, v) => later(() => { localStorage.setItem('stub:' + k, v); }),
+      delete: (k) => later(() => { localStorage.removeItem('stub:' + k); }),
+    };` }, sessionId);
+  await load();
+  await check('with an asynchronous store, the autosave reaches it', `
+    setSourceText('Old $x$.', 0); ta.dispatchEvent(new Event('input')); await wait(1200);
+    return localStorage.getItem('stub:rebuttal-bench-draft') === 'Old $x$.' || localStorage.getItem('stub:rebuttal-bench-draft');`);
+  await inPage(`setSourceText('New $y$.', 0); ta.dispatchEvent(new Event('input')); return true;`);
+  await load(); /* reload before the 700 ms autosave can reach the store */
+  await check('text typed just before a reload wins over the older stored draft', `
+    return ta.value === 'New $y$.' || ta.value.slice(0, 80);`);
+
   results.push([errors.length === 0, 'no uncaught page errors', errors.join(' | ')]);
 } catch (e) {
   results.push([false, 'smoke run', e.message]);

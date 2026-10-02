@@ -1940,9 +1940,11 @@ function setupOpenReviewMarked() {
       text = oldText || '';
     }
     if (href.indexOf('/images/') === 0) {
-      var titleAttr = title ? ' title="' + escAttr(title) + '"' : '';
-      var classAttr = /_icon\.svg$/.test(href) ? ' class="icon"' : '';
-      return '<img src="' + escAttr(href) + '" alt="' + escAttr(text) + '"' + titleAttr + classAttr + '>';
+      /* As upstream: Marked's raw strings go into the attributes unescaped (so
+         "&amp;" in the source shows as "&"), and DOMPurify sanitizes after. */
+      var titleAttr = title ? 'title="' + title + '" ' : '';
+      var classAttr = /_icon\.svg$/.test(href) ? 'class="icon" ' : '';
+      return '<img src="' + href + '" alt="' + text + '" ' + titleAttr + classAttr + '/>';
     }
     return escHtml('<img src="' + href + '" alt="' + text + '" title="' + title + '">');
   };
@@ -2060,9 +2062,12 @@ function storeSet(key, val) {
   }
   return Promise.resolve(localOk);
 }
-function storeDel(key) {
+function fallbackDel(key) {
   delete memStore[key];
   if (canLocalStore) { try { localStorage.removeItem(key); } catch (e) {} }
+}
+function storeDel(key) {
+  fallbackDel(key);
   if (canArtifactStore) return window.storage.delete(key, false).catch(function () {});
   return Promise.resolve();
 }
@@ -2092,14 +2097,39 @@ function savePrefs() {
 }
 
 /* ---- draft autosave ---- */
+/* Drafts go to localStorage at once and to the asynchronous store (when the
+   page runs where there is one) in the background. pagehide cannot wait for
+   the latter, so the last keystrokes are flushed locally and marked as the
+   newer copy, which then wins at the next start. */
+var DRAFT_PENDING_KEY = 'rebuttal-bench-draft-pending';
+var remoteDraft = null;  /* the draft the asynchronous store last confirmed */
 var draftTimer = null;
+function storeDraft(value) {
+  var localOk = fallbackSet(DRAFT_KEY, value);
+  if (!canArtifactStore) return Promise.resolve(localOk);
+  return window.storage.set(DRAFT_KEY, value, false).then(function () {
+    remoteDraft = value;
+    if (fallbackGet(DRAFT_KEY) === value) fallbackDel(DRAFT_PENDING_KEY);
+    return true;
+  }).catch(function () { return localOk; });
+}
+function loadDraft() {
+  var local = fallbackGet(DRAFT_KEY);
+  if (canArtifactStore && fallbackGet(DRAFT_PENDING_KEY) === '1' && typeof local === 'string') {
+    return Promise.resolve({ value: local, pending: true });
+  }
+  return storeGet(DRAFT_KEY).then(function (value) {
+    if (canArtifactStore && typeof value === 'string') remoteDraft = value;
+    return { value: value, pending: false };
+  });
+}
 function saveDraftSoon() {
   saveStateEl.textContent = 'Saving\u2026';
   clearTimeout(draftTimer);
   draftTimer = setTimeout(saveDraftNow, 700);
 }
 function saveDraftNow() {
-  storeSet(DRAFT_KEY, ta.value).then(function (persisted) {
+  storeDraft(ta.value).then(function (persisted) {
     saveStateEl.textContent = persisted ? 'Draft saved' : 'Draft in memory only';
   });
 }
@@ -2176,6 +2206,26 @@ function clearOldMath() {
   }
 }
 
+/* MathJax keeps \label keys and \newcommand definitions from one typeset to
+   the next, but OpenReview renders a comment once. Without a reset, every
+   labelled equation turns into "Label multiply defined" after the first
+   keystroke, and a deleted macro definition keeps working in the preview. */
+function resetTeXState() {
+  try { if (typeof MathJax.texReset === 'function') MathJax.texReset(); } catch (e) {}
+  try {
+    /* \newcommand, \def, \newenvironment and \DeclareMathOperator store their
+       definitions in these maps of the TeX input jax's own configuration. */
+    MathJax.startup.document.inputJax.forEach(function (jax) {
+      var handlers = jax.parseOptions && jax.parseOptions.handlers;
+      if (!handlers || typeof handlers.retrieve !== 'function') return;
+      ['new-Command', 'new-Environment', 'new-Delimiter', 'ams-declare-ops'].forEach(function (name) {
+        var m = handlers.retrieve(name);
+        if (m && m.map && typeof m.map.clear === 'function') m.map.clear();
+      });
+    });
+  } catch (e) {}
+}
+
 function renderPreview() {
   if (renderBusy) { renderQueued = true; return; }
   renderBusy = true;
@@ -2207,6 +2257,7 @@ function renderPreview() {
   }
 
   if (window.MJ_READY && window.MathJax && typeof MathJax.typesetPromise === 'function') {
+    resetTeXState();
     MathJax.typesetPromise([preview]).then(function () {
       var p = texProblems();
       var parts = [];
@@ -2436,7 +2487,10 @@ function schedule() {
 
 ta.addEventListener('input', function () { userEdited = true; saveDraftSoon(); schedule(); });
 /* beforeunload is not delivered reliably (mobile, bfcache); pagehide is. */
-function flushDraft() { fallbackSet(DRAFT_KEY, ta.value); }
+function flushDraft() {
+  fallbackSet(DRAFT_KEY, ta.value);
+  if (canArtifactStore && ta.value !== remoteDraft) fallbackSet(DRAFT_PENDING_KEY, '1');
+}
 window.addEventListener('beforeunload', flushDraft);
 window.addEventListener('pagehide', flushDraft);
 limitInput.addEventListener('input', function () {
@@ -2505,7 +2559,7 @@ document.getElementById('exampleBtn').addEventListener('click', function () {
 document.getElementById('clearBtn').addEventListener('click', function () {
   if (ta.value && !window.confirm('Clear the editor and its local autosave? (' + UNDO_HINT + ' in the editor brings it back.)')) return;
   setSourceText('', 0);
-  storeSet(DRAFT_KEY, '').then(function (persisted) {
+  storeDraft('').then(function (persisted) {
     saveStateEl.textContent = persisted ? 'Blank draft saved' : 'Blank draft in memory only';
   });
   updateAll();
@@ -2539,13 +2593,14 @@ storeGet(PREFS_KEY).then(function (v) {
     } catch (e) {}
   }
   applyPrefs();
-  return storeGet(DRAFT_KEY);
+  return loadDraft();
 }).then(function (draft) {
   if (userEdited) {
     /* The user started typing before storage answered; keep their text. */
-  } else if (typeof draft === 'string') {
-    ta.value = draft;
-    saveStateEl.textContent = draft ? 'Draft restored' : 'Blank draft restored';
+  } else if (typeof draft.value === 'string') {
+    ta.value = draft.value;
+    saveStateEl.textContent = draft.value ? 'Draft restored' : 'Blank draft restored';
+    if (draft.pending) saveDraftNow(); /* bring the asynchronous store up to date */
   } else {
     ta.value = EXAMPLE;
   }
