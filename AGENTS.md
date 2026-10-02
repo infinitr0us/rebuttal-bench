@@ -31,14 +31,19 @@ User-facing documentation is in `README.md`; history of changes in `CHANGELOG.md
 ## The analyzer's model
 
 - `collectMarkedRanges` locates Marked tokens in the source (with a prefix-tolerant fallback for
-  list/quote content) and records *leaf blocks*, including GFM table cells split the way Marked
-  splits them.
-- `buildRegions` — the strings MathJax searches: leaf blocks minus code, split at blank lines.
-- `mathJaxView` — the text MathJax receives from a region after Markdown's escape handling,
-  with a source position for every character.
+  list/quote content, and `\|`-tolerant matching inside table cells, where GFM unescapes the
+  pipe first) and records *leaf blocks*, including GFM table cells split the way Marked splits
+  them. It also records link syntax that is not text (brackets, destinations), which is masked
+  like code. A code span it cannot locate masks its whole container.
+- `buildRegions` — the strings MathJax searches: leaf blocks minus code, split at blank lines
+  (except HTML blocks, which OpenReview shows as one run of text).
+- `mathJaxView` — the text MathJax receives from a region after Markdown's escape handling and
+  the browser's decoding of character references (an HTML block: as typed), with a source
+  position for every character.
 - `mjFind` / `mjFindEnd` — a **faithful port of MathJax 3.2.2 FindTeX** (`$$` before `$` at the
   same position, closers only at brace depth 0, `\X` skipped as a unit, processEscapes,
-  processEnvironments). Do not "improve" it; it must behave exactly like MathJax.
+  processEnvironments, processRefs). Do not "improve" it; it must behave exactly like MathJax.
+  Diagnostics (stray closers, stray `\end`) must not change where the scan resumes.
   `npm run fuzz` must report 0 mismatches after any change here or in the view.
 - `scanMath` — real spans (what MathJax typesets) plus *recovered* spans: leftover delimiters
   paired across a boundary purely to explain breakage (`why`: blank, block, table, code,
@@ -61,14 +66,18 @@ User-facing documentation is in `README.md`; history of changes in `CHANGELOG.md
 `upstream/openreview-web.json`. When it reports a change: update the page **and**
 `tests/lib/pipeline.js` (the independent reference implementation), bump CDN URLs and
 `devDependencies` together, run `npm test`, then `npm run check-upstream -- --update`.
+Exit codes: 0 nothing changed, 1 something changed, 2 the check itself failed (network, rate
+limit, a moved file or marker, an unreadable snapshot; it never overwrites one without `--update`).
 
 ## Browser behavior
 
 `npm test` runs in Node and cannot see the DOM section. After touching it, run
 `npm run smoke`: it drives the installed Chrome/Edge headlessly (DevTools protocol, no
-dependencies) and checks Fix all + single-step undo, undoable *Clear*, the status bar's TeX-error
-and undefined-macro counts, jumping to a hazard on a long soft-wrapped line, draft persistence
-across a reload, the theme toggle, and that no page errors were thrown. Add a check there for any
-new browser-only behavior.
+dependencies) and checks Fix all + single-step undo, undoable *Clear* and *Load example*, the
+status bar's TeX-error and undefined-macro counts, a fresh TeX state per preview (no duplicate
+`\label` errors, deleted `\newcommand`s forgotten), jumping to a hazard on a long soft-wrapped
+line, refusing a stale one-click fix, draft persistence across a reload (also with a stubbed
+asynchronous `window.storage`), `/images/` attributes, the theme toggle, and that no page errors
+were thrown. Add a check there for any new browser-only behavior.
 
 Still by eye: zoom and editor-size controls, dark-mode colors, the layout below 920 px width.

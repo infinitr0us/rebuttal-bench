@@ -1,5 +1,55 @@
 # Changelog
 
+## Unreleased
+
+From a review of 3.0.0 on 2026-10-01 (Claude and Codex, each finding reproduced against the real
+pipeline).
+
+### Fix all no longer damages correct text
+- A number followed by a word inside math (`$16 GB$`, `$100 epochs$`, `$2 xy$`) was taken for
+  prose between two prices and turned into literal text.
+- In "It costs $5 per run, and $x$ is the input." both dollar signs were escaped and `$x$` was
+  lost with them; only the currency sign is escaped now.
+- Negative amounts in two table cells (`| $-5 | $-10 |`) were paired across the `|` and the
+  cells merged.
+- Escaped brackets in prose (`\[A\]`, `\[k=5\]`, `\[+2.1\]`) became display math. Brackets are
+  rewritten only around unmistakable TeX; `\(a\)` (one letter) gets a warning only.
+- An indented command with a Windows path (`C:\data`) counted as TeX and was unindented.
+- `\>` at the start of a line inside math, where it keeps `>` from starting a block quote, was
+  doubled into a TeX space.
+- Deliberate intraword emphasis (`pre*training*`) lost its asterisks.
+- A code span in a table cell that uses `\|` was edited as if it were math.
+
+### The analyzer models OpenReview more closely
+- In a table cell that uses `\|`, emphasis splitting a formula went unreported (Marked unescapes
+  the pipe before lexing the cell, so its tokens were not found in the source).
+- `\ref{…}` and `\eqref{…}` outside math are typeset by MathJax (processRefs, on by default);
+  a stray `\end{…}` no longer hides a formula inside its braces.
+- Character references (`&#36;`), link syntax (only a link's label is text) and HTML blocks
+  (shown as typed, adjacent ones in one text node) are modeled.
+
+### Checks
+- New: a `\ref`/`\eqref` without a `\label` in a tagged formula of the same comment, which
+  OpenReview shows as `(???)` (typically copied from the paper).
+- New: text accents `\"` `\'` `` \` `` `\^` `\=` `\.` inside `\text{…}` whose backslash Markdown
+  removes.
+- Every unpaired delimiter is reported (only the first 12 were).
+
+### Page
+- Each preview starts from a fresh TeX state: no false "Label multiply defined" from the second
+  render on, and deleted `\newcommand` / `\def` / `\newenvironment` / `\DeclareMathOperator`
+  definitions are forgotten, as on a freshly loaded OpenReview page.
+- With an asynchronous store (`window.storage`), text typed just before closing the page now wins
+  over the older stored draft.
+- Images under `/images/` get their alt and title text exactly as upstream builds them.
+
+### Project
+- `npm run check-upstream` validates the snapshot before going online, never replaces an
+  unreadable one without `--update`, exits 2 when the check itself fails, and shows duplicated
+  lines in its diff; its helpers have offline tests.
+- More regression cases (each with a nearby correct input), fuzz atoms for references,
+  character references and HTML blocks, and six new smoke checks.
+
 ## 3.0.0 — 2026-09-22
 
 A full review of v2, checked against openreview-web@45c27aa and against the real Marked 15.0.6 /
