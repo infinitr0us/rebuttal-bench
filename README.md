@@ -66,12 +66,12 @@ leave the browser: they autosave on this device only.
 | Stage | OpenReview (openreview-web) | This page |
 | --- | --- | --- |
 | Markdown | Marked 15.0.6, GFM, custom renderer in `client/view.js` (`setupMarked`): raw HTML shown as text, images only from `/images/`, task checkboxes as `[x]` | same |
-| Sanitizing | DOMPurify 3.4.13, tag allowlist from `lib/utils.js`, hook in `app/AppInit.js` | same |
+| Sanitizing | DOMPurify 3.4.17, tag allowlist from `lib/utils.js`, hook in `app/AppInit.js` | same |
 | Math | MathJax 3.2.2 `tex-chtml-full`, `$…$`/`\(…\)` inline, `$$…$$`/`\[…\]` display, bare `\begin{…}` environments and `\ref`/`\eqref` (`lib/mathjax-config.js` + MathJax defaults; equations are not numbered) | same; each preview starts from a fresh TeX state, as a posted comment does |
 | Styles | `.note-content-value.markdown-rendered`: Noto Sans 12px/18px (`styles/utils/_mixins.scss`) | same; 100 % zoom is 1:1 |
 
 Line *wrapping* still depends on the reader's window width and reply depth. The table was
-verified against openreview-web at commit `45c27aa` (2026-09-22); `npm run check-upstream`
+verified against openreview-web at commit `be86e65` (2026-11-20); `npm run check-upstream`
 reports when any of those sources change.
 
 ## How the hazard analyzer works
