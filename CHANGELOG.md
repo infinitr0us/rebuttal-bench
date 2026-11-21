@@ -26,7 +26,7 @@
   into that other draft.
 
 ### Project
-- `tests/history.test.js` and fourteen smoke checks. Four Codex reviews (`reviews/2026-11-21`).
+- `tests/history.test.js` and fourteen smoke checks. Five Codex reviews (`reviews/2026-11-21`).
 
 ## 3.4.0 (2026-11-21)
 

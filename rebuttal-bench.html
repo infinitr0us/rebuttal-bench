@@ -4836,6 +4836,8 @@ var draftTexts = {};       /* id -> text of the drafts not in the editor */
 var savedText = '';        /* what this window last saved or loaded for the open draft: the editor
                               differs from it only after a real edit, which alone is written back */
 var remoteDrafts = {};     /* key -> the value the asynchronous store last confirmed */
+var readCache = {};        /* key -> a text read from the store that did not fit in localStorage
+                              (memory holds it: a read, not a refused edit) */
 var remoteQueue = {};      /* key -> writes waiting for the asynchronous store */
 var draftReady = false;    /* the open draft has been restored */
 var draftTimer = null;
@@ -4918,6 +4920,7 @@ function confirmRemote(key, value) {
 
 function storeDraft(value, key) {
   key = key || draftKey;
+  delete readCache[key];
   var localOk = fallbackSet(key, value);
   if (!canArtifactStore) return Promise.resolve(localOk);
   var sent = remoteWrite(key, value);
@@ -4968,6 +4971,7 @@ function retryLocalWrites() {
 /* For when the asynchronous store may not get the text in time (leaving the
    page, switching drafts): keep it locally and mark it pending. */
 function flushDraftLocally(value, key) {
+  delete readCache[key];
   fallbackSet(key, value);
   if (canArtifactStore && value !== remoteDrafts[key]) markPending(key);
 }
@@ -4993,7 +4997,11 @@ function loadDraft(key) {
     if (pending) fallbackDel(pendingKey(key)); /* saved elsewhere since: that copy is newer */
     remoteDrafts[key] = remote;
     if (remote === null) return { value: local, pending: typeof local === 'string', failed: false };
-    if (remote !== local) fallbackSet(key, remote); /* opening a draft reads the local copy */
+    if (remote !== local) {
+      fallbackSet(key, remote); /* opening a draft reads the local copy */
+      /* Not cached for lack of space: memory holds a read, not an edit. */
+      if (memNewer[key]) readCache[key] = remote; else delete readCache[key];
+    }
     return { value: remote, pending: false, failed: false };
   });
 }
@@ -5511,6 +5519,7 @@ function openDraft(id) {
   /* Dialogs work on the draft being left: History's versions, Split's parts,
      the table about to be inserted. */
   if (historyDialog && !historyDialog.hidden) closeHistory();
+  restoreSeq++; /* a restore still checking the store belongs to the draft left */
   if (splitDialog && !splitDialog.hidden) closeSplit();
   if (tableDialog && tableDialog.open) tableDialog.close();
   if (tableOffer) { pastedTable = null; tableOffer.hidden = true; } /* an offer to convert a paste into the draft left */
@@ -5802,6 +5811,8 @@ function draftWritesWaiting() {
   return Object.keys(memNewer).some(function (k) { return k.indexOf(DRAFT_KEY) === 0; });
 }
 function retryHistory() {
+  if (!Object.keys(historyUnsaved).length) return;
+  pruneHistory(); /* never write back the versions of a draft deleted elsewhere */
   Object.keys(historyUnsaved).forEach(function (id) { writeHistory(id, readHistory(id)); });
 }
 /* Keep `text` (the editor's by default) as the open draft's newest version. */
@@ -5812,9 +5823,9 @@ function keepVersion(why, text, hold) {
   if (!draftReady) return;
   var id = draftMeta.active, list = readHistory(id);
   var next = historyAdd(list, typeof text === 'string' ? text : ta.value, why, Date.now());
-  if (next === list) return;
-  writeHistory(id, next);
-  if (hold) historyUnsaved[id] = mergeHistory(historyUnsaved[id] || [], next);
+  if (next !== list) writeHistory(id, next);
+  /* Held even when the newest version already is this text. */
+  if (hold && next.length) historyUnsaved[id] = mergeHistory(historyUnsaved[id] || [], next);
 }
 function keepVersionWhileEditing(text) {
   var id = draftMeta.active;
@@ -5875,11 +5886,15 @@ function knownDraftText(id) {
   /* A text this window read or saved is known, even while an older read of
      it is still outstanding. */
   if (id === draftMeta.active) {
-    if (ta.readOnly) return null;
-    /* An edit since the last save. (A refused write alone is no edit: it can
-       be a newer text read from the store that did not fit here, which
-       fallbackGet below returns.) */
+    var key = keyOfDraft(id);
+    /* Reopened while its text is read again: what this window knew. */
+    if (ta.readOnly) return bodyKnown[id] && typeof local === 'string' ? local : null;
+    /* An edit since the last save. */
     if (ta.value !== savedText) return ta.value;
+    /* Memory holds what did not fit in localStorage: a newer text read from
+       the store counts; an edit refused for space, perhaps undone since,
+       does not, the editor does. */
+    if (memNewer[key] && local !== readCache[key]) local = ta.value;
     if (bodyKnown[id]) return typeof local === 'string' ? local : ta.value === EXAMPLE ? '' : ta.value;
     return state !== 'loading' && typeof local === 'string' ? local : null;
   }
@@ -5960,6 +5975,7 @@ function closeHistory() {
 
 /* A restore is one more edit: one undo brings the text back, and the text
    it replaces is kept as a version first. */
+var restoreSeq = 0; /* each restore, and each draft switch, gets a new number */
 function restoreVersion(v) {
   if (!v || !draftReady || ta.readOnly) return;
   var id = draftMeta.active, key = draftKey;
@@ -5975,24 +5991,36 @@ function restoreVersion(v) {
     showToast('This draft has not loaded completely, so nothing was restored. Open it again, or reload the page.');
     return;
   }
+  /* The restore belongs to the text at the click: an edit, another restore
+     or a switch before it applies drops it. */
+  var token = ++restoreSeq, before = ta.value;
   function newerElsewhere(value) {
     return typeof value === 'string' && value !== ta.value && value !== savedText;
   }
+  /* What localStorage holds, and what memory holds in front of it (a newer
+     text read from the store that did not fit, which the editor never
+     showed). */
+  function unseen() {
+    return newerElsewhere(storedValue(key)) || newerElsewhere(fallbackGet(key));
+  }
   function refuse() {
     showToast(ta.value !== savedText || memNewer[key]
-      ? 'Another window or device saved a newer version of this draft, and this window holds text it has not saved. Copy this text first (' + (UNDO_HINT === '⌘Z' ? '⌘A, ⌘C' : 'Ctrl+A, Ctrl+C') + '), then reload the page to see the newer version.'
-      : 'Another window or device saved a newer version of this draft since this one loaded it. Reload the page to see it, then restore.');
+      ? 'Nothing was restored: another window or device saved a newer version of this draft, and this window holds text it could not save. Copy that text somewhere safe before you close or reload this window, which may write it over the newer version.'
+      : 'Nothing was restored: another window or device saved a newer version of this draft since this one loaded it. Reload the page to see it, then restore.');
   }
   function apply() {
-    if (!draftReady || ta.readOnly || draftMeta.active !== id) return; /* the page moved on meanwhile */
-    if (newerElsewhere(storedValue(key))) { refuse(); return; }
+    if (!draftReady || ta.readOnly || draftMeta.active !== id || token !== restoreSeq || ta.value !== before) {
+      showToast('Nothing was restored: the draft changed while it was being checked.');
+      return;
+    }
+    if (unseen()) { refuse(); return; }
     keepVersion('before a restore', undefined, true);
     setSourceText(v.text, 0);
     ta.scrollTop = 0;
     afterSourceChange();
     showToast('Restored the version of ' + versionTime(v.at) + '. ' + UNDO_HINT + ' undoes it.');
   }
-  if (newerElsewhere(storedValue(key))) { refuse(); return; }
+  if (unseen()) { refuse(); return; }
   if (!canArtifactStore) { apply(); return; }
   remoteRead(key).then(function (r) {
     if (!r.ok) { showToast('Storage did not answer, so nothing was restored. Try again.'); return; }
