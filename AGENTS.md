@@ -143,8 +143,13 @@ cases, Chrome probes); keep their rules:
   (`failed`). Deletions are remembered (`<key>:deleting`) until the store confirms them and are
   retried at the next start (`retryDeletes`).
 - **Only a real edit is written.** `savedText` is what this window last saved or loaded for the open
-  draft; switching away, leaving the page and the autosave write only when the editor differs from
-  it. The built-in example counts as saved. Opening a draft reads the local copy, which every window
+  draft (it advances only once a local write succeeded); switching away, leaving the page, the
+  autosave and Clear write only when the editor differs from it, so an undone edit or a Clear on a
+  blank draft cannot put a stale copy over a newer one. The built-in example counts as saved. A
+  local write refused for lack of space is retried on switching, deleting and leaving
+  (`retryLocalWrites`); a remote write is marked pending as soon as it is queued. Delete asks
+  whenever the editor or the stored copy holds text, and every control that changes the text needs
+  a writable editor (not a draft still loading). Opening a draft reads the local copy, which every window
   of the browser keeps current; a draft whose text has not been read yet (or could not be) is read
   first, with the editor locked (`bodyState`, `startBodyLoad`, `unlockDraft`, at most 8 s).
 - **Startup.** Nothing is typed, saved or flushed before the open draft is restored (`draftReady`):
@@ -159,7 +164,10 @@ cases, Chrome probes); keep their rules:
   would let Ctrl+Z pour one draft's edits into another. Therefore **attach editor listeners with
   `onEditor(type, fn)`**, never `ta.addEventListener`, and read `ta` at call time.
 - Known limits: two windows typing in *the same* draft at the same time still means the last save
-  wins; a draft deleted in one window comes back if another window has it open.
+  wins; a draft deleted in one window comes back if another window has it open; with the
+  asynchronous store, a list write that stalls while another device adds a draft can drop that
+  entry until the other device's next save or start restores it (the text itself is kept; without
+  store revisions this lost update cannot be excluded).
 
 ## Splitting
 
