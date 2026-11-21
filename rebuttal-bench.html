@@ -533,6 +533,14 @@ window.MathJax = {
   .trick .name { flex: 1; }
   .trick .gain { font-family: var(--mono); font-size: 11.5px; color: var(--ok); white-space: nowrap; }
   .trick .gain.off, .trick .gain.none { color: var(--dim); }
+  .trick-group {
+    margin: 8px 0 2px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
   .compact-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
   #compactFoot { font-size: 11.5px; color: var(--dim); }
 
@@ -759,7 +767,7 @@ window.MathJax = {
     <details class="compact" id="compactBox">
       <summary>Compaction <span id="compactSum" class="compact-sum zero"></span></summary>
       <div class="compact-body">
-        <p class="compact-note">Shorter source, the same rendering on OpenReview: every change is checked against the rendered comment and dropped if anything would differ. <b>Copy compact</b> copies the short form; the editor keeps your text.</p>
+        <p class="compact-note">Shorter source, the same rendering on OpenReview: every change is checked against the rendered comment and dropped if anything would differ (the last group excepted, and off until you switch it on). <b>Copy compact</b> copies the short form; the editor keeps your text.</p>
         <div id="compactList"></div>
         <div class="compact-actions">
           <button type="button" id="applyCompactBtn" title="Replace the editor text with the compact form (one undo brings it back)">Apply to source</button>
@@ -2029,18 +2037,25 @@ function compactContext(text) {
     if (r.type === 'code' || (r.type === 'html' && !r.inline)) block.push(r);
     else if (r.type === 'codespan' || r.type === 'html') inline.push(r);
   });
-  var mathMask = null;
+  var res = null, mathMask = null;
+  function analysis() { return res || (res = analyze(text)); }
   return {
     model: model,
     blockMask: makeMask(text.length, block),
     inlineMask: makeMask(text.length, block.concat(inline, model.hidden)),
+    analysis: analysis,
     /* Formulas, including the ones MathJax will not typeset: whitespace inside
        \text{...} is visible, so the whitespace tricks stay out of all of them. */
     mathMask: function () {
-      if (!mathMask) mathMask = makeMask(text.length, analyze(text).spans);
+      if (!mathMask) mathMask = makeMask(text.length, analysis().spans);
       return mathMask;
     }
   };
+}
+
+/* Text as DOMPurify serializes it in the sanitized HTML. */
+function htmlText(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/ /g, '&nbsp;');
 }
 
 /* Marked keeps a paragraph's soft-wrap indentation and single trailing spaces
@@ -2340,6 +2355,42 @@ function findEntities(text, ctx) {
   return edits;
 }
 
+/* Inline formulas that are a single symbol, by the TeX MathJax receives. The
+   character costs 1 instead of 5 to 12, but comes from the note's font rather
+   than MathJax's: a small visible change. Letters are left out on purpose
+   ($\alpha$ is italic in MathJax, upright as a character). */
+var COMPACT_SYMBOLS = (function () {
+  var map = {};
+  ('pm:b1 mp:2213 times:d7 div:f7 cdot:b7 uparrow:2191 downarrow:2193 Uparrow:21d1 Downarrow:21d3 ' +
+   'rightarrow:2192 to:2192 leftarrow:2190 gets:2190 leftrightarrow:2194 Rightarrow:21d2 Leftarrow:21d0 ' +
+   'Leftrightarrow:21d4 approx:2248 sim:223c simeq:2243 leq:2264 le:2264 geq:2265 ge:2265 neq:2260 ne:2260 ' +
+   'll:226a gg:226b infty:221e checkmark:2713 dagger:2020 ddagger:2021 star:22c6 bullet:2022 ' +
+   'nabla:2207 partial:2202 in:2208 propto:221d emptyset:2205 varnothing:2205 forall:2200 exists:2203 ' +
+   'neg:ac wedge:2227 vee:2228 cap:2229 cup:222a subset:2282 subseteq:2286 ldots:2026 dots:2026 cdots:22ef').split(' ').forEach(function (p) {
+    var kv = p.split(':');
+    map['\\' + kv[0]] = String.fromCharCode(parseInt(kv[1], 16));
+  });
+  map['^\\circ'] = map['^{\\circ}'] = '°';
+  return map;
+})();
+
+function findSymbols(text, ctx) {
+  var edits = [];
+  ctx.analysis().spans.forEach(function (sp) {
+    if (sp.recovered || sp.literal || sp.display || (sp.kind !== '$' && sp.kind !== '\\(')) return;
+    var tex = sp.tex.replace(/^\s+|\s+$/g, ''), ch = COMPACT_SYMBOLS.hasOwnProperty(tex) ? COMPACT_SYMBOLS[tex] : null;
+    var pct = /^(\d+(?:\.\d+)?)\s*\\%$/.exec(tex);
+    if (pct) ch = pct[1] + '%';
+    if (!ch || maskHits(ctx.blockMask, sp.start, sp.end)) return;
+    var e = compactEdit(text, sp.start, sp.end, ch), dollar = sp.kind === '$';
+    /* What the page shows for the formula before MathJax runs: Markdown has
+       already taken a backslash from "$95\\%$" and from "\\(". */
+    e.shown = (dollar ? '$' : '\\(') + sp.tex + (dollar ? '$' : '\\)');
+    edits.push(e);
+  });
+  return edits;
+}
+
 /* In application order. `on` is the default; table edge pipes are off by
    default because a table without them reads worse as plain text (the
    notification e-mail, a co-author's copy) for 2 characters a row. */
@@ -2361,7 +2412,11 @@ var COMPACT_TRICKS = [
   { id: 'tables', on: true, find: findTablePadding, label: 'Table padding and delimiter rows',
     hint: '| A | B | and | --- | :---: | become |A|B| and |-|:-:|' },
   { id: 'tableEdges', on: false, find: findTableEdges, label: 'Outer table pipes',
-    hint: '|A|B| becomes A|B where Markdown allows it; harder to read as plain text' }
+    hint: '|A|B| becomes A|B where Markdown allows it; harder to read as plain text' },
+  /* Changes the rendering slightly, so it is off until the author turns it on,
+     and it has its own check (see compactText). */
+  { id: 'symbols', on: false, look: true, find: findSymbols, label: 'One-symbol formulas as characters',
+    hint: '$\\pm$ becomes ±, $\\uparrow$ ↑, $95\\\\%$ 95%: the symbol is then set in the text font instead of MathJax\'s' }
 ];
 
 function compactDefaults() {
@@ -2386,11 +2441,23 @@ function issueCounts(issues) {
    the result, so the caller can show what it would add. `complete` is false
    when the check budget ran out; the text is then still safe, only less short. */
 function compactText(text, enabled, render, maxChecks) {
-  var base;
-  try { base = render(text); } catch (e) { return null; }
-  var baseRes = analyze(text), baseIssues = issueCounts(baseRes.issues);
-  var baseWs = collapseWhitespace(base), baseMath = mathSignature(baseRes);
   var checks = 0, budget = maxChecks || 400;
+  var PH_OPEN = String.fromCharCode(0xe000), PH_CLOSE = String.fromCharCode(0xe001);
+
+  /* What the text as it stands renders to. Each trick is checked against the
+     text it starts from, so the guarantee carries over from trick to trick. */
+  function reference(t) {
+    var html = render(t), res = analyze(t);
+    return { text: t, html: html, ws: collapseWhitespace(html), res: res, math: mathSignature(res) };
+  }
+  var ref;
+  try { ref = reference(text); } catch (e) { return null; }
+  var baseIssues = issueCounts(ref.res.issues);
+
+  function noNewIssues(res) {
+    var now = issueCounts(res.issues);
+    return Object.keys(now).every(function (k) { return now[k] <= (baseIssues[k] || 0); });
+  }
 
   /* `ws`: compare with collapsible whitespace collapsed, and require every
      formula (MathJax's input) to stay byte for byte the same. */
@@ -2399,63 +2466,98 @@ function compactText(text, enabled, render, maxChecks) {
     checks++;
     try {
       var html = render(candidate);
-      if (ws ? collapseWhitespace(html) !== baseWs : html !== base) return false;
-      var res = analyze(candidate), now = issueCounts(res.issues);
-      if (ws && mathSignature(res) !== baseMath) return false;
-      return Object.keys(now).every(function (k) { return now[k] <= (baseIssues[k] || 0); });
+      if (ws ? collapseWhitespace(html) !== ref.ws : html !== ref.html) return false;
+      var res = analyze(candidate);
+      if (ws && mathSignature(res) !== ref.math) return false;
+      return noNewIssues(res);
+    } catch (e) { return false; }
+  }
+
+  /* A trick that changes the look (`look`: a formula becomes a character)
+     cannot be checked against the old rendering. Instead, put a neutral
+     placeholder where each replaced formula was: the formula must render
+     exactly as that placeholder does, and so must its replacement. Then the
+     new HTML is the old one with that text swapped and nothing else moved, and
+     the analyzer must see every other formula unchanged. */
+  function sameButSwapped(edits) {
+    if (checks >= budget) return false;
+    checks++;
+    try {
+      var marks = edits.map(function (e, i) {
+        return { start: e.start, end: e.end, text: PH_OPEN + i + PH_CLOSE, was: e.was };
+      });
+      var held = render(applyEditsToText(ref.text, marks)), back = held, fwd = held;
+      edits.forEach(function (e, i) {
+        back = back.split(marks[i].text).join(htmlText(e.shown || e.was));
+        fwd = fwd.split(marks[i].text).join(htmlText(e.text));
+      });
+      var candidate = applyEditsToText(ref.text, edits);
+      if (back !== ref.html || fwd !== render(candidate)) return false;
+      var gone = {};
+      edits.forEach(function (e) { gone[e.start] = true; });
+      var res = analyze(candidate);
+      var left = { spans: ref.res.spans.filter(function (sp) { return !gone[sp.start]; }) };
+      return mathSignature(res) === mathSignature(left) && noNewIssues(res);
     } catch (e) { return false; }
   }
 
   /* Try a whole batch at once (the usual case: every edit is fine); when the
      batch fails, split it until the edits that change the rendering are found. */
-  function keep(cur, kept, cands, ws) {
+  function keep(ok, kept, cands) {
     if (!cands.length) return kept;
     var all = kept.concat(cands);
-    if (sameRendering(applyEditsToText(cur, all), ws)) return all;
+    if (ok(all)) return all;
     if (cands.length === 1) return kept;
     var mid = cands.length >> 1;
-    return keep(cur, keep(cur, kept, cands.slice(0, mid), ws), cands.slice(mid), ws);
+    return keep(ok, keep(ok, kept, cands.slice(0, mid)), cands.slice(mid));
   }
 
-  function run(cur, trick) {
-    var ctx = compactContext(cur);
-    if (!ctx) return { text: cur, count: 0, kept: 0 };
+  function run(trick) {
+    var cur = ref.text, ctx = compactContext(cur);
+    if (!ctx || (trick.look && (cur.indexOf(PH_OPEN) !== -1 || cur.indexOf(PH_CLOSE) !== -1))) {
+      return { text: cur, count: 0, kept: 0 };
+    }
     var cands = [], taken = [];
     trick.find(cur, ctx).forEach(function (e) {
       if (e.text === e.was || editsOverlap([e], taken)) return;
       taken.push(e);
       cands.push(e);
     });
-    var edits = keep(cur, [], cands, !!trick.ws);
+    var edits = keep(trick.look
+      ? sameButSwapped
+      : function (es) { return sameRendering(applyEditsToText(cur, es), !!trick.ws); }, [], cands);
     return { text: applyEditsToText(cur, edits), count: edits.length, kept: cands.length - edits.length };
   }
 
-  var cur = text, stats = {};
+  var stats = {};
   COMPACT_TRICKS.forEach(function (t) { stats[t.id] = { id: t.id, on: !!enabled[t.id], count: 0, kept: 0, saved: 0 }; });
   /* A second pass catches what one trick uncovers for an earlier one (a
      decoded entity in a table cell, a quote marker inside a table row). */
   for (var pass = 0; pass < 2; pass++) {
-    var before = cur;
+    var before = ref.text;
     COMPACT_TRICKS.forEach(function (t) {
       if (!enabled[t.id]) return;
-      var r = run(cur, t), s = stats[t.id];
+      var r = run(t), s = stats[t.id];
       s.count += r.count;
       s.kept = r.kept;
-      s.saved += cur.trim().length - r.text.trim().length;
-      cur = r.text;
+      s.saved += ref.text.trim().length - r.text.trim().length;
+      if (r.text !== ref.text) {
+        try { ref = reference(r.text); } catch (e) { /* render() worked a moment ago */ }
+      }
     });
-    if (cur === before) break;
+    if (ref.text === before) break;
   }
+  var result = ref.text;
   COMPACT_TRICKS.forEach(function (t) {
     if (enabled[t.id]) return;
-    var r = run(cur, t), s = stats[t.id];
+    var r = run(t), s = stats[t.id];
     s.count = r.count;
     s.kept = r.kept;
-    s.saved = cur.trim().length - r.text.trim().length;
+    s.saved = result.trim().length - r.text.trim().length;
   });
   return {
-    text: cur,
-    saved: text.trim().length - cur.trim().length,
+    text: result,
+    saved: text.trim().length - result.trim().length,
     tricks: COMPACT_TRICKS.map(function (t) { return stats[t.id]; }),
     complete: checks < budget
   };
@@ -2933,7 +3035,14 @@ function updateAll() {
 /* ---- compaction: applied on copy, the editor keeps the readable text ---- */
 
 /* One row per trick, built once so a focused checkbox survives updates. */
-COMPACT_TRICKS.forEach(function (t) {
+COMPACT_TRICKS.forEach(function (t, i) {
+  if (t.look && !(i && COMPACT_TRICKS[i - 1].look)) {
+    var head = document.createElement('div');
+    head.className = 'trick-group';
+    head.textContent = 'Changes the look slightly';
+    head.title = 'Not the same rendering: switch on only what you are happy to see change';
+    compactList.appendChild(head);
+  }
   var row = document.createElement('label');
   row.className = 'trick';
   row.innerHTML = '<input type="checkbox" data-trick="' + t.id + '"><span class="name">' + escHtml(t.label) +

@@ -75,6 +75,34 @@ for (const [name, src, want, ws] of CASES) {
   });
 }
 
+test('compact: tricks after a whitespace trick still apply', () => {
+  // Each trick is checked against the text it starts from, not the original.
+  const src = 'First line\n    of text.\n\n| a | b |\n| --- | --- |\n| 1 | 2 |';
+  const r = compact(src);
+  assert.equal(r.text, 'First line\nof text.\n\n|a|b|\n|-|-|\n|1|2|');
+  assert.ok(sameOnScreen(r.text, src));
+});
+
+const SYMBOLS = { ...DEFAULTS, symbols: true };
+test('compact: one-symbol formulas become characters only when switched on', () => {
+  const src = '| Method | AUROC $\\uparrow$ |\n| --- | --- |\n| A | 88.2 $\\pm$ 0.6 |\n\n' +
+    'At 90$^\\circ$ and $95\\\\%$ of runs, $a\\to b$ holds.';
+  assert.equal(compact(src).text.includes('$\\pm$'), true);
+  const r = compact(src, SYMBOLS);
+  assert.equal(r.text, '|Method|AUROC ↑|\n|-|-|\n|A|88.2 ± 0.6|\n\nAt 90° and 95% of runs, $a\\to b$ holds.');
+  // The HTML is the old one with exactly those formulas swapped for characters.
+  const want = renderHtml(compact(src).text).replace('$\\uparrow$', '↑').replace('$\\pm$', '±')
+    .replace('$^\\circ$', '°').replace('$95\\%$', '95%');
+  assert.equal(renderHtml(r.text), want);
+  assert.deepEqual(typeset(r.text), ['I:a\\to b']);
+  assert.equal([...r.tricks].find((t) => t.id === 'symbols').count, 4);
+});
+
+test('compact: formulas that are not one known symbol stay formulas', () => {
+  const src = 'Keep $\\pm x$, $\\alpha$, `$\\pm$` and\n\n$$\\pm$$\n\n<div>$\\pm$</div>';
+  assert.equal(compact(src, SYMBOLS).text, src);
+});
+
 test('compact: edits that would change the rendering are counted as kept', () => {
   const r = compact('See <https://example.org/a.> and [https://example.org](https://example.org)x.');
   const links = [...r.tricks].find((t) => t.id === 'links');
