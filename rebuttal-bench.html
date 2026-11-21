@@ -749,6 +749,7 @@ window.MathJax = {
 <div class="statsbar">
   <span class="charchip" id="charChip" title="Counted like OpenReview’s own counter: length after trimming leading/trailing whitespace"><span class="fill" id="charFill"></span><span class="txt" id="charStat">0 / 5,000 characters</span></span>
   <span id="compactStat" hidden title="What OpenReview counts for the text Copy compact puts on the clipboard: the same rendering, fewer characters"></span>
+  <span id="selStat" hidden title="Characters in the editor's selection, counted as OpenReview counts (UTF-16 units)"></span>
   <span id="wordStat">0 words</span>
   <span id="mathStat">0 math spans</span>
   <span id="hazStat" class="good">0 hazards</span>
@@ -2934,6 +2935,7 @@ var compactSum = document.getElementById('compactSum');
 var compactList = document.getElementById('compactList');
 var compactFoot = document.getElementById('compactFoot');
 var applyCompactBtn = document.getElementById('applyCompactBtn');
+var selStat = document.getElementById('selStat');
 
 /* ---- persistence: artifact storage -> localStorage -> memory ---- */
 var canArtifactStore = !!(window.storage && typeof window.storage.get === 'function' && typeof window.storage.set === 'function' && typeof window.storage.delete === 'function');
@@ -3464,11 +3466,29 @@ function applyAllFixes() {
   setSourceText(text, Math.min(caret, text.length));
   afterSourceChange();
 
-  var left = currentIssues.length;
+  /* Fixes add backslashes, so near the limit a pass can push the draft over
+     it; say what it cost. */
+  var left = currentIssues.length, grew = text.trim().length - startText.trim().length;
+  var limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
+  var nowOver = limit > 0 && text.trim().length > limit && startText.trim().length <= limit;
   showToast('Applied ' + applied + ' fix' + (applied === 1 ? '' : 'es') +
+    (grew ? ' (' + (grew > 0 ? '+' : '−') + fmt(Math.abs(grew)) + ' character' + (Math.abs(grew) === 1 ? '' : 's') + ')' : '') +
     (left ? ' — ' + left + ' hazard' + (left === 1 ? '' : 's') + ' still need you' : ' — no hazards left') +
-    '. ' + UNDO_HINT + ' undoes the pass.');
+    '. ' + (nowOver ? 'The draft is now ' + fmt(text.trim().length - limit) + ' over the limit. ' : '') +
+    UNDO_HINT + ' undoes the pass.');
 }
+
+/* The length of the selection, so "how much does this table cost?" has an
+   answer. Chrome fires selectionchange on the textarea, others on document. */
+function updateSelection() {
+  var n = document.activeElement === ta ? Math.abs(ta.selectionEnd - ta.selectionStart) : 0;
+  selStat.hidden = n === 0;
+  selStat.textContent = fmt(n) + ' selected';
+}
+['select', 'selectionchange', 'keyup', 'mouseup', 'input', 'blur'].forEach(function (ev) {
+  ta.addEventListener(ev, updateSelection);
+});
+document.addEventListener('selectionchange', function () { if (document.activeElement === ta) updateSelection(); });
 
 function jumpToIssue(iss) {
   if (ta.value !== analyzedText) {

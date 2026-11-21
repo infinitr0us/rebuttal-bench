@@ -209,6 +209,18 @@ try {
     btn.click();
     return ta.value === 'Set $a\\\\\\\\,b$. **ours**' && currentIssues.length === 0 || ta.value;`);
 
+  await check('Fix all says how many characters it added', `
+    setSourceText('Set $a\\\\,b$ and $c\\\\,d$.', 0); updateAll();
+    fixAllBtn.click(); await wait(100);
+    return /^Applied 2 fixes \\(\\+2 characters\\)/.test(toast.textContent) || toast.textContent;`);
+
+  await check('the status bar shows the length of the selection', `
+    setSourceText('abcdefgh', 0); updateAll();
+    ta.focus(); ta.setSelectionRange(2, 7); ta.dispatchEvent(new Event('select')); await wait(50);
+    const shown = !selStat.hidden && selStat.textContent === '5 selected';
+    ta.setSelectionRange(3, 3); ta.dispatchEvent(new Event('select')); await wait(50);
+    return shown && selStat.hidden || { shown, text: selStat.textContent, hidden: selStat.hidden };`);
+
   // Compaction runs 300 ms after the last change.
   await check('Copy compact copies a shorter text that renders the same and leaves the editor alone', `
     const src = '| Method | Acc |\\n| --- | --- |\\n| A | 1 |';
