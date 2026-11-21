@@ -282,6 +282,78 @@ try {
     box.click(); await wait(500);
     return off && prefs.compact.tables === true || { off, now: prefs.compact.tables };`);
 
+  // Draft ids other than d1 are random: other() finds the second draft.
+  const other = `const other = () => draftMeta.list.find((d) => d.id !== 'd1').id;`;
+  await check('a new draft starts empty, and each draft keeps its own text', `${other}
+    setSourceText('First draft $x$.', 0); ta.dispatchEvent(new Event('input')); await wait(50);
+    document.querySelector('#draftTools .dadd').click(); await wait(50);
+    const fresh = ta.value === '' && draftMeta.list.length === 2 && draftMeta.active === other();
+    setSourceText('Second draft $y$.', 0); ta.dispatchEvent(new Event('input')); await wait(50);
+    document.querySelector('#draftTabs .dtab[data-id="d1"]').click(); await wait(50);
+    const counts = [...document.querySelectorAll('#draftTabs .dcount')].map((e) => e.textContent).join(',');
+    return fresh && ta.value === 'First draft $x$.' && counts === '16,17' || { fresh, value: ta.value, counts };`);
+
+  await check('undo after switching drafts cannot bring the other draft in', `
+    ta.focus(); document.execCommand('undo'); await wait(50); document.execCommand('undo'); await wait(50);
+    return ta.value === 'First draft $x$.' || ta.value;`);
+
+  await load();
+  await check('the drafts and the open one survive a reload', `${other}
+    return draftMeta.list.length === 2 && draftMeta.active === 'd1' && ta.value === 'First draft $x$.' &&
+      draftText(other()) === 'Second draft $y$.' || { meta: draftMeta, value: ta.value };`);
+
+  await check('the tabs work from the keyboard', `${other}
+    window.prompt = () => 'Keyboard name';
+    const first = document.querySelector('#draftTabs .dtab[aria-selected="true"]');
+    first.focus();
+    first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    const moved = document.activeElement && document.activeElement.getAttribute('data-id') === other() && draftMeta.active === 'd1';
+    document.activeElement.click(); await wait(50);
+    const opened = draftMeta.active === other() && document.activeElement &&
+      document.activeElement.getAttribute('data-id') === other();
+    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }));
+    const renamed = draftById(other()).name === 'Keyboard name';
+    return moved && opened && renamed || { moved, opened, renamed, focus: document.activeElement && document.activeElement.outerHTML.slice(0, 80) };`);
+
+  await check('a draft only looked at is not written back over a newer copy', `${other}
+    const id = other(), key = 'rebuttal-bench-draft-' + id;
+    switchDraft('d1'); await wait(50);
+    localStorage.setItem(key, 'Newer answer from another window.'); /* while this window was elsewhere */
+    switchDraft(id); await wait(50);
+    const shown = ta.value === 'Newer answer from another window.';
+    switchDraft('d1'); await wait(50);
+    return shown && localStorage.getItem(key) === 'Newer answer from another window.' ||
+      { shown, stored: localStorage.getItem(key) };`);
+
+  await check('a draft added in another window is listed here and keeps its text', `${other}
+    const meta = JSON.parse(localStorage.getItem('rebuttal-bench-drafts'));
+    meta.list.push({ id: 'dotherwin01', name: 'Other window', at: Date.now() });
+    localStorage.setItem('rebuttal-bench-draft-dotherwin01', 'Written in the other window.');
+    localStorage.setItem('rebuttal-bench-drafts', JSON.stringify(meta));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'rebuttal-bench-drafts', newValue: JSON.stringify(meta) }));
+    const listed = !!document.querySelector('#draftTabs .dtab[data-id="dotherwin01"]');
+    document.querySelector('#draftTools .dadd').click(); await wait(50);
+    const both = draftMeta.list.length === 4 && localStorage.getItem('rebuttal-bench-draft-dotherwin01') === 'Written in the other window.' &&
+      JSON.parse(localStorage.getItem('rebuttal-bench-drafts')).list.some((d) => d.id === 'dotherwin01');
+    return listed && both || { listed, both, meta: draftMeta };`);
+
+  await inPage(`localStorage.setItem('rebuttal-bench-draft-dorphan001', 'An answer whose tab was lost.'); return true;`);
+  await load();
+  await check('a draft body without a tab gets its tab back', `
+    const d = draftMeta.list.find((x) => x.id === 'dorphan001');
+    return d && d.name === 'Recovered draft' && draftText('dorphan001') === 'An answer whose tab was lost.' ||
+      draftMeta.list.map((x) => x.id + ':' + x.name).join(', ');`);
+
+  await check('drafts can be deleted, and their text goes with them', `
+    window.confirm = () => true;
+    const gone = draftMeta.list.map((d) => d.id).filter((id) => id !== 'd1');
+    gone.forEach(deleteDraft);
+    switchDraft('d1'); await wait(50);
+    return draftMeta.list.length === 1 && draftMeta.active === 'd1' && ta.value === 'First draft $x$.' &&
+      !document.querySelector('#draftTools .dclose') &&
+      gone.every((id) => localStorage.getItem('rebuttal-bench-draft-' + id) === null && draftMeta.gone[id]) ||
+      { meta: draftMeta, value: ta.value };`);
+
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).
@@ -318,6 +390,10 @@ try {
   await inPage(`localStorage.setItem('stub:delay', '3000'); return true;`);
   await send('Page.navigate', { url: PAGE }, sessionId);
   await sleep(600);
+  await check('nothing can be typed before the drafts are restored', `
+    for (let i = 0; i < 60 && typeof ta === 'undefined'; i++) await wait(50);
+    return ta.readOnly === true && !draftReady && /Loading/.test(ta.placeholder) ||
+      { readOnly: ta.readOnly, ready: draftReady, placeholder: ta.placeholder };`);
   await check('a switch flipped before the stored preferences arrive stays flipped', `
     for (let i = 0; i < 60 && typeof compactList === 'undefined'; i++) await wait(50);
     if (prefsRestored) return 'the stored preferences came back too soon to test this';
@@ -327,6 +403,16 @@ try {
       !compactList.querySelector('input[data-trick="tables"]').checked || { restored: prefsRestored, tables: prefs.compact.tables };`);
   await inPage(`localStorage.setItem('stub:delay', '50');
     compactList.querySelector('input[data-trick="tables"]').click(); await wait(300); return true;`);
+
+  await load();
+  await inPage(`document.querySelector('#draftTools .dadd').click(); await wait(50);
+    setSourceText('Typed in a second draft $z$.', 0); ta.dispatchEvent(new Event('input')); return draftMeta.active;`);
+  await load(); /* before the 700 ms autosave reaches the store */
+  await check('with an asynchronous store, text typed in a second draft just before a reload is kept', `
+    const ok = draftMeta.list.length === 2 && ta.value === 'Typed in a second draft $z$.' && draftText('d1') === 'Theirs $b$.' && !ta.readOnly;
+    window.confirm = () => true;
+    document.querySelector('#draftTools .dclose').click(); await wait(300);
+    return ok && draftMeta.list.length === 1 || { meta: draftMeta, value: ta.value, d1: draftTexts.d1 };`);
 
   results.push([errors.length === 0, 'no uncaught page errors', errors.join(' | ')]);
 } catch (e) {

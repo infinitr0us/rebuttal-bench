@@ -99,6 +99,63 @@ caller passes `render` (the page: `renderOpenReviewMarkdown`; the tests: `render
   will reject anyway (each rejection costs renders; the budget is 400 checks).
 - Add cases to `tests/compact.test.js` in both directions, as for fixes.
 
+## Drafts and storage
+
+Several windows of the page, several devices sharing an asynchronous store, a slow or failing store
+and a reload at any moment must never lose or mix up a draft. Two Codex reviews probed this
+(`reviews/2026-11-21/codex-review-drafts`, `codex-recheck-drafts`: 17 storage scenarios, 32 edge
+cases, Chrome probes); keep their rules:
+
+- **Keys.** Each draft's text has its own key: the first draft (`d1`) keeps `rebuttal-bench-draft`,
+  the key every older version used, so existing drafts carry over; the others use
+  `rebuttal-bench-draft-<id>` with a **random id** (`newDraftId`). `rebuttal-bench-drafts` holds the
+  list `{active, list: [{id, name, at}], gone, saved}`: `at` is when an entry was created, renamed or
+  re-created, `gone` when a draft was deleted (a deletion wins over every entry not newer than it),
+  `saved` when this copy and its choice of open draft were saved.
+- **The list is merged, never overwritten** (`mergeDraftMeta`, pure, `tests/drafts.test.js`): with
+  the latest local copy before every write (`saveDraftMeta`, `deleteDraft`, which also refuses to
+  delete the last draft), with the store's copy during the write (`remoteWrite` with a merge
+  function: read, merge, write), with another window's copy on a `storage` event, and at boot. A
+  live window whose open draft was deleted elsewhere re-creates it with its text
+  (`adoptDraftMeta`); a cold boot applies deletions. At boot the open draft comes from the newer
+  copy (`saved`). `recoverDraftBodies` gives a tab back to any exactly keyed, nonempty local body
+  missing from the list, and to an answer an older version wrote under the first draft's key after
+  that draft was deleted.
+- **One autosave logic for every key**, the list included. Remote writes and deletions of a key go
+  one at a time, in order, latest value only (`remoteWrite`/`pumpRemote`). Whenever the store may
+  lack the latest value (leaving, switching, a failed or unfinished write) the local copy is marked
+  pending (`markPending`: the last confirmed base plus the values still on their way, so one of ours
+  landing after the page is gone is not taken for another device's edit). `loadDraft` decides when
+  the store answers, not when the read starts, and reports a read that failed with no local copy
+  (`failed`). Deletions are remembered (`<key>:deleting`) until the store confirms them and are
+  retried at the next start (`retryDeletes`).
+- **Only a real edit is written.** `savedText` is what this window last saved or loaded for the open
+  draft (it advances only once a local write succeeded); switching away, leaving the page, the
+  autosave and Clear write only when the editor differs from it, so an undone edit or a Clear on a
+  blank draft cannot put a stale copy over a newer one. The built-in example counts as saved. A
+  local write refused for lack of space is retried on switching, deleting and leaving
+  (`retryLocalWrites`); a remote write is marked pending as soon as it is queued. Delete asks
+  whenever the editor or the stored copy holds text, and every control that changes the text needs
+  a writable editor (not a draft still loading). Opening a draft reads the local copy, which every window
+  of the browser keeps current; a draft whose text has not been read yet (or could not be) is read
+  first, with the editor locked (`bodyState`, `startBodyLoad`, `unlockDraft`, at most 8 s).
+- **Startup.** Nothing is typed, saved or flushed before the open draft is restored (`draftReady`):
+  the editor is read-only, `setSourceText`, Clear, Load example, the input handler, the autosave and
+  `flushDraft` do nothing. Only the open draft is waited for; the others load in the background,
+  each bound to its own id. A store that never answers is given up after 8 s (this browser's copies
+  are used). Every call into the store is guarded against synchronous throws (`remoteRead`).
+- **localStorage**: readable is probed apart from writable (`canLocalRead`), and a key whose last
+  local write failed (quota) is read from memory until a write succeeds (`memNewer`).
+- A draft switch puts in a **fresh textarea** (`freshEditor`) inside the tab panel (`#draftPanel`):
+  Chrome replays its undo history into whatever the textarea holds, so a plain value assignment
+  would let Ctrl+Z pour one draft's edits into another. Therefore **attach editor listeners with
+  `onEditor(type, fn)`**, never `ta.addEventListener`, and read `ta` at call time.
+- Known limits: two windows typing in *the same* draft at the same time still means the last save
+  wins; a draft deleted in one window comes back if another window has it open; with the
+  asynchronous store, a list write that stalls while another device adds a draft can drop that
+  entry until the other device's next save or start restores it (the text itself is kept; without
+  store revisions this lost update cannot be excluded).
+
 ## Venue presets
 
 `VENUES` holds each venue's limit, link rule and official source, checked on `VENUES_CHECKED`.
@@ -120,7 +177,8 @@ limit, a moved file or marker, an unreadable snapshot; it never overwrites one w
 `npm run smoke`: it drives the installed Chrome/Edge headlessly (DevTools protocol, no
 dependencies) and checks Fix all + single-step undo, undoable *Clear* and *Load example*, the
 status bar's TeX-error and undefined-macro counts, a fresh TeX state per preview (no duplicate
-`\label` errors, deleted `\newcommand`s and `\definecolor`s forgotten), manual fixes outside Fix
+`\label` errors, deleted `\newcommand`s and `\definecolor`s forgotten), drafts (a fresh one, switching, undo isolation, rename and delete,
+across a reload and with a slow store), manual fixes outside Fix
 all, Fix all's added-character count, the selection count, venue presets, Copy compact and Apply to
 source (with undo), the compact chip state, compaction switches across a reload, jumping to a hazard on a
 long soft-wrapped line, refusing a stale one-click fix, draft persistence across a reload (also

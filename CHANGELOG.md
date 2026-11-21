@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Drafts
+- A tab per draft (an answer per reviewer, a general response, a follow-up), each with its length
+  against the limit; double-click to rename, × to delete. Each draft autosaves under its own key
+  with the same protection against a slow asynchronous store; existing drafts carry over as the
+  first tab. Switching drafts gives the editor a fresh undo history, so Ctrl+Z cannot carry text
+  from one draft into another. Several windows, several devices sharing an asynchronous store, a
+  slow or failing store or a reload at any moment cannot lose or mix up a draft (three Codex reviews
+  probed this with over 60 scenarios and Chrome checks): random draft ids, the list merged with every
+  other copy rather than overwritten, writes queued in order and marked pending until confirmed,
+  deletions retried until confirmed, only real edits written back, nothing typed before the open
+  draft is restored, and any draft body missing from the list given its tab back. The tabs work
+  from the keyboard (arrows, Enter, F2 to rename the focused tab).
+
 ## 3.2.0 (2026-11-21)
 
 From a brainstorm on 2026-11-21 (Claude, Codex and Fable) about per-comment character limits and
