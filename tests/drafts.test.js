@@ -81,8 +81,9 @@ test('only the newest deletions are remembered', () => {
 });
 
 test('new ids are random, valid, and new drafts get a free name', () => {
-  const ids = new Set(Array.from({ length: 500 }, () => A.newDraftId()));
-  assert.equal(ids.size, 500);
+  // Generated within the same millisecond or two: the random part alone must keep them apart.
+  const ids = new Set(Array.from({ length: 5000 }, () => A.newDraftId()));
+  assert.equal(ids.size, 5000);
   for (const id of ids) assert.match(id, A.DRAFT_ID);
   assert.equal(A.newDraftName([{ name: 'Draft 1' }]), 'Draft 2');
   assert.equal(A.newDraftName([{ name: 'Draft 1' }, { name: 'draft 3' }]), 'Draft 4');
