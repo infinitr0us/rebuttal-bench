@@ -249,6 +249,15 @@ window.MathJax = {
     font-size: 12.5px;
   }
   .controls input[type="checkbox"] { accent-color: var(--accent); }
+  .controls select {
+    max-width: 150px;
+    background: var(--btn-bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 5px 4px;
+    font-size: 12.5px;
+  }
 
   button {
     background: var(--btn-bg);
@@ -736,6 +745,7 @@ window.MathJax = {
       <span class="fs-val" id="fsPreviewVal">100%</span>
       <button type="button" data-fs="zoomPreview" data-dir="1" aria-label="Zoom preview in">+</button>
     </div>
+    <label>Venue <select id="venue" aria-label="Venue rules"><option value="">Custom</option></select></label>
     <label>Limit <input id="limit" type="number" value="5000" min="0" step="100" aria-label="Character limit"></label>
     <label><input type="checkbox" id="sync" checked> Sync scroll</label>
     <button id="themeBtn">Dark mode</button>
@@ -1522,7 +1532,54 @@ function texContextAt(src, a, i) {
   return { row: row, text: stack.indexOf('text') !== -1 };
 }
 
-function analyze(src) {
+/* Rebuttal rules of venues that run their discussion on OpenReview, from the
+   official pages on VENUES_CHECKED. `links`: 'none' (no links at all), 'anon'
+   (no non-anonymized, personal or shortened URLs), 'any' (nothing stated).
+   `limit: null` keeps whatever limit is set. Rules change every year, so each
+   preset names its source and the page shows when it was checked. */
+var VENUES_CHECKED = '2026-11-21';
+var VENUES = [
+  { id: 'neurips', name: 'NeurIPS', limit: 10000, links: 'none',
+    rule: '10,000 characters per review, no links; several comments may total more (2025 FAQ, 2026 handbook and July 2026 newsletter)',
+    source: 'https://neurips.cc/Conferences/2026/MainTrackHandbook' },
+  { id: 'icml', name: 'ICML', limit: 5000, links: 'anon',
+    rule: '5,000 characters per discussion round (rebuttal, reviewer follow-up, author follow-up); no non-anonymized, personal-website or shortened URLs (2026)',
+    source: 'https://icml.cc/Conferences/2026/ReviewerInstructions' },
+  { id: 'aaai', name: 'AAAI', limit: 2500, links: 'none',
+    rule: 'one rebuttal of 2,500 characters for all reviews; responses with URLs may be withheld; no new results (AAAI-26)',
+    source: 'https://aaai.org/conference/aaai/aaai-26/aaai-26-faq-for-authors-rebuttal/' },
+  { id: 'arr', name: 'ACL ARR (ACL, NAACL, EMNLP)', limit: 5000, links: 'none',
+    rule: 'one general response plus one per review, 5,000 characters each; text only, no external links (desk rejection)',
+    source: 'https://aclrollingreview.org/authors' },
+  { id: 'iclr', name: 'ICLR', limit: null, links: 'any',
+    rule: 'the author guide sets no limit: read it off the counter under the OpenReview comment box',
+    source: 'https://iclr.cc/Conferences/2027/AuthorGuidelines' }
+];
+
+function venueById(id) {
+  for (var i = 0; i < VENUES.length; i++) if (VENUES[i].id === id) return VENUES[i];
+  return null;
+}
+
+var LINK_SHORTENERS = /^(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|is\.gd|buff\.ly|rebrand\.ly|cutt\.ly|shorturl\.at|tiny\.cc|rb\.gy|s\.id)$/;
+
+function linkHost(href) {
+  var m = /^(?:[a-z][a-z0-9+.-]*:)?\/\/([^\/?#:@]+)/i.exec(href) || /^(www\.[^\/?#:]+)/i.exec(href);
+  return m ? m[1].toLowerCase().replace(/^www\./, '') : '';
+}
+
+/* Links that can name the authors in a double-blind discussion: a personal
+   repository or page, a shared drive, an e-mail address. Anonymous mirrors
+   (anonymous.4open.science) and OpenReview itself are fine. */
+function linkMayReveal(href, host) {
+  if (/^mailto:/i.test(href)) return true;
+  if (/(^|\.)github\.io$|(^|\.)dropbox\.com$|^(drive|docs|sites)\.google\.com$|^onedrive\.live\.com$/.test(host)) return true;
+  if (/^(github\.com|gitlab\.com|huggingface\.co|bitbucket\.org)$/.test(host)) return /^[^?#]*\/\/[^\/]+\/[^\/?#]+/.test(href);
+  return /\/~[A-Za-z]/.test(href);
+}
+
+/* `opts.venue`: the id of a VENUES preset, whose link rule then applies. */
+function analyze(src, opts) {
   var issues = [];
   var issueKeys = Object.create(null);
 
@@ -2185,6 +2242,35 @@ function analyze(src) {
     });
   }
   if (model) checkLiteralText();
+
+  /* 15. Links, under the chosen venue's rule. Rebuttals are double-blind
+         everywhere, so a link that may name the authors gets a note even
+         when no venue is chosen. */
+  var venue = opts && opts.venue ? venueById(opts.venue) : null;
+  markedRanges.forEach(function (r) {
+    if (r.type !== 'link' || !r.token || typeof r.token.href !== 'string') return;
+    var href = r.token.href, host = linkHost(href), raw = src.slice(r.start, r.end);
+    var own = href.charAt(0) === '/' || host === 'openreview.net';
+    if (venue && venue.links === 'none') {
+      /* A labelled link can keep its words; a bare URL is all link. */
+      var label = raw.charAt(0) === '[' && typeof r.token.text === 'string' &&
+        raw.indexOf('[' + r.token.text + ']') === 0 ? r.token.text : null;
+      push(own ? 'warn' : 'err', 'Links are not allowed at ' + venue.name.replace(/ \(.*\)$/, ''),
+        escHtml(venue.name) + ': ' + escHtml(venue.rule) + '.' +
+        (own ? ' A link to this OpenReview forum may be tolerated, but the rule makes no exception.' : ''),
+        r.start, r.end, label ? manual('keep the link text', r.start, r.end, label) : null);
+      return;
+    }
+    if (LINK_SHORTENERS.test(host)) {
+      push(venue && venue.links === 'anon' ? 'err' : 'warn', 'Shortened URL',
+        'A shortener hides where the link goes and can log who opens it. ICML forbids them in responses; give the full URL.',
+        r.start, r.end);
+    } else if (!own && linkMayReveal(href, host)) {
+      push(venue && venue.links === 'anon' ? 'warn' : 'note', 'This link may reveal who the authors are',
+        'Reviews are double-blind: a personal repository, page, shared drive or e-mail address can name you. Use an anonymized copy (for example anonymous.4open.science).',
+        r.start, r.end);
+    }
+  });
 
   issues.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
   return {
@@ -2936,6 +3022,13 @@ var compactList = document.getElementById('compactList');
 var compactFoot = document.getElementById('compactFoot');
 var applyCompactBtn = document.getElementById('applyCompactBtn');
 var selStat = document.getElementById('selStat');
+var venueSelect = document.getElementById('venue');
+VENUES.forEach(function (v) {
+  var opt = document.createElement('option');
+  opt.value = v.id;
+  opt.textContent = v.name;
+  venueSelect.appendChild(opt);
+});
 
 /* ---- persistence: artifact storage -> localStorage -> memory ---- */
 var canArtifactStore = !!(window.storage && typeof window.storage.get === 'function' && typeof window.storage.set === 'function' && typeof window.storage.delete === 'function');
@@ -2987,7 +3080,8 @@ var PREFS_KEY = 'rebuttal-bench-prefs';
 var DRAFT_KEY = 'rebuttal-bench-draft';
 var FS_RANGES = { fsEditor: [11, 20], zoomPreview: [70, 200] };
 var FS_STEPS = { fsEditor: 1, zoomPreview: 10 };
-var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, sync: true, compact: compactDefaults(), compactOpen: false };
+var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, sync: true, venue: '',
+  compact: compactDefaults(), compactOpen: false };
 
 function applyPrefs() {
   document.documentElement.setAttribute('data-theme', prefs.theme === 'dark' ? 'dark' : 'light');
@@ -2998,6 +3092,11 @@ function applyPrefs() {
   themeBtn.textContent = prefs.theme === 'dark' ? 'Light mode' : 'Dark mode';
   limitInput.value = prefs.limit;
   syncBox.checked = !!prefs.sync;
+  var venue = venueById(prefs.venue);
+  venueSelect.value = venue ? venue.id : '';
+  venueSelect.title = venue
+    ? venue.name + ': ' + venue.rule + '. Source: ' + venue.source + ' (checked ' + VENUES_CHECKED + '; rules change every year)'
+    : 'Choose a venue to set its character limit and check links against its rebuttal rules';
   compactBox.open = !!prefs.compactOpen;
   Array.prototype.forEach.call(compactList.querySelectorAll('input[data-trick]'), function (box) {
     box.checked = !!prefs.compact[box.getAttribute('data-trick')];
@@ -3224,7 +3323,7 @@ function updateAll() {
   analyzedText = text;
   lineStarts = computeLineStarts(text);
 
-  var res = analyze(text);
+  var res = analyze(text, { venue: prefs.venue });
   currentIssues = res.issues;
 
   /* stats — counted like OpenReview's own counter (TextAreaWidget.js):
@@ -3547,6 +3646,16 @@ limitInput.addEventListener('input', function () {
   updateAll();
 });
 
+venueSelect.addEventListener('change', function () {
+  var venue = venueById(venueSelect.value);
+  prefs.venue = venue ? venue.id : '';
+  if (venue && venue.limit) prefs.limit = venue.limit;
+  applyPrefs();
+  savePrefs();
+  updateAll();
+  if (venue) showToast(venue.name + ': ' + venue.rule + '.');
+});
+
 syncBox.addEventListener('change', function () {
   prefs.sync = syncBox.checked;
   savePrefs();
@@ -3634,7 +3743,8 @@ function showToast(msg) {
   toast.textContent = msg;
   toast.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(function () { toast.classList.remove('show'); }, 1800);
+  /* Long enough to read: a venue's rule is a full sentence. */
+  toastTimer = setTimeout(function () { toast.classList.remove('show'); }, Math.max(1800, Math.min(7000, msg.length * 45)));
 }
 
 /* ---- boot ---- */
@@ -3652,6 +3762,7 @@ storeGet(PREFS_KEY).then(function (v) {
       if (zoom !== null && zoom >= FS_RANGES.zoomPreview[0] && zoom <= FS_RANGES.zoomPreview[1]) prefs.zoomPreview = zoom;
       if (typeof p.limit === 'number' && p.limit >= 0) prefs.limit = p.limit;
       if (typeof p.sync === 'boolean') prefs.sync = p.sync;
+      if (typeof p.venue === 'string' && (p.venue === '' || venueById(p.venue))) prefs.venue = p.venue;
       /* Only known tricks: one removed in a later version is simply forgotten. */
       if (p.compact && typeof p.compact === 'object') {
         Object.keys(prefs.compact).forEach(function (id) {

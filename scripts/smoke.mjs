@@ -221,6 +221,17 @@ try {
     ta.setSelectionRange(3, 3); ta.dispatchEvent(new Event('select')); await wait(50);
     return shown && selStat.hidden || { shown, text: selStat.textContent, hidden: selStat.hidden };`);
 
+  await check('choosing a venue sets its limit and checks links against its rule', `
+    setSourceText('See [the logs](https://example.org/logs).', 0); updateAll();
+    const before = currentIssues.length;
+    venueSelect.value = 'neurips'; venueSelect.dispatchEvent(new Event('change')); await wait(50);
+    const ok = before === 0 && limitInput.value === '10000' &&
+      currentIssues.some((i) => /not allowed at NeurIPS/.test(i.title));
+    venueSelect.value = ''; venueSelect.dispatchEvent(new Event('change'));
+    limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
+    return ok && prefs.venue === '' && currentIssues.length === 0 ||
+      { before, limit: limitInput.value, issues: currentIssues.map((i) => i.title) };`);
+
   // Compaction runs 300 ms after the last change.
   await check('Copy compact copies a shorter text that renders the same and leaves the editor alone', `
     const src = '| Method | Acc |\\n| --- | --- |\\n| A | 1 |';

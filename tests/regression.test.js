@@ -69,8 +69,9 @@ const CASES = {
   },
   'image hosted by OpenReview': { src: '![Fig. 1](/images/fig.png)', issues: [], fixed: null },
   'links, URLs and home paths with tildes': {
+    // No tie, footnote or \textbf hazard; the two personal (~user) pages get the link note.
     src: '[result](https://example.org/~user "[^1] \\textbf{x}") and <https://example.org/~user> or https://example.org/a~b and `~/data`.',
-    issues: [], fixed: null,
+    issues: ['This link may reveal who the authors are', 'This link may reveal who the authors are'], fixed: null,
   },
   'URL in a label and a scheme left as text': {
     src: '[https://site.org/query?key=a~b](page) and ssh://site.org/data~old', issues: [], fixed: null,
@@ -279,9 +280,9 @@ const manualCases = [
   ['\\textit is shown outside math', '\\textit{important}', '*important*', /<em>important<\/em>/],
   ['\\emph is shown outside math', '\\emph{this}', '*this*', /<em>this<\/em>/],
   ['\\texttt is shown outside math', '\\texttt{fmt}', '`fmt`', /<code>fmt<\/code>/],
-  ['\\url is shown outside math', '\\url{https://example.org/~user}', 'https://example.org/~user', /<a href="https:\/\/example.org\/~user"/],
-  ['\\href is shown outside math', '\\href{https://example.org/~user}{our {code}}', '[our {code}](https://example.org/~user)',
-    /<a href="https:\/\/example.org\/~user"[^>]*>our \{code\}<\/a>/],
+  ['\\url is shown outside math', '\\url{https://example.org/a~b}', 'https://example.org/a~b', /<a href="https:\/\/example.org\/a~b"/],
+  ['\\href is shown outside math', '\\href{https://example.org/a~b}{our {code}}', '[our {code}](https://example.org/a~b)',
+    /<a href="https:\/\/example.org\/a~b"[^>]*>our \{code\}<\/a>/],
   ['\\href is shown outside math', '\\href{foo~bar}{log}', '[log](foo~bar)', /<a href="foo~bar"[^>]*>log<\/a>/],
   ['LaTeX quotation marks are shown as text', "It is ``better''.", 'It is "better".', /<p>It is "better"\.<\/p>/],
   [TIE, 'Table~1', 'Table 1', /<p>Table 1<\/p>/],
