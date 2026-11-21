@@ -3,7 +3,7 @@
   "version": "3.1.0",
   "private": true,
   "description": "Preview OpenReview comments the way openreview.net renders them (Marked -> DOMPurify -> MathJax) and fix Markdown/TeX hazards before posting.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "engines": {
     "node": ">=22"
   },

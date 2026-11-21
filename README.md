@@ -4,6 +4,8 @@ A single-file previewer for OpenReview comments. Paste a rebuttal and see it ren
 openreview.net renders it — Marked (GFM) → DOMPurify → MathJax — next to a list of *hazards*:
 places where Markdown mangles your TeX before MathJax ever sees it, most with a one-click fix.
 
+Rebuttal Bench is an independent tool. It is not affiliated with or endorsed by OpenReview.
+
 ## Using it
 
 Open `rebuttal-bench.html` in a browser (double-click is fine). It needs an internet connection
@@ -126,3 +128,10 @@ AGENTS.md                  engineering notes for contributors and coding agents
 
 When adding or changing a check or fix, add regression cases for the broken input it repairs
 **and** for nearby correct input it must leave alone.
+
+## Licence
+
+MIT, see [`LICENSE`](LICENSE). The one exception is `upstream/openreview-web.json`: verbatim
+excerpts of openreview-web, kept for the drift check, which remain under openreview-web's own
+licence (AGPL-3.0); see [`upstream/README.md`](upstream/README.md). The libraries the page loads
+(Marked, DOMPurify, MathJax) come from public CDNs under their own licences.
