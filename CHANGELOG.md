@@ -9,6 +9,14 @@
   first tab. Switching drafts gives the editor a fresh undo history, so Ctrl+Z cannot carry text
   from one draft into another.
 
+### Splitting into several comments
+- *Split into comments…* (in the Compaction panel) cuts a draft over the limit into numbered parts
+  under it: between blocks, or between table rows (header repeated), list items (an ordered list
+  keeps counting) and sentences, never inside a formula, code or a link. Parts can be copied one
+  by one or opened as drafts. Macros and labels used across parts are reported (each comment is
+  typeset on its own), link reference definitions are repeated where used, and the venue presets
+  say where only one response is allowed (AAAI, ACL ARR, one per round at ICML).
+
 ## 3.2.0 (2026-11-21)
 
 From a brainstorm on 2026-11-21 (Claude, Codex and Fable) about per-comment character limits and

@@ -114,9 +114,19 @@ caller passes `render` (the page: `renderOpenReviewMarkdown`; the tests: `render
   into another. Therefore **attach editor listeners with `onEditor(type, fn)`**, never
   `ta.addEventListener`, and read `ta` at call time rather than keeping a reference to it.
 
+## Splitting
+
+`splitComment(text, limit, {label})` (pure) cuts only where a comment can end: between top-level
+blocks, and inside a block too long for one part between table rows (header and delimiter row
+repeated), list items (each piece starts with its own item, so an ordered list keeps its numbers)
+or sentences (never at a position inside a formula, code, a link or inline HTML). It never drops
+or reorders content (`tests/split.test.js` checks the text round-trips), appends each link
+reference definition to the parts that use it, and reports macros and labels used across parts,
+because OpenReview typesets each comment from a fresh TeX state.
+
 ## Venue presets
 
-`VENUES` holds each venue's limit, link rule and official source, checked on `VENUES_CHECKED`.
+`VENUES` holds each venue's limit, link rule, whether several comments are allowed (`parts`) and official source, checked on `VENUES_CHECKED`.
 When a call for papers changes, update the entry, its source and the date together, and keep
 `tests/links.test.js` passing. Do not add a venue without an official page that states its rule.
 

@@ -311,6 +311,30 @@ try {
       !document.querySelector('#draftTabs .dclose') && localStorage.getItem('rebuttal-bench-draft-d2') === null ||
       { renamed, meta: draftMeta, value: ta.value };`);
 
+  await check('Split cuts an over-limit draft into parts under the limit, which can become drafts', `
+    limitInput.value = '300'; limitInput.dispatchEvent(new Event('input'));
+    const para = (k) => [0, 1, 2].map((i) => 'Sentence ' + (k + i) + ' explains a point in enough words to take some room.').join(' ');
+    const original = [para(1), para(4), para(7)].join('\\n\\n');
+    setSourceText(original, 0); ta.dispatchEvent(new Event('input')); updateAll(); await wait(100);
+    document.getElementById('splitBtn').click(); await wait(100);
+    const parts = splitResult.parts, n = parts.length;
+    const shown = !splitDialog.hidden && n >= 2 && parts.every((p) => p.length <= 300) &&
+      splitParts.querySelectorAll('.split-part').length === n;
+    let copied = null;
+    Object.defineProperty(navigator, 'clipboard', { configurable: true,
+      value: { writeText: (t) => { copied = t; return Promise.resolve(); } } });
+    splitParts.querySelector('[data-copy="1"]').click(); await wait(50);
+    const copiedOk = copied === parts[1].text;
+    const origId = draftMeta.active, before = draftMeta.list.map((d) => d.id);
+    splitDraftsBtn.click(); await wait(100);
+    const made = splitDialog.hidden && draftMeta.list.length === before.length + n && ta.value === parts[0].text &&
+      draftTexts[origId] === original && /\\(1\\/\\d\\)$/.test(draftById(draftMeta.active).name);
+    window.confirm = () => true;
+    draftMeta.list.map((d) => d.id).filter((id) => !before.includes(id)).forEach(deleteDraft);
+    switchDraft(origId);
+    limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
+    return shown && copiedOk && made && ta.value === original || { shown, copiedOk, made, n, value: ta.value.slice(0, 40) };`);
+
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).
