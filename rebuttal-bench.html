@@ -3584,8 +3584,13 @@ function mergeDraftMeta(mine, theirs) {
   });
 }
 
+/* Time plus 8 random base-36 digits (about 2.8e12 values): two windows, or a
+   burst of new drafts within one millisecond, practically never collide, and
+   createDraft still checks that the key is free. */
 function newDraftId() {
-  return 'd' + Date.now().toString(36) + Math.floor(Math.random() * 1679616).toString(36);
+  var r = '';
+  while (r.length < 8) r += Math.floor(Math.random() * 46656).toString(36);
+  return 'd' + Date.now().toString(36) + r.slice(0, 8);
 }
 
 function newDraftName(list) {
