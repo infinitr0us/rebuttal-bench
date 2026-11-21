@@ -61,7 +61,7 @@ const CASES = [
   ['link with its own label', '[the paper](https://example.org/a)', null],
   ['URL with a final dot in brackets', 'See <https://example.org/a.> now.', null],
   ['self-link glued to a word', '[https://example.org](https://example.org)x', null],
-  ['math is never touched', 'We use $ x + y $ and $$\n a = b \n$$', null],
+  ['math stays unchanged without a MathML converter', 'We use $ x + y $ and $$\n a = b \n$$', null],
 ];
 
 for (const [name, src, want, ws] of CASES) {

@@ -28,6 +28,8 @@ leave the browser: they autosave on this device only.
 - **Compaction.** *Copy compact* copies a shorter form of your source that OpenReview renders
   exactly the same: table padding and long delimiter rows (`| --- |` becomes `|-|`), links
   that repeat their URL, closing `#`s, extra blank lines and spaces, character references.
+  Inside formulas it can remove ignored spaces, shorten command arguments and aliases,
+  use `\cr` for row breaks, and drop redundant `$$` around a display environment.
   The editor keeps your readable text; the status bar shows the compact count, and the
   character chip turns amber when only the compact form fits the limit. The *Compaction* panel
   under the hazards shows what each trick saves, with a switch for each; *Apply to source*
@@ -96,23 +98,27 @@ ambiguous cases get a warning without a fix, or a fix that only a click on its c
 
 ## How compaction stays safe
 
-Each trick proposes edits, and an edit is kept only if the whole comment still renders to the
-same sanitized HTML (so MathJax receives the same text), both as typed and as OpenReview posts
-it (trimmed, which can change how the first line parses), and the analyzer reports no more
-hazards of any kind than before. A batch that fails is split until the offending edits are
-found, so a trick never has to be right about every corner of Markdown: what would change the
-rendering is simply dropped. Two refinements:
+Each proposed edit is checked against the whole comment, both as typed and as OpenReview
+posts it. Posting trims the source, which can change how the first line parses. The analyzer
+must find no additional hazards of any kind. Most tricks require identical sanitized HTML.
+A batch that fails is split so that independent edits can still apply.
 
 - The whitespace tricks (paragraph indentation, single trailing spaces) change only whitespace
   that the note's `white-space: normal` collapses. They are compared on collapsed text (tags,
   attributes and `<pre>` untouched), and every formula MathJax will find in the rendered HTML
   must stay byte for byte the same, since `\text{}` and `\verb` keep their spaces.
+- Inside a formula, `$ x + y $` can become `$x+y$`, `\frac{1}{2}` can become `\frac12`,
+  and `\leq` can become `\le`. Every formula must produce identical MathML, in the same
+  position and display mode, and all HTML outside the formulas must match exactly. MathJax
+  starts fresh for each comment and compiles its formulas in order, so an earlier definition
+  can rule out a later substitution. `x^{2}` and `\rightarrow` keep their spelling because the
+  shorter forms change the MathML. Math edits are skipped while MathJax is loading.
 - The opt-in symbol trick does change the rendering. Each formula it replaces, and the
   character replacing it, must both render exactly as a neutral placeholder at that spot, so
   the new HTML is the old one with that text swapped and nothing else moved.
 
-On a draft with two space-aligned results tables the default tricks save about 20% (394 of
-2,011 characters; `tests/fixtures/padded-tables.md`); a draft written tersely saves nothing.
+On the padded-tables fixture the default tricks save 414 of 2,007 characters, including 20
+inside formulas. On the theory-response fixture they save 85 of 1,006 characters.
 While you type, compaction gets a short time slice and may stop early (the panel says so; the
 result is still safe); *Copy compact* and *Apply to source* give it more time.
 
@@ -136,7 +142,10 @@ tests/
   regression.test.js       hazard + Fix-all cases, broken and correct input
   compact.test.js          compaction: what each trick saves, what it must leave alone
   table-import.test.js     imported tables, rendered cells, warnings and MathJax input
+  compact-math.test.js     formula compaction against independently typeset MathML
   links.test.js            links under each venue's rules
+  drafts.test.js           the stored list of drafts: parsing, merging two windows' lists
+  split.test.js            splitting a draft into comments: where it cuts, what it keeps
   fixtures/                realistic drafts used by the tests
   example.test.js          the built-in example must end clean and fully typeset
   fuzz.test.js             analyzer vs. real Marked + DOMPurify + MathJax

@@ -28,6 +28,13 @@
   columns, and insert with one undo. Pasting LaTeX or tab-separated rows in the editor offers
   the same conversion for the pasted range.
 
+### Formula compaction
+- Compaction can now shorten formulas when MathJax produces identical MathML. It removes
+  ignored spaces, shortens single-token arguments and aliases, uses `\cr` between rows,
+  and removes redundant display-environment wrappers. All five switches are on by default.
+  Each comparison starts with fresh TeX definitions and checks every formula in order.
+  The new tricks save 20 characters on the padded-tables draft and 85 on the theory response.
+
 ## 3.2.0 (2026-11-21)
 
 From a brainstorm on 2026-11-21 (Claude, Codex and Fable) about per-comment character limits and

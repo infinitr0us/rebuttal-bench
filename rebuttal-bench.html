@@ -2867,10 +2867,8 @@ function importTable(text, options) {
    OpenReview counts the Markdown source, so markup that renders to nothing
    (cell padding, long delimiter rows, a link label that repeats its URL) costs
    as much as content. Each trick below proposes edits; compactText keeps an
-   edit only when the whole comment still renders to exactly the same sanitized
-   HTML and the analyzer reports no hazard it did not report before. Equal HTML
-   means MathJax receives the same text, so no trick has to be argued correct
-   case by case: a candidate that would change anything is simply dropped.
+   edit only after checking the rendered comment and its analyzer hazards.
+   Formula edits compare exact MathML inside formulas and exact HTML outside.
    The caller passes the renderer (the page: Marked + DOMPurify configured as
    on OpenReview; the tests: the reference pipeline). The whole comment is
    compared rather than one block because Markdown reaches across blocks (link
@@ -2901,7 +2899,7 @@ function maskHits(mask, a, b) {
 /* Code and HTML blocks keep every character (OpenReview shows an HTML block as
    typed); code spans, inline HTML and link syntax are off limits for edits
    inside a line. */
-function compactContext(text) {
+function compactContext(text, res) {
   var model = collectMarkedRanges(text);
   if (!model) return null;
   var block = [], inline = [];
@@ -2909,7 +2907,7 @@ function compactContext(text) {
     if (r.type === 'code' || (r.type === 'html' && !r.inline)) block.push(r);
     else if (r.type === 'codespan' || r.type === 'html') inline.push(r);
   });
-  var res = null, mathMask = null;
+  var mathMask = null;
   function analysis() { return res || (res = analyze(text)); }
   return {
     model: model,
@@ -2956,38 +2954,76 @@ function htmlTagName(tag) {
   return m ? m[1].toLowerCase() : '';
 }
 
-function htmlDecodeText(s) {
-  return s.replace(/&(?:#(\d+)|#[xX]([0-9a-fA-F]+)|(amp|lt|gt|quot|nbsp));/g, function (m, dec, hex, name) {
-    if (name) return { amp: '&', lt: '<', gt: '>', quot: '"', nbsp: String.fromCharCode(160) }[name];
-    return charFromCodePoint(dec ? parseInt(dec, 10) : parseInt(hex, 16));
-  });
-}
-
 /* Every formula MathJax will find in sanitized HTML, as it receives it. Like
    MathJax's HTMLDomStrings, text runs on across <br> (a newline), <wbr> and
    comments, any other tag ends the string, and code, pre and a few others are
    skipped. This does not rely on the analyzer's source model, so it also holds
    where that model is approximate (character references inside \begin, say). */
 var MJ_SKIP_TAGS = { script: 1, noscript: 1, style: 1, textarea: 1, pre: 1, code: 1, annotation: 1, 'annotation-xml': 1 };
-function mathJaxInputs(html) {
-  var strings = [], cur = '', skip = 0;
+function renderedMath(html, mask) {
+  var cur = '', skip = 0, pos = 0, last = 0, from = [], to = [];
+  var inputs = [], outside = [], formulas = [], supported = true;
+  function append(s, at, width) {
+    cur += s;
+    if (mask) for (var i = 0; i < s.length; i++) {
+      from.push(width ? at : at + i);
+      to.push(width ? at + width : at + i + 1);
+    }
+  }
+  function flush() {
+    if (cur) mjFind(cur).found.forEach(function (f) {
+      var end = f.close + f.closeLen, raw = cur.slice(f.open, end);
+      if (!mask) inputs.push(f.kind + ':' + raw);
+      /* The analyzer also finds a closer blocked by unmatched braces. Only
+         real FindTeX matches can own (and mask) any part of the HTML. */
+      if (!mask || f.braces) return;
+      outside.push(html.slice(last, from[f.open]));
+      last = to[end - 1];
+      formulas.push({ kind: f.kind, display: f.display,
+        tex: f.kind === 'env' || f.kind === 'ref' ? raw : cur.slice(f.open + f.openLen, f.close) });
+    });
+    cur = '';
+    from = [];
+    to = [];
+  }
   htmlTokens(html).forEach(function (bit, k) {
-    if (!(k % 2)) { if (!skip) cur += htmlDecodeText(bit); return; }
+    var at = pos;
+    pos += bit.length;
+    if (!(k % 2)) {
+      if (skip) return;
+      var re = /\0|\r\n?|&(?:#(\d+)|#[xX]([0-9a-fA-F]+)|(amp|lt|gt|quot|nbsp));/g, m, p = 0;
+      while ((m = re.exec(bit))) {
+        append(bit.slice(p, m.index), at + p);
+        /* Assigning sanitized HTML to innerHTML parses it once more. Even a
+           CR originally written as &#13; is now a literal line ending and
+           ends a TeX comment. Preserve its source extent for the HTML check. */
+        var ch = m[0];
+        if (m[3]) ch = { amp: '&', lt: '<', gt: '>', quot: '"', nbsp: '\u00a0' }[m[3]];
+        else if (m[1] || m[2]) ch = charFromCodePoint(parseInt(m[1] || m[2], m[1] ? 10 : 16));
+        else if (mask) ch = ch === '\0' ? '' : '\n';
+        append(ch, at + m.index, m[0].length);
+        p = re.lastIndex;
+      }
+      append(bit.slice(p), at + p);
+      return;
+    }
     if (bit.slice(0, 4) === '<!--') return;
+    /* MathJax can override subtree scanning by class or data attribute. If
+       present, the pure scanner cannot vouch for these formula positions. */
+    if (mask && /\s(?:data-mjx="[^"]+"|class="[^"]*\b(?:disable-tex-rendering|mathjax_process)\b[^"]*")/i.test(bit)) supported = false;
     var name = htmlTagName(bit);
     if (name === 'wbr') return;
-    if (name === 'br') { if (!skip) cur += '\n'; return; }
+    if (name === 'br') { if (!skip) append('\n', at, bit.length); return; }
     if (MJ_SKIP_TAGS[name]) skip = Math.max(0, skip + (bit.charAt(1) === '/' ? -1 : 1));
-    strings.push(cur);
-    cur = '';
+    flush();
   });
-  strings.push(cur);
-  var out = [];
-  strings.forEach(function (s) {
-    if (s) mjFind(s).found.forEach(function (f) { out.push(f.kind + ':' + s.slice(f.open, f.close + f.closeLen)); });
-  });
-  return JSON.stringify(out);
+  flush();
+  outside.push(html.slice(last));
+  if (!mask) return JSON.stringify(inputs);
+  return supported ? { outside: outside, formulas: formulas } : null;
 }
+
+function mathJaxInputs(html) { return renderedMath(html, false); }
 
 function mathSignature(res) {
   return JSON.stringify(res.spans.map(function (sp) { return [sp.tex, !!sp.display, !!sp.recovered]; }));
@@ -3315,6 +3351,116 @@ function findSymbols(text, ctx) {
   return edits;
 }
 
+/* Locate tokens in the TeX MathJax receives, but edit their Markdown source
+   extents. In particular, the two TeX backslashes of a row break occupy four
+   source characters. The rendered-comment check is independent of this model. */
+var SHORT_TEX = { leq: 'le', geq: 'ge', neq: 'ne', leftarrow: 'gets', rightarrow: 'to',
+  wedge: 'land', lnot: 'neg', owns: 'ni' };
+var SIMPLE_ARG = /^(?:[dt]?frac|binom|sqrt|hat|bar|vec|dot|ddot|tilde|overline|underline|math(?:cal|bb|bf|rm|sf|tt|it|frak))$/;
+function mathCandidates(text, ctx) {
+  if (ctx.mathEdits) return ctx.mathEdits;
+  var edits = { mathSpace: [], mathArgs: [], mathAliases: [], mathRows: [], mathDisplay: [] };
+  /* Inline markup may surround a whole formula. If one of its boundaries is
+     inside the span, MathJax searches separate text nodes there. */
+  var cuts = [];
+  ctx.model.ranges.forEach(function (r) {
+    if (/^(?:em|strong|del|link|image)$/.test(r.type)) cuts[r.start] = cuts[r.end - 1] = true;
+  });
+  ctx.analysis().spans.forEach(function (sp) {
+    if (sp.recovered || sp.literal || sp.kind === 'ref' || maskHits(ctx.inlineMask, sp.start, sp.end) ||
+        maskHits(cuts, sp.start, sp.end)) return;
+    var v = mathJaxView(text, sp.innerStart, sp.innerEnd, false), s = v.text;
+    if (s !== sp.tex) return;
+    function add(id, a, b, replacement) {
+      var e = compactEdit(text, v.from[a], v.to[b - 1], replacement);
+      if (e.text.length <= e.was.length && e.text !== e.was) edits[id].push(e);
+    }
+    var env = /^\s*(\\begin\{([\w*]+)\}[\s\S]*\\end\{\2\})\s*$/.exec(s);
+    if (env && sp.kind === '$$') {
+      var a = s.indexOf(env[1]), b = a + env[1].length;
+      edits.mathDisplay.push(compactEdit(text, sp.start, sp.end, text.slice(v.from[a], v.to[b - 1])));
+    }
+    var re = /\\(?:[A-Za-z]+|[\s\S])|%[^\n]*(?:\n|$)|[ \t\r\n]+|[{}^_]/g, m;
+    var envs = [], protectedDepth = 0, wordEnd = -1;
+    while ((m = re.exec(s))) {
+      var tok = m[0], i = m.index, end = re.lastIndex;
+      if (protectedDepth) {
+        if (tok === '{') protectedDepth++;
+        if (tok === '}') protectedDepth--;
+        continue;
+      }
+      if (/^\s/.test(tok)) {
+        /* Keep a control-word terminator and an explicit TeX space. Only
+           discard literal whitespace, never a quote prefix or an entity. */
+        if (text.slice(v.from[i], v.to[end - 1]) === tok && s.charAt(i - 1) !== '\\') {
+          add('mathSpace', i, end, wordEnd === i && /[A-Za-z]/.test(s.charAt(end)) ? ' ' : '');
+        }
+        continue;
+      }
+      if (tok === '\\\\') {
+        if (envs.length && ROW_ENV_NAME.test(envs[envs.length - 1]) &&
+            text.slice(v.from[i], v.to[end - 1]) === bs(4) && !/^\s*\[/.test(s.slice(end))) {
+          add('mathRows', i, end, /[A-Za-z]/.test(s.charAt(end)) ? '\\cr ' : '\\cr');
+        }
+        continue;
+      }
+      var cmd = tok.slice(1), script = tok === '^' || tok === '_';
+      if (!script && !/^\\[A-Za-z]+$/.test(tok)) continue;
+      if (!script) wordEnd = end;
+      var tail = s.slice(end), arg;
+      if (cmd === 'verb') {
+        var delimiter = /\S/.exec(tail);
+        var close = delimiter && s.indexOf(delimiter[0], end + delimiter.index + 1);
+        re.lastIndex = close == null || close < 0 ? s.length : close + 1;
+        continue;
+      }
+      if (TEXT_CMD.test(cmd) || /^(?:operatorname|tag|label|ref|eqref|url)$/.test(cmd)) {
+        arg = /^\*?\s*\{/.exec(tail);
+        if (arg) { protectedDepth = 1; re.lastIndex += arg[0].length; }
+        continue;
+      }
+      if (cmd === 'begin' || cmd === 'end') {
+        arg = /^\s*\{([^{}]*)\}/.exec(tail);
+        if (arg) {
+          if (cmd === 'begin') envs.push(arg[1]);
+          else envs.pop();
+          re.lastIndex += arg[0].length;
+        }
+        continue;
+      }
+      if (Object.prototype.hasOwnProperty.call(SHORT_TEX, cmd)) {
+        add('mathAliases', i, end, '\\' + SHORT_TEX[cmd]);
+      }
+      if (script || SIMPLE_ARG.test(cmd)) {
+        /* A letter directly after a control word needs a separator. Each
+           argument edit stands alone when a rejected batch is bisected. */
+        var n = /^(?:[dt]?frac|binom)$/.test(cmd) ? 2 : 1;
+        var followsWord = !script;
+        for (var j = 0, p = end; j < n; j++) {
+          arg = /^(\s*)(?:\{([a-zA-Z0-9]|\\[a-zA-Z]+)\}|([a-zA-Z0-9]|\\[a-zA-Z]+))/.exec(s.slice(p));
+          if (!arg) break;
+          var start = p + arg[1].length;
+          p += arg[0].length;
+          if (arg[2]) {
+            var token = text.slice(v.from[start + 1], v.to[p - 2]);
+            if (!arg[1] && followsWord && /^[a-zA-Z]/.test(arg[2])) token = ' ' + token;
+            if (arg[2].charAt(0) === '\\' && /[a-zA-Z]/.test(s.charAt(p))) token += ' ';
+            add('mathArgs', start, p, token);
+          }
+          followsWord = (arg[2] || arg[3]).charAt(0) === '\\';
+        }
+      }
+    }
+  });
+  ctx.mathEdits = edits;
+  return edits;
+}
+
+function mathTrick(id, label, hint) {
+  return { id: id, on: true, math: true, label: label, hint: hint,
+    find: function (text, ctx) { return mathCandidates(text, ctx)[id]; } };
+}
+
 /* In application order. `on` is the default; table edge pipes are off by
    default because a table without them reads worse as plain text (the
    notification e-mail, a co-author's copy) for 2 characters a row. */
@@ -3337,6 +3483,11 @@ var COMPACT_TRICKS = [
     hint: '| A | B | and | --- | :---: | become |A|B| and |-|:-:|' },
   { id: 'tableEdges', on: false, find: findTableEdges, label: 'Outer table pipes',
     hint: '|A|B| becomes A|B where Markdown allows it; harder to read as plain text' },
+  mathTrick('mathRows', 'TeX row breaks', 'Use \\cr between rows where it preserves the same matrix or alignment'),
+  mathTrick('mathSpace', 'Spaces inside formulas', 'Remove whitespace that leaves the formula’s MathML unchanged'),
+  mathTrick('mathArgs', 'Single-token TeX arguments', '\\frac{1}{2} becomes \\frac12'),
+  mathTrick('mathAliases', 'Short TeX aliases', '\\leq becomes \\le where both commands produce identical MathML'),
+  mathTrick('mathDisplay', 'Display environment wrappers', 'Remove redundant $$ around a complete display environment'),
   /* Changes the rendering slightly, so it is off until the author turns it on,
      and it has its own check (see compactText). */
   { id: 'symbols', on: false, look: true, find: findSymbols, label: 'One-symbol formulas as characters',
@@ -3358,20 +3509,54 @@ function issueCounts(issues) {
   return counts;
 }
 
+/* Cache complete ordered inputs: an earlier formula can define a later
+   command, and a forward reference can depend on a later label. Only in a
+   comment consisting entirely of elementary arithmetic and known stateless
+   commands can an individual formula also reuse a result from fresh state. */
+function cachedMathML(convert, expired) {
+  var recent = [], simple = Object.create(null);
+  var elementary = /^(?:[a-zA-Z0-9 \t\r\n+.,=(){}^_/-]|\\(?:frac|sqrt|hat|mathcal|leq?|geq?|neq?|gets|leftarrow|rightarrow|to)(?![A-Za-z]))*$/;
+  return function (formulas) {
+    var key = JSON.stringify(formulas.map(function (f) { return [f.display, f.tex]; })), i;
+    for (i = 0; i < recent.length; i++) if (recent[i].key === key) return recent[i].value;
+    var independent = formulas.every(function (f) { return elementary.test(f.tex); });
+    var missing = [], keys = [], seen = Object.create(null);
+    if (independent) formulas.forEach(function (f) {
+      var k = JSON.stringify([f.display, f.tex]);
+      keys.push(k);
+      if (simple[k] === undefined && !seen[k]) { seen[k] = true; missing.push(f); }
+    });
+    var batch = independent ? missing : formulas, value;
+    if (expired()) return null;
+    try { value = batch.length ? convert(batch, expired) : []; } catch (e) { return null; }
+    if (!Array.isArray(value) || value.length !== batch.length) return null;
+    for (i = 0; i < value.length; i++) if (typeof value[i] !== 'string') return null;
+    if (independent) {
+      missing.forEach(function (f, j) { simple[JSON.stringify([f.display, f.tex])] = value[j]; });
+      value = keys.map(function (k) { return simple[k]; });
+    }
+    recent.push({ key: key, value: value });
+    if (recent.length > 4) recent.shift();
+    return value;
+  };
+}
+
 /* Rewrite `text` with the tricks switched on in `enabled` ({id: bool}).
    `render(text)` must return the sanitized HTML OpenReview would show.
-   `limits`: a number of checks, or {checks, ms}; the defaults are 400 checks
-   and no time limit (the page passes a time limit so typing never stalls).
-   Returns {text, saved, tricks: [{id, on, count, kept, skipped, saved}],
+   `limits`: a number of checks, or {checks, ms, mathml}; the defaults are 400
+   checks and no time limit. mathml converts ordered inputs from fresh state.
+   Returns {text, saved, tricks: [{id, on, count, kept, skipped, unavailable, saved}],
    complete}, or null when the text cannot be rendered. `kept` counts edits
-   left out because they would change the rendering; `skipped` those never
-   tried because the limits ran out (then `complete` is false: the text is
-   still safe, only less short). A trick that is off is still run on the
+   left out by the check; `skipped` counts unchecked edits when the limits run
+   out (complete is false) or MathML cannot be verified (unavailable is true).
+   A trick that is off is still run on the
    result, so the caller can show what it would add. */
 function compactText(text, enabled, render, limits) {
   var maxChecks = typeof limits === 'number' ? limits : (limits && typeof limits.checks === 'number' ? limits.checks : 400);
   var deadline = limits && typeof limits.ms === 'number' ? Date.now() + limits.ms : Infinity;
   var checks = 0, starved = false;
+  function expired() { return Date.now() > deadline; }
+  var mathml = limits && typeof limits.mathml === 'function' ? cachedMathML(limits.mathml, expired) : null;
   var PH_OPEN = String.fromCharCode(0xe000), PH_CLOSE = String.fromCharCode(0xe001);
 
   function out() {
@@ -3384,7 +3569,8 @@ function compactText(text, enabled, render, limits) {
      space before "#"). So every comparison covers the text as typed and as
      posted. */
   function views(t) {
-    return [render(t), render(t.trim())];
+    var html = render(t), trimmed = t.trim();
+    return [html, trimmed === t ? html : render(trimmed)];
   }
 
   /* What the text as it stands renders to. Each trick is checked against the
@@ -3392,7 +3578,7 @@ function compactText(text, enabled, render, limits) {
   function reference(t) {
     var html = views(t), res = analyze(t);
     return {
-      text: t, html: html, res: res,
+      text: t, html: html, res: res, ctx: compactContext(t, res), math: [],
       ws: html.map(collapseWhitespace), mj: html.map(mathJaxInputs)
     };
   }
@@ -3419,6 +3605,33 @@ function compactText(text, enabled, render, limits) {
       }
       return noNewIssues(analyze(candidate));
     } catch (e) { return false; }
+  }
+
+  /* The outside fragments are positional, so even literal placeholder text in
+     a draft cannot hide a moved formula. Only the wrapper trick may change a
+     delimiter kind, and only from $$ to that very same display environment. */
+  function sameMathRendering(candidate, trick) {
+    checks++;
+    var html = views(candidate);
+    for (var i = 0; i < html.length; i++) {
+      if (i && html[0] === html[1] && ref.html[0] === ref.html[1]) continue;
+      var old = ref.math[i] || (ref.math[i] = renderedMath(ref.html[i], true));
+      var now = renderedMath(html[i], true);
+      if (!old || !now) return null;
+      if (old.outside.length !== now.outside.length ||
+          !old.outside.every(function (s, j) { return s === now.outside[j]; })) return false;
+      if (!old.formulas.every(function (a, j) {
+        var b = now.formulas[j];
+        return a.display === b.display && (a.kind === b.kind ||
+          (trick.id === 'mathDisplay' && a.kind === '$$' && b.kind === 'env' && a.tex.trim() === b.tex));
+      })) return false;
+      var before = old.mml || (old.mml = mathml(old.formulas));
+      if (!before) return null;
+      var after = mathml(now.formulas);
+      if (!after) return null;
+      if (!before.every(function (s, j) { return s === after[j]; })) return false;
+    }
+    return noNewIssues(analyze(candidate));
   }
 
   /* A trick that changes the look (`look`: a formula becomes a character)
@@ -3457,26 +3670,46 @@ function compactText(text, enabled, render, limits) {
     if (!cands.length) return kept;
     if (out()) { tally.skipped += cands.length; return kept; }
     var all = kept.concat(cands);
-    if (ok(all)) return all;
+    var result = ok(all);
+    if (result) return all;
+    if (result === null) {
+      tally.skipped += cands.length;
+      if (expired()) starved = true;
+      else tally.unavailable = true;
+      return kept;
+    }
     if (cands.length === 1) { tally.kept++; return kept; }
     var mid = cands.length >> 1;
     return keep(ok, keep(ok, kept, cands.slice(0, mid), tally), cands.slice(mid), tally);
   }
 
   function run(trick) {
-    var cur = ref.text, tally = { kept: 0, skipped: 0 }, ctx = compactContext(cur);
+    var cur = ref.text, tally = { kept: 0, skipped: 0, unavailable: false }, ctx = ref.ctx;
     if (!ctx || (trick.look && (cur.indexOf(PH_OPEN) !== -1 || cur.indexOf(PH_CLOSE) !== -1))) {
       return { text: cur, count: 0, tally: tally };
     }
-    var cands = [], taken = [];
+    var cands = [], end = 0;
     trick.find(cur, ctx).forEach(function (e) {
-      if (e.text === e.was || editsOverlap([e], taken)) return;
-      taken.push(e);
+      /* Math tokens are visited in source order. A long derivation can
+         have thousands of spaces, so check only the last accepted range. */
+      if (e.text === e.was || (trick.math ? e.start < end : editsOverlap([e], cands))) return;
       cands.push(e);
+      end = e.end;
     });
+    if (trick.math && !mathml) {
+      tally.skipped = cands.length;
+      tally.unavailable = cands.length > 0;
+      return { text: cur, count: 0, tally: tally };
+    }
     var edits = keep(trick.look
       ? sameButSwapped
-      : function (es) { return sameRendering(applyEditsToText(cur, es), !!trick.ws); }, [], cands, tally);
+      : function (es) {
+        var candidate = applyEditsToText(cur, es);
+        if (trick.math) {
+          try { return sameMathRendering(candidate, trick); } catch (e) { return null; }
+        }
+        return sameRendering(candidate, !!trick.ws);
+      }, [], cands, tally);
     return { text: applyEditsToText(cur, edits), count: edits.length, tally: tally };
   }
 
@@ -3494,6 +3727,7 @@ function compactText(text, enabled, render, limits) {
       s.count += r.count;
       s.kept = r.tally.kept;
       s.skipped = r.tally.skipped;
+      s.unavailable = r.tally.unavailable;
       s.saved += ref.text.trim().length - r.text.trim().length;
       if (r.text !== ref.text) {
         try { ref = reference(r.text); } catch (e) { /* render() worked a moment ago */ }
@@ -3508,6 +3742,7 @@ function compactText(text, enabled, render, limits) {
     s.count = r.count;
     s.kept = r.tally.kept;
     s.skipped = r.tally.skipped;
+    s.unavailable = r.tally.unavailable;
     s.saved = result.trim().length - r.text.trim().length;
   });
   return {
@@ -4228,6 +4463,45 @@ function resetTeXState() {
   } catch (e) {}
 }
 
+/* Compile with the page's TeX packages and safe filter, in a private math
+   document. Its input jax owns the definitions, colors and label tables;
+   compilation never clears or typesets the preview. compile() also makes
+   MathJax's second pass for forward references. */
+function compactMathML(formulas, expired) {
+  var startup = MathJax.startup, modules = MathJax._, live = startup.document;
+  var Doc = modules.ui.safe.SafeHandler.SafeMathDocumentMixin(modules.handlers.html.HTMLDocument.HTMLDocument);
+  var doc = new Doc(document, live.adaptor, {
+    InputJax: startup.getInputJax(), OutputJax: startup.getOutputJax(),
+    safeOptions: live.options.safeOptions,
+    compileError: function (_doc, _item, err) { throw err; }
+  });
+  doc.safe.filterAttributes.set('fontfamily', 'filterFamily');
+  doc.safe.filterMethods.filterFamily = live.safe.filterMethods.filterFamily;
+  var jax = doc.inputJax[0];
+  /* These MathJax extensions use process-wide state: \unicode remembers a
+     glyph's font, and \require loads packages for the whole page. Stop if
+     one is actually executed, including through a user-defined macro. */
+  var handlers = jax.parseOptions.handlers;
+  ['unicode', 'require', 'Require'].forEach(function (name) {
+    if (handlers.get('macro').contains(name)) {
+      handlers.retrieve('new-Command').add(name, new modules.input.tex.Symbol.Macro(name, function () {
+        throw new Error('This TeX command uses shared MathJax state');
+      }));
+    }
+  });
+  jax.preFilters.add(function () {
+    if (expired && expired()) throw new Error('Compaction time limit');
+  }, -100);
+  var items = formulas.map(function (f) {
+    var item = new doc.options.MathItem(f.tex, jax, f.display);
+    item.start.node = document.body;
+    doc.math.push(item);
+    return item;
+  });
+  doc.compile();
+  return items.map(function (item) { return startup.toMML(item.root); });
+}
+
 function renderPreview() {
   if (renderBusy) { renderQueued = true; return; }
   renderBusy = true;
@@ -4292,6 +4566,7 @@ function renderPreview() {
 window.onMathJaxReady = function () {
   setMathStatus('MathJax ready', 'good');
   renderPreview();
+  scheduleCompaction();
 };
 
 /* MathJax scales math to the ex-height of the surrounding font, so a typeset
@@ -4671,13 +4946,13 @@ var compactTimer = null;
 /* `full`: a click on Copy compact or Apply to source, where the user waits
    anyway; the idle run gets a short time slice so typing never stalls. */
 function compactResult(full) {
-  var text = ta.value, key = JSON.stringify(prefs.compact), c = compactCache;
+  var text = ta.value, key = JSON.stringify(prefs.compact) + window.MJ_READY, c = compactCache;
   if (c && c.source === text && c.key === key && (!full || c.full || !c.result || c.result.complete)) return c.result;
   var result = null;
   if (MARKED_READY && purifier) {
     try {
       result = compactText(text, prefs.compact, renderOpenReviewMarkdown,
-        full ? { checks: 2000, ms: 1500 } : { checks: 400, ms: 150 });
+        { checks: full ? 2000 : 400, ms: full ? 1500 : 150, mathml: window.MJ_READY ? compactMathML : null });
     } catch (e) { result = null; }
   }
   compactCache = { source: text, key: key, result: result, full: !!full };
@@ -4712,8 +4987,10 @@ function updateCompaction() {
     var t = COMPACT_TRICKS[i], s = r ? r.tricks[i] : null, gain = row.querySelector('.gain');
     row.querySelector('input').checked = !!prefs.compact[t.id];
     gain.textContent = !s || !s.saved ? '' : '−' + fmt(s.saved) + (s.on ? '' : ' if on');
+    if (s && s.unavailable) gain.textContent = s.saved ? gain.textContent + ', some skipped' : 'skipped';
     gain.className = 'gain' + (!s || !s.saved ? ' none' : s.on ? '' : ' off');
-    row.title = t.hint + (s && s.kept ? '. Left alone in ' + s.kept + (s.kept === 1 ? ' place' : ' places') +
+    row.title = t.hint + (s && s.unavailable ? '. Skipped because MathML comparison is unavailable.' : '') +
+      (s && s.kept ? '. Left alone in ' + s.kept + (s.kept === 1 ? ' place' : ' places') +
       ', where the change would alter the rendering.' : '');
   });
 }
