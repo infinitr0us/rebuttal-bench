@@ -1,6 +1,6 @@
 {
   "name": "rebuttal-bench",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "private": true,
   "description": "Preview OpenReview comments the way openreview.net renders them (Marked -> DOMPurify -> MathJax) and fix Markdown/TeX hazards before posting.",
   "license": "MIT",

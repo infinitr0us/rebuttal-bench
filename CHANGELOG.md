@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.3.0 (2026-11-21)
 
 ### Drafts
 - A tab per draft (an answer per reviewer, a general response, a follow-up), each with its length
