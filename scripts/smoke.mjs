@@ -656,6 +656,32 @@ try {
     return kept && /saved a newer version/.test(msg) && localStorage.getItem(DRAFT_KEY) === 'First draft $x$.' ||
       { kept, msg, stored: localStorage.getItem(DRAFT_KEY) };`);
 
+  await check('Export changes nothing stored, even with a deletion from another window not yet taken in', `
+    const id = createDraft('Deleted elsewhere', 'Its text.'); switchDraft(id); await wait(50);
+    const theirs = JSON.parse(localStorage.getItem(DRAFTS_KEY)); /* the open draft, deleted in another window */
+    theirs.list = theirs.list.filter((d) => d.id !== id); theirs.gone[id] = Date.now(); theirs.saved = Date.now();
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(theirs)); /* as another window, before its storage event */
+    const snap = () => JSON.stringify(Object.keys(localStorage).sort().map((k) => [k, localStorage.getItem(k)]));
+    const before = snap();
+    const realDownload = downloadFile;
+    downloadFile = function () { return true; };
+    window.confirm = () => true;
+    exportAllDrafts(); exportOpenDraft();
+    downloadFile = realDownload;
+    const same = snap() === before;
+    deleteDraft(id); switchDraft('d1');
+    return same || 'storage changed';`);
+
+  await check('Restore waits for a draft whose text has not been read', `
+    keepVersion('test', 'An older version.');
+    bodyKnown.d1 = false; /* as after a read that failed */
+    document.querySelector('#draftTools [data-act="history"]').click(); await wait(50);
+    const v = historyShown.find((x) => x.text === 'An older version.');
+    restoreVersion(v); await wait(50);
+    const kept = ta.value === 'First draft $x$.', msg = toast.textContent;
+    bodyKnown.d1 = true; dropHistory('d1');
+    return kept && /has not loaded completely/.test(msg) || { kept, msg };`);
+
   await check('versions waiting in memory survive when stored versions give way to a draft', `
     keepVersion('test', 'Stored version.');
     historyUnsaved.d1 = [{ at: Date.now(), why: 'test', text: 'Waiting in memory.' }]; /* did not fit */
