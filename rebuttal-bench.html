@@ -413,6 +413,7 @@ window.MathJax = {
   .dtab:focus-visible, .dtool:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .dclose:hover { border-color: var(--err); color: var(--err); }
   .dadd { border-style: dashed; }
+  .dpanel { display: contents; }
 
   /* editor */
   #src {
@@ -865,7 +866,7 @@ window.MathJax = {
   <section class="pane" aria-label="Source editor">
     <div class="pane-head"><h2>Source</h2><span class="hint">exactly what you'll paste into OpenReview, or its compact form</span></div>
     <div class="drafts" id="draftBar"><div class="dtabs" id="draftTabs" role="tablist" aria-label="Drafts"></div><div class="dtools" id="draftTools"></div></div>
-    <textarea id="src" spellcheck="false" placeholder="Type or paste your rebuttal…"></textarea>
+    <div id="draftPanel" class="dpanel" role="tabpanel"><textarea id="src" spellcheck="false" placeholder="Type or paste your rebuttal…"></textarea></div>
     <div class="lint">
       <div class="lint-head"><span>Hazards</span> <span id="lintCount" class="zero">0</span><button type="button" id="fixAllBtn" hidden title="Rewrite every hazard that has a mechanical fix. One Ctrl+Z undoes the whole pass.">Fix all</button></div>
       <div id="lintList"></div>
@@ -3105,12 +3106,14 @@ function compactText(text, enabled, render, limits) {
    {active, list: [{id, name, at}], gone: {id: time}}. The first draft is
    "d1" (its text keeps the key every older version used); new drafts get
    random ids, so two windows adding a draft at the same moment cannot pick
-   the same one. `at` is when an entry was created or renamed; `gone` remembers
-   deletions, so lists saved by different windows, or by this one before a
-   reload, merge without losing a draft or bringing a deleted one back.
-   Anything unreadable falls back to the single draft older versions had. */
+   the same one. `at` is when an entry was created, renamed or re-created;
+   `gone` remembers when a draft was deleted. A deletion wins over every entry
+   that is not newer than it, so lists saved by different windows or devices,
+   or by this one before a reload, merge without losing a draft or bringing a
+   deleted one back. Anything unreadable falls back to the single draft older
+   versions had. */
 var DRAFT_ID = /^d[0-9a-z]{1,24}$/;
-var DRAFT_GONE_KEPT = 100;
+var DRAFT_GONE_KEPT = 2000; /* about 60 kB at most: deletions are cheap to remember */
 
 function parseDraftMeta(raw) {
   var meta = null;
@@ -3123,33 +3126,37 @@ function parseDraftMeta(raw) {
     });
   }
   (Array.isArray(meta.list) ? meta.list : []).forEach(function (d) {
-    if (!d || typeof d.id !== 'string' || !DRAFT_ID.test(d.id) || seen[d.id] || gone[d.id]) return;
+    if (!d || typeof d.id !== 'string' || !DRAFT_ID.test(d.id) || seen[d.id]) return;
+    var at = typeof d.at === 'number' && isFinite(d.at) ? d.at : 0;
+    if (gone[d.id] !== undefined && gone[d.id] >= at) return;
     seen[d.id] = true;
+    delete gone[d.id]; /* an entry newer than its deletion was re-created */
     var name = typeof d.name === 'string' ? d.name.replace(/\s+/g, ' ').trim().slice(0, 40) : '';
-    list.push({ id: d.id, name: name || 'Draft', at: typeof d.at === 'number' && isFinite(d.at) ? d.at : 0 });
+    list.push({ id: d.id, name: name || 'Draft', at: at });
   });
   if (!list.length) {
     list = [{ id: 'd1', name: 'Draft 1', at: 0 }];
     seen.d1 = true;
     delete gone.d1;
   }
-  /* Keep the newest deletions only: an old one has long been merged everywhere. */
-  var ids = Object.keys(gone).sort(function (a, b) { return gone[b] - gone[a]; });
   var kept = {};
-  ids.slice(0, DRAFT_GONE_KEPT).forEach(function (id) { kept[id] = gone[id]; });
+  Object.keys(gone).sort(function (a, b) { return gone[b] - gone[a]; }).slice(0, DRAFT_GONE_KEPT)
+    .forEach(function (id) { kept[id] = gone[id]; });
   var active = typeof meta.active === 'string' && seen[meta.active] === true ? meta.active : list[0].id;
-  return { active: active, list: list, gone: kept };
+  /* `saved`: when this copy (and its choice of open draft) was saved. */
+  var saved = typeof meta.saved === 'number' && isFinite(meta.saved) ? meta.saved : 0;
+  return { active: active, list: list, gone: kept, saved: saved };
 }
 
-/* Everything either list knows: drafts from both (the newer name wins),
-   deletions from both. The draft open in `mine` survives even a deletion from
-   elsewhere, since this window is still writing it. */
-function mergeDraftMeta(mine, theirs) {
+/* Everything either list knows: drafts from both (the newer `at` wins),
+   deletions from both. `now` is given when `mine` belongs to a live window:
+   its open draft, deleted elsewhere meanwhile, is re-created at `now`
+   instead, since someone is still writing it. */
+function mergeDraftMeta(mine, theirs, now) {
   var gone = {}, byId = Object.create(null), order = [];
   [mine.gone, theirs.gone].forEach(function (g) {
     Object.keys(g).forEach(function (id) { gone[id] = Math.max(gone[id] || 0, g[id]); });
   });
-  delete gone[mine.active];
   mine.list.concat(theirs.list).forEach(function (d) {
     var cur = byId[d.id];
     if (!cur) {
@@ -3160,8 +3167,12 @@ function mergeDraftMeta(mine, theirs) {
       cur.at = d.at;
     }
   });
+  var open = byId[mine.active];
+  if (now && open && gone[mine.active] !== undefined && gone[mine.active] >= open.at) open.at = Math.max(now, gone[mine.active] + 1);
+  /* The open draft and when it was chosen travel together, from `mine`. */
   return parseDraftMeta({
     active: mine.active,
+    saved: mine.saved,
     list: order.map(function (id) { return byId[id]; }),
     gone: gone
   });
@@ -3431,7 +3442,7 @@ function renderOpenReviewMarkdown(text) {
 var ta = document.getElementById('src');
 /* Until the drafts are restored nothing may be typed: there is no way to
    tell yet which draft the text would belong to. */
-var TA_PLACEHOLDER = ta.placeholder, localMeta = null;
+var TA_PLACEHOLDER = ta.placeholder, localMeta = null, metaChanged = false;
 ta.readOnly = true;
 ta.placeholder = 'Loading your drafts…';
 var preview = document.getElementById('preview');
@@ -3491,47 +3502,59 @@ VENUES.forEach(function (v) {
 
 /* ---- persistence: artifact storage -> localStorage -> memory ---- */
 var canArtifactStore = !!(window.storage && typeof window.storage.get === 'function' && typeof window.storage.set === 'function' && typeof window.storage.delete === 'function');
-var canLocalStore = (function () {
-  try { var k = '__probe__'; localStorage.setItem(k, '1'); localStorage.removeItem(k); return true; }
-  catch (e) { return false; }
+/* Reading and writing are probed apart: a full localStorage still holds
+   drafts worth reading. */
+var canLocalRead = (function () {
+  try { localStorage.getItem('__probe__'); return true; } catch (e) { return false; }
 })();
 var memStore = {};
+/* Keys whose last local write failed (quota): their newer value lives in
+   memStore, and reads must not fall back to the older stored copy. */
+var memNewer = {};
 
 function fallbackGet(key) {
-  if (canLocalStore) { try { return localStorage.getItem(key); } catch (e) {} }
+  if (canLocalRead && !memNewer[key]) { try { return localStorage.getItem(key); } catch (e) {} }
   return Object.prototype.hasOwnProperty.call(memStore, key) ? memStore[key] : null;
 }
 function fallbackSet(key, val) {
   var ok = false;
-  if (canLocalStore) { try { localStorage.setItem(key, val); ok = true; } catch (e) {} }
+  if (canLocalRead) { try { localStorage.setItem(key, val); ok = true; } catch (e) {} }
   memStore[key] = val;
+  if (ok || !canLocalRead) delete memNewer[key];
+  else memNewer[key] = true;
   return ok;
+}
+function fallbackDel(key) {
+  delete memStore[key];
+  delete memNewer[key];
+  if (canLocalRead) { try { localStorage.removeItem(key); } catch (e) {} }
+}
+/* The asynchronous store's methods may also throw synchronously; either way
+   the caller gets a settled promise. */
+function remoteRead(key) {
+  try {
+    return Promise.resolve(window.storage.get(key, false)).then(
+      function (r) { return { ok: true, value: r ? r.value : null }; },
+      function () { return { ok: false, value: null }; });
+  } catch (e) {
+    return Promise.resolve({ ok: false, value: null });
+  }
 }
 function storeGet(key) {
   if (canArtifactStore) {
-    return window.storage.get(key, false)
-      .then(function (r) { return r ? r.value : fallbackGet(key); })
-      .catch(function () { return fallbackGet(key); });
+    return remoteRead(key).then(function (r) { return r.ok && r.value !== null ? r.value : fallbackGet(key); });
   }
   return Promise.resolve(fallbackGet(key));
 }
 function storeSet(key, val) {
   var localOk = fallbackSet(key, val);
-  if (canArtifactStore) {
-    return window.storage.set(key, val, false)
-      .then(function () { return true; })
-      .catch(function () { return localOk; });
+  if (!canArtifactStore) return Promise.resolve(localOk);
+  try {
+    return Promise.resolve(window.storage.set(key, val, false))
+      .then(function () { return true; }, function () { return localOk; });
+  } catch (e) {
+    return Promise.resolve(localOk);
   }
-  return Promise.resolve(localOk);
-}
-function fallbackDel(key) {
-  delete memStore[key];
-  if (canLocalStore) { try { localStorage.removeItem(key); } catch (e) {} }
-}
-function storeDel(key) {
-  fallbackDel(key);
-  if (canArtifactStore) return window.storage.delete(key, false).catch(function () {});
-  return Promise.resolve();
 }
 
 /* ---- preferences (theme, font sizes, limit, sync) ---- */
@@ -3591,29 +3614,36 @@ function savePrefs() {
    there were several, the others under DRAFT_KEY + '-' + id; the list of
    drafts under DRAFTS_KEY. A value goes to localStorage at once and to the
    asynchronous store (when the page runs where there is one) in the
-   background. pagehide cannot wait for the latter, so the last keystrokes are
-   flushed locally and marked pending (the key + '-pending'), together with
-   the stored value they were based on. At the next start the pending copy
-   wins, unless the store has changed since (another device). */
+   background. Whenever the store may not have the latest value (leaving the
+   page, switching drafts, a write that failed or is still on its way), the
+   local copy is marked pending (the key + '-pending'), together with the
+   last value the store confirmed and the values still on their way. At the
+   next start the pending copy wins, unless the store holds something else
+   since (another device). */
 var DRAFTS_KEY = 'rebuttal-bench-drafts';
 var draftMeta = parseDraftMeta(null);
 var draftKey = DRAFT_KEY;  /* the storage key of the draft in the editor */
 var draftTexts = {};       /* id -> text of the drafts not in the editor */
-var openedText = '';       /* the open draft as it was when opened: unchanged, it is not written back */
+var savedText = '';        /* what this window last saved or loaded for the open draft: the editor
+                              differs from it only after a real edit, which alone is written back */
 var remoteDrafts = {};     /* key -> the value the asynchronous store last confirmed */
 var remoteQueue = {};      /* key -> writes waiting for the asynchronous store */
-var draftReady = false;    /* the saved drafts have been restored */
+var draftReady = false;    /* the open draft has been restored */
 var draftTimer = null;
 function keyOfDraft(id) { return id === 'd1' ? DRAFT_KEY : DRAFT_KEY + '-' + id; }
 function pendingKey(key) { return key + '-pending'; }
+function deletingKey(key) { return key + ':deleting'; }
 
 /* Writes and deletions (value null) of one key reach the asynchronous store
    one at a time and in order, and only the latest value waiting is sent: an
    older write finishing last can no longer roll a draft back, nor bring back
-   one deleted since. Resolves to {ok, value} for the value actually written. */
-function remoteWrite(key, value) {
-  var q = remoteQueue[key] || (remoteQueue[key] = { busy: false, waiting: false, value: null, cbs: [] });
+   one deleted since. `merge(mine, stored)`, when given, combines the value
+   with what the store holds at that moment (the list of drafts, which several
+   devices write). Resolves to {ok, value} for the value actually written. */
+function remoteWrite(key, value, merge) {
+  var q = remoteQueue[key] || (remoteQueue[key] = { busy: false, waiting: false, value: null, sending: null, cbs: [] });
   q.value = value;
+  q.merge = merge || null;
   q.waiting = true;
   return new Promise(function (resolve) {
     q.cbs.push(resolve);
@@ -3623,18 +3653,50 @@ function remoteWrite(key, value) {
 function pumpRemote(key) {
   var q = remoteQueue[key];
   if (q.busy || !q.waiting) return;
-  var value = q.value, cbs = q.cbs;
+  var value = q.value, merge = q.merge, cbs = q.cbs;
   q.waiting = false;
   q.cbs = [];
   q.busy = true;
-  var done = function (ok) {
+  q.sending = value;
+  var done = function (ok, written) {
     q.busy = false;
-    cbs.forEach(function (cb) { cb({ ok: ok, value: value }); });
+    q.sending = null;
+    cbs.forEach(function (cb) { cb({ ok: ok, value: written }); });
     pumpRemote(key);
   };
-  var op;
-  try { op = value === null ? window.storage.delete(key, false) : window.storage.set(key, value, false); } catch (e) { op = null; }
-  Promise.resolve(op).then(function () { done(!!op); }, function () { done(false); });
+  var write = function (v) {
+    try {
+      return Promise.resolve(v === null ? window.storage.delete(key, false) : window.storage.set(key, v, false))
+        .then(function () { return true; }, function () { return false; });
+    } catch (e) {
+      return Promise.resolve(false);
+    }
+  };
+  if (!merge || value === null) {
+    write(value).then(function (ok) { done(ok, value); });
+    return;
+  }
+  remoteRead(key).then(function (r) {
+    if (!r.ok) { done(false, value); return; }
+    var v = merge(value, r.value);
+    q.sending = v;
+    write(v).then(function (ok) { done(ok, v); });
+  });
+}
+
+/* Mark `key`'s local copy pending against the last value the store confirmed
+   (an existing marker keeps its base until the store confirms something), and
+   list the values still on their way: if one of those lands after this page
+   is gone, it is ours, not another device's. */
+function markPending(key) {
+  if (!canArtifactStore) return;
+  var old = null, q = remoteQueue[key], also = [];
+  try { old = JSON.parse(fallbackGet(pendingKey(key)) || 'null'); } catch (e) {}
+  if (q && q.sending !== null) also.push(q.sending);
+  if (q && q.waiting && q.value !== null) also.push(q.value);
+  if (old && old.also) old.also.forEach(function (v) { if (also.indexOf(v) === -1) also.push(v); });
+  var base = remoteDrafts.hasOwnProperty(key) ? remoteDrafts[key] : (old ? old.base : null);
+  fallbackSet(pendingKey(key), JSON.stringify({ base: base, also: also.slice(-4) }));
 }
 
 /* The store now holds `value`: a local copy that is the same is no longer
@@ -3642,7 +3704,7 @@ function pumpRemote(key) {
 function confirmRemote(key, value) {
   remoteDrafts[key] = value;
   if (fallbackGet(key) === value) fallbackDel(pendingKey(key));
-  else if (fallbackGet(pendingKey(key)) !== null) fallbackSet(pendingKey(key), JSON.stringify({ base: value }));
+  else if (fallbackGet(pendingKey(key)) !== null) markPending(key);
 }
 
 function storeDraft(value, key) {
@@ -3650,62 +3712,71 @@ function storeDraft(value, key) {
   var localOk = fallbackSet(key, value);
   if (!canArtifactStore) return Promise.resolve(localOk);
   return remoteWrite(key, value).then(function (r) {
-    if (!r.ok) return localOk;
+    if (!r.ok) { markPending(key); return localOk; }
     confirmRemote(key, r.value);
     return true;
   });
 }
 
+/* A deletion is remembered (key + ':deleting') until the store confirms it,
+   and retried at the next start, so neither a failed request nor a page
+   closed first can leave the text for an older version to show. */
 function deleteDraftStorage(key) {
   fallbackDel(key);
   fallbackDel(pendingKey(key));
   delete remoteDrafts[key];
-  if (canArtifactStore) remoteWrite(key, null);
+  if (!canArtifactStore) return;
+  fallbackSet(deletingKey(key), '1');
+  remoteWrite(key, null).then(function (r) { if (r.ok) fallbackDel(deletingKey(key)); });
+}
+function retryDeletes() {
+  if (!canArtifactStore || !canLocalRead) return;
+  var keys = [];
+  try {
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf(DRAFT_KEY) === 0 && /:deleting$/.test(k)) keys.push(k.slice(0, -':deleting'.length));
+    }
+  } catch (e) {}
+  keys.forEach(function (key) {
+    remoteWrite(key, null).then(function (r) { if (r.ok) fallbackDel(deletingKey(key)); });
+  });
 }
 
 /* For when the asynchronous store may not get the text in time (leaving the
-   page, switching drafts): keep it locally and mark it pending against the
-   last value the store confirmed. An existing marker keeps its base until the
-   store confirms something newer. */
+   page, switching drafts): keep it locally and mark it pending. */
 function flushDraftLocally(value, key) {
   fallbackSet(key, value);
-  if (!canArtifactStore || value === remoteDrafts[key]) return;
-  if (fallbackGet(pendingKey(key)) !== null && !remoteDrafts.hasOwnProperty(key)) return;
-  fallbackSet(pendingKey(key), JSON.stringify({ base: remoteDrafts.hasOwnProperty(key) ? remoteDrafts[key] : null }));
+  if (canArtifactStore && value !== remoteDrafts[key]) markPending(key);
 }
 
+/* What `key` holds: {value, pending, failed}. The choice between the stored
+   and the local copy is made when the store answers, not when the read
+   starts, since another window may save meanwhile. `failed`: the store could
+   not be read and there is no local copy either. */
 function loadDraft(key) {
   key = key || draftKey;
-  var local = fallbackGet(key), pending = null;
-  try { pending = JSON.parse(fallbackGet(pendingKey(key)) || 'null'); } catch (e) {}
-  if (!canArtifactStore || !pending || typeof local !== 'string') {
-    return storeGet(key).then(function (value) {
-      if (canArtifactStore && typeof value === 'string') {
-        remoteDrafts[key] = value;
-        /* Keep the local copy current: opening a draft reads it. */
-        if (value !== local) fallbackSet(key, value);
-      }
-      return { value: value, pending: false };
-    });
-  }
-  return window.storage.get(key, false).then(function (r) {
-    var remote = r ? r.value : null;
-    if (remote === null || remote === pending.base) {
-      /* The local copy wins; remember the base it was written against, so a
-         later flush keeps pointing at it. */
+  if (!canArtifactStore) return Promise.resolve({ value: fallbackGet(key), pending: false, failed: false });
+  return remoteRead(key).then(function (r) {
+    var local = fallbackGet(key), pending = null;
+    try { pending = JSON.parse(fallbackGet(pendingKey(key)) || 'null'); } catch (e) {}
+    if (!r.ok) return { value: local, pending: !!pending && typeof local === 'string', failed: typeof local !== 'string' };
+    var remote = r.value;
+    if (pending && typeof local === 'string' &&
+        (remote === null || remote === pending.base || (pending.also || []).indexOf(remote) !== -1)) {
+      /* The local copy wins; remember the base it was written against. */
       remoteDrafts[key] = remote;
-      return { value: local, pending: true };
+      return { value: local, pending: true, failed: false };
     }
-    fallbackDel(pendingKey(key)); /* saved elsewhere since: that draft is newer */
-    fallbackSet(key, remote);
+    if (pending) fallbackDel(pendingKey(key)); /* saved elsewhere since: that copy is newer */
     remoteDrafts[key] = remote;
-    return { value: remote, pending: false };
-  }, function () {
-    return { value: local, pending: true };
+    if (remote === null) return { value: local, pending: typeof local === 'string', failed: false };
+    if (remote !== local) fallbackSet(key, remote); /* opening a draft reads the local copy */
+    return { value: remote, pending: false, failed: false };
   });
 }
 function saveDraftSoon() {
-  if (!draftReady) return;
+  if (!draftReady || ta.readOnly) return;
   saveStateEl.textContent = 'Saving…';
   clearTimeout(draftTimer);
   draftTimer = setTimeout(saveDraftNow, 700);
@@ -3713,9 +3784,11 @@ function saveDraftSoon() {
 /* The status line speaks for the draft in the editor only: a save of another
    draft, or of an older text of this one, finishing late does not claim it. */
 function saveDraftNow() {
-  if (!draftReady) return;
+  if (!draftReady || ta.readOnly) return;
   var key = draftKey, value = ta.value;
-  storeDraft(value, key).then(function (persisted) {
+  var done = storeDraft(value, key);
+  if (fallbackGet(key) === value) savedText = value;
+  done.then(function (persisted) {
     if (key === draftKey && value === ta.value) saveStateEl.textContent = persisted ? 'Draft saved' : 'Draft in memory only';
   });
 }
@@ -3949,6 +4022,9 @@ function updateAll() {
 /* ---- drafts: one per reviewer, a general response, a follow-up ---- */
 var draftTabs = document.getElementById('draftTabs');
 var draftTools = document.getElementById('draftTools');
+var draftPanel = document.getElementById('draftPanel');
+var bodyState = {}; /* id -> 'loading' | 'ready' | 'failed': whether its text has been read */
+var bodyLoads = {}; /* id -> the read in progress */
 
 function draftById(id) {
   for (var i = 0; i < draftMeta.list.length; i++) if (draftMeta.list[i].id === id) return draftMeta.list[i];
@@ -3960,94 +4036,170 @@ function draftText(id) {
   return typeof local === 'string' ? local : (draftTexts[id] || '');
 }
 
-/* Another window may have changed the list since this one read it: merge with
-   the latest local copy first, so its drafts stay listed and its deletions
-   stick. The list goes through the same pending logic as a draft's text. */
+/* Read draft `id` (again). Its text is kept for when it is opened. */
+function startBodyLoad(id) {
+  bodyState[id] = 'loading';
+  var key = keyOfDraft(id);
+  bodyLoads[id] = loadDraft(key).then(function (res) {
+    bodyState[id] = res.failed ? 'failed' : 'ready';
+    if (!res.failed && id !== draftMeta.active) draftTexts[id] = typeof res.value === 'string' ? res.value : '';
+    /* Bring the store up to date with a local copy it never got. */
+    if (res.pending && id !== draftMeta.active && typeof res.value === 'string') storeDraft(res.value, key);
+    return res;
+  });
+  return bodyLoads[id];
+}
+
+/* Take in a list saved elsewhere (another window, another device, this one
+   before a reload). If the draft open here was deleted there, it is re-created
+   with the text in this editor, since someone is still writing it. */
+function adoptDraftMeta(theirs) {
+  var wasGone = theirs.gone[draftMeta.active] !== undefined && draftReady;
+  draftMeta = mergeDraftMeta(draftMeta, theirs, draftReady ? Date.now() : 0);
+  if (wasGone && draftById(draftMeta.active)) {
+    storeDraft(ta.value, draftKey);
+    savedText = ta.value;
+    return true;
+  }
+  return false;
+}
+
+/* The list is merged with the latest local copy before it is written, and
+   with the store's copy while it is written (several devices write it), so
+   no window or device drops another's drafts or undoes its deletions. */
 function saveDraftMeta() {
   var latest = fallbackGet(DRAFTS_KEY);
-  if (typeof latest === 'string') draftMeta = mergeDraftMeta(draftMeta, parseDraftMeta(latest));
+  if (typeof latest === 'string' && adoptDraftMeta(parseDraftMeta(latest))) { /* body re-created */ }
+  draftMeta.saved = Date.now();
   var json = JSON.stringify(draftMeta);
   flushDraftLocally(json, DRAFTS_KEY);
-  return storeDraft(json, DRAFTS_KEY);
+  if (!canArtifactStore) return Promise.resolve(true);
+  return remoteWrite(DRAFTS_KEY, json, function (mine, stored) {
+    return stored === null ? mine : JSON.stringify(mergeDraftMeta(parseDraftMeta(mine), parseDraftMeta(stored), Date.now()));
+  }).then(function (r) {
+    if (!r.ok) { markPending(DRAFTS_KEY); return false; }
+    confirmRemote(DRAFTS_KEY, r.value);
+    if (r.value !== json) {
+      /* The store knew drafts or deletions this window did not. */
+      adoptDraftMeta(parseDraftMeta(r.value));
+      fallbackSet(DRAFTS_KEY, JSON.stringify(draftMeta));
+      if (fallbackGet(DRAFTS_KEY) !== r.value) markPending(DRAFTS_KEY);
+      draftMeta.list.forEach(function (d) { if (!bodyState[d.id]) startBodyLoad(d.id); });
+      renderDraftTabs();
+    }
+    return true;
+  });
 }
 
 /* A draft body stored here but missing from the list (a list write that never
    landed, an older list from another window) gets its tab back instead of
-   staying hidden. Only localStorage can be listed. */
+   staying hidden; so does an answer written by an older version under the
+   first draft's key after that draft was deleted. Only localStorage can be
+   listed, and only exactly keyed, nonempty bodies count. */
 function recoverDraftBodies() {
-  if (!canLocalStore) return false;
-  var prefix = DRAFT_KEY + '-', listed = {}, found = false;
+  if (!canLocalRead) return false;
+  var listed = {}, found = false, ids = [];
   draftMeta.list.forEach(function (d) { listed[d.id] = true; });
   try {
     for (var i = 0; i < localStorage.length; i++) {
       var k = localStorage.key(i);
-      if (!k || k.indexOf(prefix) !== 0 || /-pending$/.test(k)) continue;
-      var id = k.slice(prefix.length), text = localStorage.getItem(k);
-      if (!DRAFT_ID.test(id) || listed[id] || draftMeta.gone[id] || !text || !text.trim()) continue;
-      draftMeta.list.push({ id: id, name: 'Recovered draft', at: Date.now() });
-      listed[id] = true;
-      found = true;
+      if (k === DRAFT_KEY) ids.push('d1');
+      else if (k && k.indexOf(DRAFT_KEY + '-') === 0 && !/-pending$/.test(k)) ids.push(k.slice(DRAFT_KEY.length + 1));
     }
   } catch (e) {}
+  ids.forEach(function (id) {
+    var key = keyOfDraft(id), text = fallbackGet(key);
+    if (!DRAFT_ID.test(id) || listed[id] || fallbackGet(deletingKey(key)) !== null || !text || !text.trim()) return;
+    if (draftMeta.gone[id] !== undefined && id !== 'd1') return; /* deleted here: a stale copy */
+    draftMeta.list.push({ id: id, name: 'Recovered draft', at: Date.now() });
+    delete draftMeta.gone[id];
+    listed[id] = true;
+    found = true;
+  });
   return found;
 }
 
 /* Tabs carry their length as OpenReview counts it, red when over the limit,
    so four answers can be balanced at a glance. Keyboard: the tabs form one
-   stop (arrows move, Enter opens, F2 renames); Rename, delete and New sit
-   beside them. */
+   stop (arrows move, Enter opens, F2 renames the focused one); Rename, Delete
+   and + Draft sit beside them. */
 function renderDraftTabs() {
   if (!draftReady) return;
   var limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
-  var focused = document.activeElement && document.activeElement.closest && document.activeElement.closest('#draftTabs .dtab');
-  var focusId = focused ? focused.getAttribute('data-id') : null, html = '';
+  var focusedTab = document.activeElement && document.activeElement.closest && document.activeElement.closest('#draftTabs .dtab');
+  var focusedTool = document.activeElement && document.activeElement.closest && document.activeElement.closest('#draftTools .dtool');
+  var focusId = focusedTab ? focusedTab.getAttribute('data-id') : null;
+  var focusAct = focusedTool ? focusedTool.getAttribute('data-act') : null, html = '';
   draftMeta.list.forEach(function (d) {
     var active = d.id === draftMeta.active, n = draftText(d.id).trim().length;
-    html += '<button type="button" role="tab" class="dtab" id="dtab-' + d.id + '" data-id="' + d.id + '" aria-controls="src"' +
+    html += '<button type="button" role="tab" class="dtab" id="dtab-' + d.id + '" data-id="' + d.id + '" aria-controls="draftPanel"' +
       ' aria-selected="' + active + '" tabindex="' + (active ? 0 : -1) + '" title="' +
-      escAttr(active ? d.name + ' (F2 or double-click to rename)' : 'Open ' + d.name) + '"><span class="dname">' + escHtml(d.name) +
-      '</span><span class="dcount' + (limit > 0 && n > limit ? ' over' : '') + '">' + fmt(n) + '</span></button>';
+      escAttr(active ? d.name + ' (F2 or double-click to rename)' : 'Open ' + d.name + ' (F2 to rename)') + '"><span class="dname">' +
+      escHtml(d.name) + '</span><span class="dcount' + (limit > 0 && n > limit ? ' over' : '') + '">' + fmt(n) + '</span></button>';
   });
   draftTabs.innerHTML = html;
   draftTools.innerHTML = '<button type="button" class="dtool" data-act="rename" title="Rename the open draft (F2)">Rename</button>' +
     (draftMeta.list.length > 1 ? '<button type="button" class="dtool dclose" data-act="delete" title="Delete the open draft">Delete</button>' : '') +
     '<button type="button" class="dtool dadd" data-act="add" title="A new draft: one per reviewer, a general response, a follow-up">+ Draft</button>';
-  ta.setAttribute('aria-labelledby', 'dtab-' + draftMeta.active);
-  if (focusId) {
-    var again = draftTabs.querySelector('.dtab[data-id="' + focusId + '"]');
-    if (again) again.focus();
-  }
+  draftPanel.setAttribute('aria-labelledby', 'dtab-' + draftMeta.active);
+  var again = focusId ? draftTabs.querySelector('.dtab[data-id="' + focusId + '"]')
+    : focusAct ? draftTools.querySelector('.dtool[data-act="' + focusAct + '"]') : null;
+  if (again) again.focus();
 }
 
 /* Put draft `id` in a fresh editor, with an undo history of its own: Ctrl+Z
    can never bring another draft's text into this one. The text comes from
-   the local copy, which every window of this browser keeps current. */
+   the local copy, which every window of this browser keeps current; a draft
+   whose text has not been read yet (or could not be) is read first, with the
+   editor locked meanwhile. */
 function openDraft(id) {
   var local = fallbackGet(keyOfDraft(id)); /* read before `id` becomes the open draft */
   var text = typeof local === 'string' ? local : (draftTexts[id] || '');
+  var state = bodyState[id] || 'ready';
   draftMeta.active = id;
   draftKey = keyOfDraft(id);
   delete draftTexts[id];
-  openedText = text;
+  savedText = text;
   freshEditor(text);
   ta.scrollTop = 0;
   saveStateEl.textContent = '';
+  if (state !== 'ready') {
+    ta.readOnly = true;
+    ta.placeholder = 'Loading this draft…';
+    var load = state === 'failed' ? startBodyLoad(id) : bodyLoads[id];
+    var give = setTimeout(function () { unlockDraft(id, null); }, 8000);
+    load.then(function (res) { clearTimeout(give); unlockDraft(id, res); });
+  }
+  updateAll();
+  renderPreview();
+}
+function unlockDraft(id, res) {
+  if (draftMeta.active !== id || !ta.readOnly) return;
+  if (res && !res.failed) {
+    ta.value = savedText = typeof res.value === 'string' ? res.value : '';
+  } else {
+    saveStateEl.textContent = 'Could not read this draft from storage: showing this browser’s copy';
+  }
+  ta.readOnly = false;
+  ta.placeholder = TA_PLACEHOLDER;
   updateAll();
   renderPreview();
 }
 
 function switchDraft(id) {
   if (!draftReady || id === draftMeta.active || !draftById(id)) return;
-  /* A draft that was changed is written now, locally at once and marked
-     pending until the asynchronous store confirms it; one that was only
-     looked at is not written at all, so a stale copy cannot overwrite a newer
-     one saved meanwhile (another window, another device). */
+  /* Only a real edit since the last save is written now (locally at once,
+     pending until the store confirms it). A draft only looked at is not
+     written at all, so a stale copy cannot overwrite a newer one saved
+     meanwhile in another window or on another device. */
   clearTimeout(draftTimer);
   var leaving = ta.value;
-  draftTexts[draftMeta.active] = leaving;
-  if (leaving !== openedText) {
-    flushDraftLocally(leaving, draftKey);
-    storeDraft(leaving, draftKey);
+  if (!ta.readOnly) {
+    draftTexts[draftMeta.active] = leaving;
+    if (leaving !== savedText) {
+      flushDraftLocally(leaving, draftKey);
+      storeDraft(leaving, draftKey);
+    }
   }
   openDraft(id);
   saveDraftMeta();
@@ -4057,8 +4209,9 @@ function switchDraft(id) {
    list (saveDraftMeta, or switchDraft, which does). */
 function createDraft(name, text) {
   var id = newDraftId();
-  while (draftById(id) || draftMeta.gone[id] || fallbackGet(keyOfDraft(id)) !== null) id = newDraftId();
+  while (draftById(id) || draftMeta.gone[id] !== undefined || fallbackGet(keyOfDraft(id)) !== null) id = newDraftId();
   draftMeta.list.push({ id: id, name: name.slice(0, 40), at: Date.now() });
+  bodyState[id] = 'ready';
   flushDraftLocally(text, keyOfDraft(id)); /* pending until the store has it */
   storeDraft(text, keyOfDraft(id));
   draftTexts[id] = text;
@@ -4077,7 +4230,8 @@ function renameDraft(id) {
   var name = window.prompt('Name this draft (a reviewer’s ID, "General", "Follow-up", ...):', d.name);
   if (name === null) return;
   name = name.replace(/\s+/g, ' ').trim().slice(0, 40);
-  if (!name) return;
+  if (!name || !draftById(id)) return;
+  d = draftById(id);
   d.name = name;
   d.at = Date.now();
   saveDraftMeta();
@@ -4085,12 +4239,15 @@ function renameDraft(id) {
 }
 
 function deleteDraft(id) {
+  /* Another window may have deleted drafts meanwhile: never delete the last. */
+  var latest = fallbackGet(DRAFTS_KEY);
+  if (typeof latest === 'string') adoptDraftMeta(parseDraftMeta(latest));
   var d = draftById(id);
-  if (!d || draftMeta.list.length < 2) return;
+  if (!d || draftMeta.list.length < 2) { renderDraftTabs(); return; }
   if (draftText(id).trim() && !window.confirm('Delete the draft “' + d.name + '”? Its text cannot be brought back.')) return;
   var i = draftMeta.list.indexOf(d);
   draftMeta.list.splice(i, 1);
-  draftMeta.gone[id] = Date.now();
+  draftMeta.gone[id] = Math.max(Date.now(), d.at + 1);
   delete draftTexts[id];
   if (id === draftMeta.active) {
     clearTimeout(draftTimer);
@@ -4115,7 +4272,7 @@ draftTabs.addEventListener('dblclick', function (e) {
 draftTabs.addEventListener('keydown', function (e) {
   var tab = e.target.closest('.dtab');
   if (!tab) return;
-  if (e.key === 'F2') { e.preventDefault(); renameDraft(draftMeta.active); return; }
+  if (e.key === 'F2') { e.preventDefault(); renameDraft(tab.getAttribute('data-id')); return; }
   var tabs = Array.prototype.slice.call(draftTabs.querySelectorAll('.dtab')), i = tabs.indexOf(tab), to = -1;
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') to = (i + 1) % tabs.length;
   else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') to = (i - 1 + tabs.length) % tabs.length;
@@ -4140,7 +4297,8 @@ draftTools.addEventListener('click', function (e) {
    wins, as it always has.) */
 window.addEventListener('storage', function (e) {
   if (!draftReady || e.key !== DRAFTS_KEY || typeof e.newValue !== 'string') return;
-  draftMeta = mergeDraftMeta(draftMeta, parseDraftMeta(e.newValue));
+  if (adoptDraftMeta(parseDraftMeta(e.newValue))) saveDraftMeta();
+  draftMeta.list.forEach(function (d) { if (!bodyState[d.id]) bodyState[d.id] = 'ready'; });
   renderDraftTabs();
 });
 
@@ -4474,10 +4632,15 @@ function schedule() {
   timer = setTimeout(function () { updateAll(); renderPreview(); }, 220);
 }
 
-onEditor('input', function () { userEdited = true; clearTimeout(compactTimer); saveDraftSoon(); schedule(); });
+onEditor('input', function () {
+  if (!draftReady) return; /* nothing belongs to a draft before they are restored */
+  userEdited = true; clearTimeout(compactTimer); saveDraftSoon(); schedule();
+});
 /* beforeunload is not delivered reliably (mobile, bfcache); pagehide is. */
 function flushDraft() {
-  if (!draftReady && !userEdited) return; /* nothing restored or typed yet: keep the saved draft */
+  /* Only an edit not yet saved: an untouched window must not write its
+     older copy over a newer one saved in another window. */
+  if (!draftReady || ta.readOnly || ta.value === savedText) return;
   flushDraftLocally(ta.value, draftKey);
 }
 window.addEventListener('beforeunload', flushDraft);
@@ -4580,6 +4743,7 @@ document.getElementById('clearBtn').addEventListener('click', function () {
   if (ta.value && !window.confirm('Clear the editor and its local autosave? (' + UNDO_HINT + ' in the editor brings it back.)')) return;
   setSourceText('', 0);
   var key = draftKey;
+  savedText = '';
   storeDraft('').then(function (persisted) {
     if (key === draftKey && !ta.value) saveStateEl.textContent = persisted ? 'Blank draft saved' : 'Blank draft in memory only';
   });
@@ -4632,39 +4796,63 @@ storeGet(PREFS_KEY).then(function (v) {
   localMeta = fallbackGet(DRAFTS_KEY); /* before loading refreshes the local copy */
   return loadDraft(DRAFTS_KEY);
 }).then(function (metaRes) {
+  if (draftReady) return null; /* the watchdog started without the store */
   /* The list as stored, merged with this browser's copy (which can hold a
-     change the store never got), plus any draft body that has no tab. */
+     change the store never got), plus any draft body that has no tab. No
+     editor is open yet, so deletions apply to every draft. */
   draftMeta = parseDraftMeta(metaRes.value);
   var differs = typeof localMeta === 'string' && localMeta !== metaRes.value;
-  if (differs) draftMeta = mergeDraftMeta(draftMeta, parseDraftMeta(localMeta));
-  var changed = recoverDraftBodies() || metaRes.pending || differs;
+  if (differs) {
+    var mine = parseDraftMeta(localMeta), stored = draftMeta;
+    draftMeta = mergeDraftMeta(stored, mine, 0);
+    /* Reopen the draft chosen last: this browser's choice if its copy of the
+       list was saved after the stored one (and that draft still exists). */
+    if (mine.saved > stored.saved && draftMeta.list.some(function (d) { return d.id === mine.active; })) {
+      draftMeta.active = mine.active;
+      draftMeta.saved = mine.saved;
+    }
+  }
+  metaChanged = recoverDraftBodies() || metaRes.pending || differs;
+  retryDeletes();
   draftKey = keyOfDraft(draftMeta.active);
-  return Promise.all(draftMeta.list.map(function (d) { return loadDraft(keyOfDraft(d.id)); })).then(function (loaded) {
-    if (changed) saveDraftMeta();
-    return loaded;
-  });
-}).then(function (loaded) {
-  var draft = null;
-  draftMeta.list.forEach(function (d, i) {
-    if (d.id === draftMeta.active) { draft = loaded[i]; return; }
-    draftTexts[d.id] = typeof loaded[i].value === 'string' ? loaded[i].value : '';
-    if (loaded[i].pending) storeDraft(draftTexts[d.id], keyOfDraft(d.id));
-  });
+  /* Every draft is read, each bound to its own id; only the open one is
+     waited for. */
+  draftMeta.list.forEach(function (d) { startBodyLoad(d.id); });
+  return bodyLoads[draftMeta.active];
+}).then(function (draft) {
+  if (draft && !draftReady) finishBoot(draft, '');
+});
+
+/* Storage that never answers must not leave the editor locked: after a while,
+   start from this browser's own copies. */
+setTimeout(function () {
+  if (draftReady) return;
+  draftMeta = parseDraftMeta(fallbackGet(DRAFTS_KEY));
+  draftKey = keyOfDraft(draftMeta.active);
+  draftMeta.list.forEach(function (d) { bodyState[d.id] = 'ready'; });
+  finishBoot({ value: fallbackGet(draftKey), pending: false, failed: false },
+    'Storage did not answer: working from this browser’s copy');
+}, 8000);
+
+function finishBoot(draft, note) {
   draftReady = true;
   ta.readOnly = false;
   ta.placeholder = TA_PLACEHOLDER;
   if (typeof draft.value === 'string') {
-    ta.value = draft.value;
-    saveStateEl.textContent = draft.value ? 'Draft restored' : 'Blank draft restored';
+    ta.value = savedText = draft.value;
+    saveStateEl.textContent = note || (draft.value ? 'Draft restored' : 'Blank draft restored');
     if (draft.pending) saveDraftNow(); /* bring the asynchronous store up to date */
   } else {
-    ta.value = EXAMPLE;
+    /* Nothing stored, or the store could not be read: the example, which
+       counts as saved, so it is never written over a draft unless edited. */
+    ta.value = savedText = EXAMPLE;
+    if (draft.failed) saveStateEl.textContent = 'Could not read this draft from storage: open it again to retry';
   }
-  openedText = typeof draft.value === 'string' ? draft.value : null;
+  if (metaChanged) saveDraftMeta();
   renderDraftTabs();
   updateAll();
   renderPreview();
-});
+}
 </script>
 </body>
 </html>
