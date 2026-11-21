@@ -1,5 +1,30 @@
 # Changelog
 
+## 3.5.0 (unreleased)
+
+### History and files
+- *History* (beside the draft tabs) lists earlier versions of the open draft, each with its
+  time, why it was kept and its length. One is kept before *Fix all*, *Apply to source*, *Clear*,
+  *Load example* and a restore, and one every 10 minutes while you edit: up to 20 per draft, in
+  this browser only. *Restore* is undoable; *Copy* copies a version.
+- Versions never cost a draft: when a draft cannot be saved for lack of space, they give way,
+  and deleting a draft deletes its versions.
+- *Export all drafts* writes them to one `.json` file; *Download this draft* writes the open one
+  as `.md`. *Import* reads such a file, or any `.md`/`.txt` file as one draft, and only adds
+  drafts: a text already here is skipped, and a name already taken gets a number. The online
+  page and a downloaded copy keep separate drafts, so this is also how drafts move between them.
+- Safe with storage nearly full, several windows and a slow store: an import or a split saves
+  the open draft first, adds drafts only when their text and the list naming them are stored
+  (all parts of a split or none), and says what it left out; a draft that has not loaded is never
+  written to a file as blank; Restore refuses to replace text another window saved since; a
+  failed save is retried with the current text, so an undone edit cannot come back (a problem
+  older versions had); History, Split and Import table close when the open draft changes.
+- Two Codex reviews of this feature found 34 problems, all fixed and covered by tests except two
+  documented limits (AGENTS.md, "Drafts and storage").
+
+### Project
+- `tests/history.test.js` and fourteen smoke checks.
+
 ## 3.4.0 (2026-11-21)
 
 ### Before posting
@@ -40,30 +65,10 @@
   `\mmlToken{mtext}[mathcolor=red]{\R}` still looks like an undefined macro (its fix is refused),
   and a card can point at math in an image's title when the same formula also appears in text.
 
-### History and files
-- *History* (beside the draft tabs) lists earlier versions of the open draft, each with its
-  time, why it was kept and its length. One is kept before *Fix all*, *Apply to source*, *Clear*,
-  *Load example* and a restore, and one every 10 minutes while you edit: up to 20 per draft, in
-  this browser only. *Restore* is undoable; *Copy* copies a version.
-- Versions never cost a draft: when a draft cannot be saved for lack of space, they give way,
-  and deleting a draft deletes its versions.
-- *Export all drafts* writes them to one `.json` file; *Download this draft* writes the open one
-  as `.md`. *Import* reads such a file, or any `.md`/`.txt` file as one draft, and only adds
-  drafts: a text already here is skipped, and a name already taken gets a number. The online
-  page and a downloaded copy keep separate drafts, so this is also how drafts move between them.
-- Safe with storage nearly full, several windows and a slow store: an import or a split saves
-  the open draft first, adds drafts only when their text and the list naming them are stored
-  (all parts of a split or none), and says what it left out; a draft that has not loaded is never
-  written to a file as blank; Restore refuses to replace text another window saved since; a
-  failed save is retried with the current text, so an undone edit cannot come back (a problem
-  older versions had); History, Split and Import table close when the open draft changes.
-- Two Codex reviews of this feature found 34 problems, all fixed and covered by tests except two
-  documented limits (AGENTS.md, "Drafts and storage").
-
 ### Project
 - DOMPurify 3.4.17, which openreview-web now uses (reported by `npm run check-upstream`).
 - The drift check also watches the trim on posting.
-- `tests/preflight.test.js`, `tests/history.test.js`, and new smoke checks.
+- `tests/preflight.test.js` and ten smoke checks.
 
 ## 3.3.0 (2026-11-21)
 
