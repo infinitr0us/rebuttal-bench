@@ -50,7 +50,7 @@ window.MathJax = {
 };
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.6/lib/marked.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.13/purify.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.17/purify.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-chtml-full.js" async></script>
 
 <!-- OpenReview sets its note text in Noto Sans. -->
@@ -959,7 +959,7 @@ window.MathJax = {
 </main>
 
 <footer>
-  Pipeline mirror: Marked 15.0.6 in GFM mode with OpenReview’s HTML/image/checkbox renderers → DOMPurify 3.4.13 with OpenReview’s tag allowlist → MathJax 3.2.2 <code>tex-chtml-full</code> with <code>ui/safe</code>. Preview styling mirrors <code>.note-content .markdown-rendered</code> from the live openreview.net stylesheet — Noto Sans 12px/18px, 8px block gaps, rule-only tables — so at 100% zoom it is 1:1 with the site. Line <em>wrapping</em> still depends on the reader’s window width and reply depth, which no previewer can pin down. This follows the current <a href="https://github.com/openreview/openreview-web" target="_blank" rel="noopener">openreview-web implementation</a>; the live service can change, so give the posted comment one last glance. Drafts autosave only on this device. Rebuttal Bench is an independent tool, not affiliated with or endorsed by OpenReview.
+  Pipeline mirror: Marked 15.0.6 in GFM mode with OpenReview’s HTML/image/checkbox renderers → DOMPurify 3.4.17 with OpenReview’s tag allowlist → MathJax 3.2.2 <code>tex-chtml-full</code> with <code>ui/safe</code>. Preview styling mirrors <code>.note-content .markdown-rendered</code> from the live openreview.net stylesheet — Noto Sans 12px/18px, 8px block gaps, rule-only tables — so at 100% zoom it is 1:1 with the site. Line <em>wrapping</em> still depends on the reader’s window width and reply depth, which no previewer can pin down. This follows the current <a href="https://github.com/openreview/openreview-web" target="_blank" rel="noopener">openreview-web implementation</a>; the live service can change, so give the posted comment one last glance. Drafts autosave only on this device. Rebuttal Bench is an independent tool, not affiliated with or endorsed by OpenReview.
 </footer>
 
 <div class="modal" id="splitDialog" hidden>
@@ -1758,8 +1758,90 @@ function linkMayReveal(href, host) {
   return /\/~[A-Za-z]/.test(href);
 }
 
-/* `opts.venue`: the id of a VENUES preset, whose link rule then applies. */
+/* Whether `src` reads differently once posting trims its first `lead`
+   characters: null when its Markdown renders the same (as the note shows
+   it, see visibleHtml), else the first block before and after. Leading
+   blank lines never matter. */
+function postedStartChanges(src, lead) {
+  var api = (typeof window !== 'undefined') ? window.marked : null;
+  if (!lead || /^(?:[ \t]*\n)+$/.test(src.slice(0, lead)) || !api || typeof api.lexer !== 'function') return null;
+  var parse = typeof api.parse === 'function' ? api.parse : null, posted = src.slice(lead);
+  /* The same as the note shows it, and the same formulas for MathJax, whose
+     \verb and \text keep spaces the note collapses. */
+  try {
+    var a = parse && parse.call(api, src), b = parse && parse.call(api, posted);
+    if (parse && visibleHtml(a) === visibleHtml(b) &&
+        JSON.stringify(mathJaxInputs(a)) === JSON.stringify(mathJaxInputs(b))) return null;
+  } catch (e) {
+    return null;
+  }
+  function first(text) {
+    var toks;
+    try { toks = api.lexer(text); } catch (e) { return null; }
+    for (var i = 0; i < toks.length; i++) if (toks[i].type !== 'space') return toks[i];
+    return null;
+  }
+  return { before: first(src), after: first(posted) };
+}
+
+/* HTML about as a note with white-space: normal shows it: whitespace runs
+   outside <pre> collapse, and whitespace at the start or end of a block or
+   between blocks (a stray BOM or no-break space included) does not count. */
+var BLOCK_TAG = '(?:p|li|ul|ol|h[1-6]|blockquote|table|thead|tbody|tr|td|th|div|hr|pre)';
+function visibleHtml(html) {
+  return collapseWhitespace(html)
+    .replace(new RegExp('(<\\/?' + BLOCK_TAG + '\\b[^>]*>)\\s+', 'g'), '$1')
+    .replace(new RegExp('\\s+(<\\/?' + BLOCK_TAG + '\\b[^>]*>)', 'g'), '$1');
+}
+
+/* `opts.venue`: the id of a VENUES preset, whose link rule then applies.
+   OpenReview trims a comment when it posts it (constructEdit in
+   client/view-v2.js), so the checks read the comment as posted and every
+   offset they report is moved back into the editor's text; edits keep
+   their `was`. Check 16 says when the trimmed whitespace changes how the
+   start of the comment reads. */
 function analyze(src, opts) {
+  var lead = src.length - src.replace(/^\s+/, '').length;
+  var end = Math.max(lead, src.replace(/\s+$/, '').length);
+  if (!lead && end === src.length) return analyzeText(src, opts);
+  var res = analyzeText(src.slice(lead, end), opts);
+  if (!lead) return res;
+  res.issues.forEach(function (iss) {
+    iss.start += lead;
+    iss.end += lead;
+    if (iss.fix) iss.fix.edits.forEach(function (e) { e.start += lead; e.end += lead; });
+  });
+  res.spans.forEach(function (sp) {
+    ['start', 'end', 'innerStart', 'innerEnd', 'openAt', 'closeAt'].forEach(function (k) {
+      if (typeof sp[k] === 'number') sp[k] += lead;
+    });
+    (sp.refs || []).forEach(function (rf) { rf.start += lead; rf.end += lead; });
+  });
+
+  /* 16. The start as posted. Removing the whitespace cannot change the
+         posted comment, only the editor's version of it; it is still the
+         author's call, because an indented first line may have been meant
+         as code. */
+  var change = postedStartChanges(src, lead);
+  if (change) {
+    var lineEnd = src.indexOf('\n', lead), was = change.before, now = change.after;
+    var kind = !now ? 'nothing' : now.type === 'heading' ? 'a heading' : now.type === 'list' ? 'a list' :
+      now.type === 'blockquote' ? 'a quote' : now.type === 'table' ? 'a table' : now.type === 'code' ? 'code' : 'ordinary text';
+    res.issues.unshift({
+      sev: 'warn', title: 'Posting removes the leading whitespace',
+      detail: was && was.type === 'code' && !(now && now.type === 'code')
+        ? 'OpenReview trims a comment when it is posted, so this indented first line is not a code block there: it becomes ' + kind + ', as the preview shows. To post code, put it between <code>```</code> lines.'
+        : 'OpenReview trims a comment when it is posted, and without the whitespace before it the first line reads differently (' + kind + '), as the preview shows.',
+      start: 0, end: lineEnd < 0 ? src.length : lineEnd, math: false,
+      fix: { label: 'remove the leading whitespace', manual: true,
+        edits: [{ start: 0, end: lead, text: '', was: src.slice(0, lead) }] }
+    });
+  }
+  return res;
+}
+
+/* The analyzer's checks, on a comment as posted (see analyze). */
+function analyzeText(src, opts) {
   var issues = [];
   var issueKeys = Object.create(null);
 
@@ -1782,13 +1864,16 @@ function analyze(src, opts) {
     return f;
   }
 
+  /* Checks 1-7 are about Markdown damaging TeX: their cards can explain
+     why MathJax fails on a formula (texProblemIssues). */
+  var aboutMath = true;
   function push(sev, title, detail, start, end, autofix) {
     start = Math.max(0, Math.min(src.length, start));
     end = Math.max(start + 1, Math.min(src.length, end));
     var key = sev + '|' + title + '|' + start + '|' + end;
     if (issueKeys[key]) return;
     issueKeys[key] = true;
-    issues.push({ sev: sev, title: title, detail: detail, start: start, end: end, fix: autofix || null });
+    issues.push({ sev: sev, title: title, detail: detail, start: start, end: end, fix: autofix || null, math: aboutMath });
   }
 
   /* Markdown emphasis / strikethrough that ate TeX: shield both delimiter runs
@@ -2061,16 +2146,19 @@ function analyze(src, opts) {
 
   markedRanges.forEach(function (r) {
     if (!risky[r.type]) return;
+    var reported = false;
     for (var s = 0; s < spans.length; s++) {
       var sp = spans[s];
       if (!rangeOverlaps(r, sp) || rangeWraps(r, sp)) continue;
+      sp.cut = true; /* MathJax never sees this formula whole (texProblemIssues) */
+      if (reported) continue;
+      reported = true;
       var raw = src.slice(r.start, r.end);
       var offset = (r.type === 'link' || r.type === 'image') ? Math.max(0, raw.indexOf('[')) : 0;
       var hs = r.start + offset;
       var he = Math.min(r.end, hs + (r.type === 'strong' ? 2 : 1));
       var autofix = (r.type === 'em' || r.type === 'strong' || r.type === 'del') ? emphasisFix(r) : null;
       push('err', risky[r.type][0], risky[r.type][1], hs, he, autofix);
-      break;
     }
   });
 
@@ -2179,6 +2267,8 @@ function analyze(src, opts) {
     });
   }
 
+  aboutMath = false; /* the checks below are not about Markdown damaging TeX */
+
   /* 8. \ref / \eqref. OpenReview leaves MathJax's equation tags at 'none', so a
         reference resolves only to a \label in a formula of this comment that
         also carries a \tag{…}; any other reference shows as (???) or ???. */
@@ -2204,6 +2294,7 @@ function analyze(src, opts) {
 
   /* These checks describe OpenReview's Markdown output, so they require the
      parser. Keep their exclusions separate from the text MathJax searches. */
+  var commentRanges = []; /* HTML comments, as check 10 finds them */
   function checkLiteralText() {
     var protectedText = makeMask(src.length, codeRanges.concat(model.dropped, model.definitions,
       spans.filter(function (sp) { return !sp.recovered; })));
@@ -2310,6 +2401,7 @@ function analyze(src, opts) {
     }
     /* 10. Preserve a space between surrounding words and keep line breaks. */
     comments.forEach(function (t) {
+      commentRanges.push({ start: t.start, end: t.end });
       var a = t.start, b = t.end;
       if (src[a - 1] === ' ' && (b === src.length || /[ \n]/.test(src[b]))) a--;
       else if (src[b] === ' ' && (!a || src[a - 1] === '\n')) b++;
@@ -2452,6 +2544,86 @@ function analyze(src, opts) {
     }
   });
 
+  /* 17. Placeholders, posted as typed. Each pattern is limited to where it is
+         unmistakable: "XX" can be a product inside math, "??" an operator in
+         code, "[ref]" a link label. Text nobody sees (link destinations and
+         definitions, image syntax, a dropped table cell) is skipped, and so
+         are HTML comments, which have their own card. */
+  var skipText = makeMask(src.length, codeRanges.concat(model ? model.hidden.concat(model.definitions, model.dropped,
+    commentRanges, markedRanges.filter(function (r) {
+      /* only an OpenReview image hides its syntax; any other prints it */
+      return r.type === 'image' && r.token && typeof r.token.href === 'string' && r.token.href.indexOf('/images/') === 0;
+    })) : []));
+  var PLACEHOLDERS = [
+    /* a cross-reference to fill in: "Table X", "Fig. ??", "Section~XX", "Fig.X" */
+    { re: /\b(?:(?:Tables?|Figures?|Sections?|Appendix|Equations?|Theorems?|Lemmas?|Lines?|Pages?)(?:[ \t]|~)+|(?:Tab|Fig|Sec|App|Eqs?|Thm)\.(?:[ \t]|~)*)(?:X{1,3}|\?{1,3})(?![\w?])/g, math: false },
+    { re: /\bReviewer[ \t]+(?:X|XXXX|\?+)(?![\w?])/g, math: false },
+    { re: /\b(?:TODO|TBD|TBA|FIXME|[Ff]ixme)\b/g, math: true },
+    { re: /\bXXX+\b/g, math: false },
+    /* a number to fill in: "XX.X", "x.xx", "+X.X", "XX%" and "XX\%", also
+       at the end of a sentence */
+    { re: /(^|[^\w.])(X{1,3}(?:\.X{1,3})+|x{2,3}\.x{1,3}|x\.x{2,3}|X{1,3}(?=[ \t]?\\?%))(?!\w|\.\w)/g, math: true, group: 2 },
+    { re: /\?{2,}/g, math: false },
+    { re: /\[(?:cite|citation(?: needed)?|refs?|references?|todo|tbd|placeholder|(?:insert|add|fill in)\b[^\]\n]{0,60})\](?![(\[:])/gi, math: false },
+    { re: /\blorem ipsum\b/gi, math: true }
+  ];
+  var placed = new Uint8Array(src.length);
+  PLACEHOLDERS.forEach(function (p) {
+    var pm;
+    p.re.lastIndex = 0;
+    while ((pm = p.re.exec(src))) {
+      var ps = pm.index + (p.group ? pm[1].length : 0), pe = ps + (p.group ? pm[p.group] : pm[0]).length;
+      if (pe === ps) { p.re.lastIndex++; continue; }
+      if (skipText[ps] || placed[ps] || (!p.math && mathMask[ps])) continue;
+      for (var k = ps; k < pe; k++) placed[k] = 1;
+      push('warn', 'Placeholder left in the text',
+        '“' + escHtml(src.slice(ps, pe)) + '” looks like a placeholder. Reviewers would see it as typed: fill it in or remove it.',
+        ps, pe);
+    }
+  });
+
+  /* 18. Characters a PDF copy brings along. The invisible ones still count
+         toward the limit and stop a reviewer's search from finding the word;
+         ligatures are single characters that search does not match either.
+         A zero-width space can be deliberate (it keeps a URL from becoming a
+         link), so both fixes are the author's call. */
+  function pdfCharacters(re, title, detail, label, replace) {
+    var edits = [], first = -1, m;
+    re.lastIndex = 0;
+    while ((m = re.exec(src))) {
+      if (first < 0) first = m.index;
+      edits.push(edit(m.index, m.index + m[0].length, replace(m[0])));
+    }
+    if (first < 0) return;
+    /* Mark the word around the first one, since the character itself is
+       invisible in the card, without cutting a character in two. */
+    var a = first, b = first + 1;
+    while (a > 0 && a > first - 40 && /\S/.test(src[a - 1])) a--;
+    while (b < src.length && b < first + 40 && /\S/.test(src[b])) b++;
+    if (a > 0 && /[\udc00-\udfff]/.test(src[a])) a--;
+    if (b < src.length && /[\ud800-\udbff]/.test(src[b - 1])) b++;
+    var f = fix(label(edits.length), edits);
+    if (f) f.manual = true;
+    push('note', title, detail(edits.length), a, b, f);
+  }
+  pdfCharacters(/[\u00ad\u180e\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g,
+    'Invisible characters from a copy',
+    function (n) {
+      return (n === 1 ? 'An invisible character (a soft hyphen, zero-width space or direction mark) is' : n + ' invisible characters (soft hyphens, zero-width spaces, direction marks) are') +
+        ' in the text, usually from a PDF. Reviewers do not see ' + (n === 1 ? 'it' : 'them') + ', but ' + (n === 1 ? 'it counts' : 'they count') +
+        ' toward the limit and can keep a search from finding the word.';
+    },
+    function (n) { return n === 1 ? 'remove it' : 'remove all ' + n; },
+    function () { return ''; });
+  var LIGATURES = { '\ufb00': 'ff', '\ufb01': 'fi', '\ufb02': 'fl', '\ufb03': 'ffi', '\ufb04': 'ffl', '\ufb05': 'st', '\ufb06': 'st' };
+  pdfCharacters(/[\ufb00-\ufb06]/g, 'Ligature characters from a PDF',
+    function (n) {
+      return (n === 1 ? 'A ligature such as “\ufb01” is' : n + ' ligatures such as “\ufb01” are') +
+        ' a single character in place of its letters: a search for “fine” does not find “\ufb01ne”, and some fonts draw ' + (n === 1 ? 'it' : 'them') + ' differently.';
+    },
+    function (n) { return n === 1 ? 'spell it out' : 'spell all ' + n + ' out'; },
+    function (ch) { return LIGATURES[ch]; });
+
   issues.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
   return {
     issues: issues,
@@ -2505,6 +2677,290 @@ function fixAllText(text) {
     applied += roundCount;
   }
   return { text: text, applied: applied };
+}
+
+/* ---- TeX problems, as MathJax reports them ---- */
+
+/* Macros from LaTeX packages that MathJax 3.2.2 does not have, with a
+   replacement it does have (tests/preflight.test.js typesets each one). A
+   replacement goes into Markdown source, so it avoids "\" before ASCII
+   punctuation (Markdown would eat the backslash: "\," becomes ","), and "*",
+   "_", "[" and "|", which Markdown can pair. `to` replaces the control word
+   (`arg`: only where an argument follows it); `open`/`close` replace it and
+   the braces of its argument. A fix is still checked against the whole
+   comment, compiled by MathJax, when it is clicked (texProblemIssues). */
+var TEX_SUBSTITUTES = {
+  bm: { to: '\\boldsymbol', arg: true }, mathbold: { to: '\\boldsymbol', arg: true },
+  mathbbm: { to: '\\mathbb', arg: true }, mathds: { to: '\\mathbb', arg: true },
+  E: { to: '\\mathbb{E}' }, R: { to: '\\mathbb{R}' }, N: { to: '\\mathbb{N}' }, Z: { to: '\\mathbb{Z}' },
+  cmark: { to: '\\checkmark' }, xmark: { to: '\\times' },
+  argmax: { to: '\\mathop{\\mathrm{arg\\ max}}' }, argmin: { to: '\\mathop{\\mathrm{arg\\ min}}' },
+  eps: { to: '\\epsilon' }, given: { to: '\\mid' }, nicefrac: { to: '\\tfrac', arg: true }, emph: { to: '\\textit', arg: true },
+  iid: { to: '\\text{i.i.d.}' }, dd: { to: '\\mathrm{d}' }, vect: { to: '\\mathbf', arg: true },
+  ensuremath: { to: '', arg: true }, xspace: { to: '' },
+  abs: { open: '\\lvert ', close: '\\rvert' }, norm: { open: '\\lVert ', close: '\\rVert' },
+  SI: { hint: 'siunitx is not available: write the number and the unit, e.g. <code>5\\,\\mathrm{ms}</code>.' },
+  si: { hint: 'siunitx is not available: write the unit, e.g. <code>\\mathrm{ms}</code>.' },
+  num: { hint: 'siunitx is not available: write the number itself.' },
+  indep: { to: '\\perp\\mkern-10mu\\perp' },
+  llbracket: { hint: 'Write <code>[\\![</code> and <code>]\\!]</code>, doubling each backslash before <code>!</code> in Markdown.' },
+  rrbracket: { hint: 'Write <code>]\\!]</code>, doubling the backslash before <code>!</code> in Markdown.' }
+};
+['diag', 'tr', 'Tr', 'rank', 'sign', 'sgn', 'softmax', 'sigmoid', 'relu', 'ReLU', 'Var', 'Cov', 'Corr',
+ 'KL', 'supp', 'erf', 'logit', 'poly', 'polylog'].forEach(function (op) {
+  TEX_SUBSTITUTES[op] = { to: '\\operatorname{' + op + '}' };
+});
+
+/* \verb arguments (MathJax allows spaces before the delimiter) and TeX
+   comments: text MathJax does not execute. */
+var TEX_LITERAL = /\\verb\*?\s*([^a-zA-Z\s*])[\s\S]*?\1|\\[\s\S]|%[^\n]*/g;
+/* TeX that MathJax executes: without comments and \verb arguments. */
+function texCode(tex) {
+  return tex.replace(new RegExp(TEX_LITERAL.source, 'g'), function (m, delim) {
+    return m.charAt(0) === '%' || delim ? new Array(m.length + 1).join(' ') : m;
+  });
+}
+/* Where `tex` has text MathJax does not execute, as [start, end) pairs. */
+function texLiteralRanges(tex) {
+  var out = [], m, re = new RegExp(TEX_LITERAL.source, 'g');
+  while ((m = re.exec(tex))) {
+    if (m[0].charAt(0) === '%' || m[1]) out.push([m.index + (m[1] ? 5 : 0), re.lastIndex]);
+  }
+  return out;
+}
+var TEX_KEY = function (tex) { return tex.replace(/\s+/g, ' ').trim(); };
+/* A formula's TeX as the analyzer and as MathJax have it: the same up to
+   whitespace, or up to a named character reference the browser decoded. */
+function sameTeX(spanTex, reportTex) {
+  var a = TEX_KEY(spanTex), b = TEX_KEY(reportTex);
+  if (a === b) return true;
+  if (!/&[A-Za-z][A-Za-z0-9]*;/.test(a)) return false;
+  return new RegExp('^' + a.split(/&[A-Za-z][A-Za-z0-9]*;/).map(escRe).join('[\\s\\S]{1,2}') + '$').test(b);
+}
+/* What serialized MathML says went wrong: TeX errors and the macros
+   noundefined showed as red text. */
+function mathmlProblems(mml) {
+  var undef = [], errors = (mml.match(/<merror\b/g) || []).length, m;
+  var re = /<mtext\b[^>]*\bmathcolor="red"[^>]*>(\\[^<]*)<\/mtext>/g;
+  while ((m = re.exec(mml))) undef.push(m[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+  return { undef: undef, errors: errors };
+}
+
+/* Cards for what MathJax could not typeset. `reports` lists the formulas the
+   preview typeset, in document order: {tex, undef: ['\\bm', …], errors:
+   [message, …]}. Formulas cut apart by inline Markdown are skipped: MathJax
+   never sees them whole. Reports and formulas are aligned in order by their
+   TeX, so the cards follow the source while it changes (`opts.stale`: the
+   reports are of an earlier version of the text). `opts.analyze` are the
+   options the page analyzes with.
+   An undefined macro's card gets a fix only from reports of exactly this
+   text, and only when every word it rewrites is a use MathJax reported.
+   The fix is decided when it is clicked: `fix.check(compile)` returns the
+   edits to apply, or null. It tries the plain replacement, then one in
+   braces, and keeps the first after which the comment keeps its Markdown
+   structure and hazards (`holds`) and, compiled by `compile(formulas)`
+   (ordered MathML from a fresh TeX state, or null when MathJax is not
+   available), no formula reports the macro or a new error and every other
+   formula, \ref included, is unchanged. */
+function texProblemIssues(src, spans, reports, issues, opts) {
+  var out = [], stale = !!(opts && opts.stale), aopts = opts && opts.analyze;
+  reports = (reports || []).filter(function (r) { return r && typeof r.tex === 'string'; });
+  var whole = spans.filter(function (sp) { return !sp.recovered && typeof sp.tex === 'string' && !sp.cut; });
+  /* Each report, in order, goes to the next formula with the same TeX:
+     formulas MathJax never saw (in an image's attributes, say) are passed
+     over, and so are reports the analyzer has no formula for. A pair is
+     certain (`same`) when the TeX is the same up to whitespace and no
+     formula with that TeX was passed over. */
+  var pairs = [], used = [], next = 0;
+  reports.forEach(function (r) {
+    for (var q = next; q < whole.length; q++) {
+      if (!sameTeX(whole[q].tex, r.tex)) continue;
+      pairs.push({ sp: whole[q], r: r, at: q });
+      used[q] = true;
+      next = q + 1;
+      return;
+    }
+  });
+  pairs.forEach(function (p) {
+    var key = TEX_KEY(p.sp.tex);
+    p.same = key === TEX_KEY(p.r.tex) && !whole.some(function (sp, q) { return !used[q] && TEX_KEY(sp.tex) === key; });
+  });
+  function edit(start, end, text) { return { start: start, end: end, text: text, was: src.slice(start, end) }; }
+  /* Views are built on the comment as posted: its first line starts where
+     the trimmed text does. */
+  var lead = src.length - src.replace(/^\s+/, '').length, posted = src.slice(lead);
+  function viewOf(sp) {
+    var v = mathJaxView(posted, sp.innerStart - lead, sp.innerEnd - lead, sp.literal);
+    return { text: v.text, from: v.from.map(function (x) { return x + lead; }), to: v.to.map(function (x) { return x + lead; }) };
+  }
+
+  var macros = Object.create(null), order = [];
+  pairs.forEach(function (p) {
+    var sp = p.sp, r = p.r;
+    if (r.errors && r.errors.length) {
+      var other = (issues || []).some(function (iss) { return iss.math && iss.start < sp.end && sp.start < iss.end; });
+      out.push({ sev: 'err', title: 'MathJax cannot typeset this formula',
+        detail: 'MathJax reports “' + escHtml(r.errors[0]) + '”, so OpenReview shows the formula’s TeX source, marked as an error, instead of the formula.' +
+          (other ? ' Another card on this formula may be the cause: fix that one first.' : ''),
+        start: sp.start, end: sp.end, fix: null });
+    }
+    if (!r.undef || !r.undef.length) return;
+    /* Where each control word of the formula sits in the source. */
+    var v = viewOf(sp), words = [], m;
+    var mapped = p.same && v.text === sp.tex, wre = /\\([a-zA-Z]+|[\s\S])/g;
+    var literal = mapped ? texLiteralRanges(v.text) : [];
+    while (mapped && (m = wre.exec(v.text))) {
+      var at = m.index, quoted = literal.some(function (q) { return at >= q[0] && at < q[1]; });
+      if (!quoted && (m[1].length > 1 || /[a-zA-Z]/.test(m[1]))) words.push({ name: m[1], at: at, len: m[0].length });
+    }
+    var reported = Object.create(null);
+    r.undef.forEach(function (u) { var n = u.replace(/^\\/, ''); reported[n] = (reported[n] || 0) + 1; });
+    Object.keys(reported).forEach(function (name) {
+      if (!macros[name]) { macros[name] = { name: name, formulas: [], uses: [], ok: true }; order.push(name); }
+      var entry = macros[name], mine = words.filter(function (w) { return w.name === name; });
+      entry.formulas.push(sp);
+      /* Every word in the formula must be a use MathJax reported: not the
+         key of a \label, the text of a \verb, or a word a macro expanded. */
+      if (!mapped || mine.length !== reported[name]) entry.ok = false;
+      mine.forEach(function (w) { entry.uses.push({ sp: sp, v: v, w: w }); });
+    });
+  });
+
+  /* Where the comment defines `name` at the top level of a formula (not in
+     a macro's body, a comment or \verb), after the first formula that MathJax
+     reported it in: MathJax typesets in order. Replacing it would also
+     rewrite the definition. */
+  var real = spans.filter(function (sp) { return !sp.recovered && typeof sp.tex === 'string'; });
+  function definedLater(name, firstUse) {
+    var re = new RegExp('\\\\(?:(?:re|provide)?newcommand\\*?|DeclareMathOperator\\*?|DeclarePairedDelimiter[XP]*)\\s*\\{?\\s*\\\\' +
+      escRe(name) + '(?![a-zA-Z])|\\\\(?:def|let)\\s*\\\\' + escRe(name) + '(?![a-zA-Z])', 'g');
+    var from = real.indexOf(firstUse);
+    return real.some(function (sp, k) {
+      if (k < from) return false;
+      var code = texCode(sp.tex), m;
+      re.lastIndex = 0;
+      while ((m = re.exec(code))) {
+        var depth = 0;
+        for (var i = 0; i < m.index; i++) {
+          if (code[i] === '\\') i++;
+          else if (code[i] === '{') depth++;
+          else if (code[i] === '}' && depth) depth--;
+        }
+        if (!depth) return true;
+      }
+      return false;
+    });
+  }
+
+  /* The edits that replace every use of `name`; `braced`: a replacement of
+     several tokens goes in braces, so it stays one argument (\frac\R2). */
+  function rewrite(e, sub, braced) {
+    var edits = [];
+    for (var u = 0; u < e.uses.length; u++) {
+      var v = e.uses[u].v, a = e.uses[u].w.at, b = a + e.uses[u].w.len, t = v.text;
+      var i = b;
+      while (i < t.length && /\s/.test(t[i])) i++;
+      if (sub.to !== undefined) {
+        if (sub.arg && !/[{\\a-zA-Z0-9]/.test(t[i] || '')) return null;
+        var to = braced && /[\\{}]/.test(sub.to.slice(1)) ? '{' + sub.to + '}' : sub.to;
+        edits.push(edit(v.from[a], v.to[b - 1], to));
+        continue;
+      }
+      /* \abs{x} -> \lvert x\rvert: needs the braced argument; \verb text and
+         TeX comments inside it do not count */
+      if (t[i] !== '{') return null;
+      var depth = 0, j = i, skip = texLiteralRanges(t);
+      for (; j < t.length; j++) {
+        var lit = null;
+        for (var s = 0; s < skip.length; s++) if (j >= skip[s][0] && j < skip[s][1]) lit = skip[s];
+        if (lit) { j = lit[1] - 1; continue; }
+        if (t[j] === '\\') { j++; continue; }
+        if (t[j] === '{') depth++;
+        else if (t[j] === '}' && --depth === 0) break;
+      }
+      if (j >= t.length) return null;
+      edits.push(edit(v.from[a], v.to[i], sub.open),
+        edit(v.from[j], v.to[j], sub.close + (/[a-zA-Z]/.test(t[j + 1] || '') ? ' ' : '')));
+    }
+    return edits.length ? edits : null;
+  }
+
+  /* The comment after the fix keeps every formula (the rewritten ones
+     changed only there) and gains no hazard: a "}" before "_" can let
+     Markdown pair emphasis across formulas. */
+  function formulasOf(list) {
+    return list.filter(function (sp) { return !sp.recovered && typeof sp.tex === 'string' && !sp.cut; })
+      .map(function (sp) { return { tex: sp.tex, display: !!sp.display }; });
+  }
+  function holds(edits, e) {
+    var after = applyEditsToText(src, edits), res = analyze(after, aopts);
+    var was = spans.filter(function (sp) { return !sp.recovered; });
+    var now = res.spans.filter(function (sp) { return !sp.recovered; });
+    if (was.length !== now.length) return null;
+    for (var i = 0; i < was.length; i++) {
+      if (was[i].display !== now[i].display || was[i].kind !== now[i].kind || !!was[i].cut !== !!now[i].cut) return null;
+      if (e.formulas.indexOf(was[i]) < 0 && was[i].tex !== now[i].tex) return null;
+    }
+    var tally = Object.create(null);
+    (issues || []).forEach(function (iss) { var k = iss.sev + '|' + iss.title; tally[k] = (tally[k] || 0) + 1; });
+    return res.issues.every(function (iss) { var k = iss.sev + '|' + iss.title; return tally[k]-- > 0; }) ? res : null;
+  }
+  function compiles(res, e, compile) {
+    var before = compile(formulasOf(spans)), after = compile(formulasOf(res.spans));
+    if (!before || !after || before.length !== after.length) return false;
+    var targets = formulasOf(spans).map(function () { return false; }), w = 0;
+    spans.forEach(function (sp) {
+      if (sp.recovered || typeof sp.tex !== 'string' || sp.cut) return;
+      if (e.formulas.indexOf(sp) >= 0) targets[w] = true;
+      w++;
+    });
+    for (var i = 0; i < after.length; i++) {
+      var was = mathmlProblems(before[i]), now = mathmlProblems(after[i]);
+      if (now.undef.indexOf('\\' + e.name) >= 0 || now.errors > was.errors) return false;
+      if (now.undef.some(function (u) { return was.undef.indexOf(u) < 0; })) return false;
+      if (!targets[i] && before[i] !== after[i]) return false;
+    }
+    return true;
+  }
+
+  order.forEach(function (name) {
+    var e = macros[name], n = e.formulas.length, later = definedLater(name, e.formulas[0]);
+    var sub = later ? null : TEX_SUBSTITUTES[name] || null;
+    var first = e.ok ? e.uses[0] : null, start = first ? first.v.from[first.w.at] : e.formulas[0].start;
+    var end = first ? first.v.to[first.w.at + first.w.len - 1] : e.formulas[0].end;
+    var fix = null;
+    if (!stale && sub && (sub.to !== undefined || sub.open) && e.ok && e.uses.length && rewrite(e, sub, false)) {
+      fix = {
+        label: sub.to === '' ? 'remove \\' + name : 'use ' + (sub.to || sub.open.trim() + '…' + sub.close),
+        manual: true, edits: rewrite(e, sub, false),
+        check: function (compile) {
+          var tries = [rewrite(e, sub, false), rewrite(e, sub, true)];
+          for (var t = 0; t < tries.length; t++) {
+            if (!tries[t] || (t && JSON.stringify(tries[t]) === JSON.stringify(tries[0]))) continue;
+            var res = holds(tries[t], e);
+            if (res && (!compile || compiles(res, e, compile))) return tries[t];
+          }
+          return null;
+        }
+      };
+    }
+    var where = n === 1 ? 'this formula' : n + ' formulas', all = n === 1 ? '' : ' in all of them';
+    var detail = 'MathJax has no <code>\\' + escHtml(name) + '</code>, so OpenReview shows it as red text in ' + where + '. ';
+    if (later) detail = '<code>\\' + escHtml(name) + '</code> is defined in this comment, but after ' + (n === 1 ? 'a formula that uses' : n + ' formulas that use') +
+      ' it, which OpenReview shows as red text: MathJax typesets formulas in order. Move the definition before the first use.';
+    else if (fix) detail += (sub.to === '' ? 'MathJax does not need it: the fix removes it' + all
+      : 'The fix replaces it with <code>' + escHtml(sub.to || sub.open.trim() + '…' + sub.close) + '</code>' + all) +
+      ', once MathJax confirms that nothing else in the comment changes.';
+    else if (sub && sub.hint) detail += sub.hint;
+    else if (sub) detail += (sub.to === '' ? 'MathJax does not need it' : 'MathJax has <code>' + escHtml(sub.to || sub.open.trim() + '…' + sub.close) + '</code>') +
+      (stale ? '; the fix is offered once the preview has caught up with your edits.'
+        : ', but here the replacement cannot be placed safely: edit the formula by hand.');
+    else if (!/^[a-zA-Z]/.test(name)) detail += 'Text accents work only inside <code>\\text{…}</code>; in math, use <code>\\tilde{…}</code>, <code>\\hat{…}</code>, <code>\\ddot{…}</code> or <code>\\acute{…}</code>.';
+    else detail += 'If your paper defines it, copy the definition into this comment, in or before the first formula that uses it, for example <code>$\\newcommand{\\' + escHtml(name) + '}{…}$</code>.';
+    out.push({ sev: 'err', title: '\\' + name + ' is not defined in MathJax', detail: detail,
+      start: start, end: Math.max(start + 1, end), fix: fix });
+  });
+  return out;
 }
 
 /* ---- table import ---- */
@@ -4465,6 +4921,7 @@ function saveDraftNow() {
 var lineStarts = [0];
 var currentIssues = [];
 var analyzedText = '';   /* the text currentIssues were computed from */
+var lastAnalysis = null; /* analyze(analyzedText) */
 var userEdited = false;  /* typed before the saved draft finished loading */
 
 var EXAMPLE = [
@@ -4513,19 +4970,45 @@ function setMathStatus(text, kind) {
 
 /* The full MathJax build loads noerrors and noundefined: a TeX error still
    becomes <mjx-merror>, but an undefined macro (\Expect, \~ in math) is shown
-   as red text, so it is found in MathJax's internal tree instead. */
+   as red text, so it is found in MathJax's internal tree instead. `reports`
+   gives each formula's problems, in document order, for texProblemIssues. */
 function texProblems() {
-  var errors = preview.querySelectorAll('mjx-merror').length, undef = 0;
+  var errors = preview.querySelectorAll('mjx-merror').length, undef = 0, reports = [];
   try {
     MathJax.startup.document.getMathItemsWithin(preview).forEach(function (item) {
+      if (item.display === null) return; /* a processEscapes escape (\$), not math */
+      var r = { tex: item.math, undef: [], errors: [] };
+      reports.push(r);
       if (!item.root || typeof item.root.walkTree !== 'function') return;
       item.root.walkTree(function (node) {
-        if (node.isKind('mtext') && node.attributes.get('mathcolor') === 'red' &&
-            typeof node.getText === 'function' && node.getText().charAt(0) === '\\') undef++;
+        if (node.isKind('merror')) {
+          r.errors.push(String(node.attributes.get('data-mjx-error') || 'TeX error'));
+        /* noundefined sets the color on the text itself; red \verb text
+           inherits it from \color, which is not a missing macro */
+        } else if (node.isKind('mtext') && node.attributes.getExplicit('mathcolor') === 'red' &&
+            typeof node.getText === 'function' && node.getText().charAt(0) === '\\') {
+          undef++;
+          r.undef.push(node.getText());
+        }
       });
     });
   } catch (e) {}
-  return { errors: errors, undef: undef };
+  return { errors: errors, undef: undef, reports: reports };
+}
+
+/* What the last typeset of the source preview reported, and for which
+   editor text, for the hazard cards (see texProblemIssues): their fixes need
+   reports of exactly the text in the editor. The cards are redrawn when the
+   reports change at all (where a problem sits depends on every formula) or
+   when they catch up with the editor. */
+var texReports = [], texReportsFor = null, texReportKey = '', texCardsStale = false;
+function texReportsChanged(reports, source) {
+  var key = JSON.stringify(reports);
+  var changed = key !== texReportKey || (texCardsStale && source === analyzedText);
+  texReportKey = key;
+  texReports = reports;
+  texReportsFor = source;
+  return changed;
 }
 
 function clearOldMath(target) {
@@ -4538,6 +5021,7 @@ function clearOldMath(target) {
    the next, but OpenReview renders a comment once. Without a reset, every
    labelled equation turns into "Label multiply defined" after the first
    keystroke, and a deleted macro definition keeps working in the preview. */
+var mathtoolsDefaults = typeof WeakMap === 'function' ? new WeakMap() : { get: function () { return null; }, set: function () {} };
 function resetTeXState() {
   try { if (typeof MathJax.texReset === 'function') MathJax.texReset(); } catch (e) {}
   try {
@@ -4546,7 +5030,7 @@ function resetTeXState() {
     MathJax.startup.document.inputJax.forEach(function (jax) {
       var handlers = jax.parseOptions && jax.parseOptions.handlers;
       if (!handlers || typeof handlers.retrieve !== 'function') return;
-      ['new-Command', 'new-Environment', 'new-Delimiter', 'ams-declare-ops'].forEach(function (name) {
+      ['new-Command', 'new-Environment', 'new-Delimiter', 'ams-declare-ops', 'mathtools-paired-delims'].forEach(function (name) {
         var m = handlers.retrieve(name);
         if (m && m.map && typeof m.map.clear === 'function') m.map.clear();
       });
@@ -4554,8 +5038,32 @@ function resetTeXState() {
       var color = jax.parseOptions.packageData && jax.parseOptions.packageData.get('color');
       var userColors = color && color.model && color.model.userColors;
       if (userColors && typeof userColors.clear === 'function') userColors.clear();
+      /* \mathtoolsset changes the mathtools options themselves: back to how
+         they were before the first typeset. */
+      var mt = jax.parseOptions.options && jax.parseOptions.options.mathtools;
+      if (mt) {
+        var saved = mathtoolsDefaults.get(jax);
+        if (!saved) {
+          saved = { values: {}, maps: {} };
+          Object.keys(mt).forEach(function (k) {
+            if (mt[k] && typeof mt[k] === 'object') saved.maps[k] = Object.keys(mt[k]);
+            else saved.values[k] = mt[k];
+          });
+          mathtoolsDefaults.set(jax, saved);
+        }
+        Object.keys(saved.values).forEach(function (k) { mt[k] = saved.values[k]; });
+        Object.keys(saved.maps).forEach(function (k) {
+          Object.keys(mt[k] || {}).forEach(function (key) { if (saved.maps[k].indexOf(key) < 0) delete mt[k][key]; });
+        });
+      }
     });
   } catch (e) {}
+}
+
+/* Ordered MathML of `formulas` from a fresh TeX state, or null when that
+   cannot be had (see compactMathML), for checking a TeX fix. */
+function compileFormulas(formulas) {
+  try { return compactMathML(formulas); } catch (e) { return null; }
 }
 
 /* Compile with the page's TeX packages and safe filter, in a private math
@@ -4604,7 +5112,9 @@ function renderPreview() {
      cannot reset macros while the source preview is still being typeset. */
   var importing = tableDialog.open;
   var target = importing ? tablePreview : preview;
-  var text = importing ? (tableResult ? tableResult.markdown : '') : ta.value;
+  /* The comment as posted: OpenReview trims it (analyzer check 16). */
+  var source = ta.value;
+  var text = importing ? (tableResult ? tableResult.markdown : '') : source.trim();
   var keep = scroller.scrollTop;
 
   var done = function () {
@@ -4642,6 +5152,7 @@ function renderPreview() {
     MathJax.typesetPromise([target]).then(function () {
       if (importing) { done(); return; }
       var p = texProblems();
+      if (texReportsChanged(p.reports, source) && ta.value === analyzedText) renderIssues();
       var parts = [];
       if (p.errors) parts.push(p.errors + ' TeX error' + (p.errors === 1 ? '' : 's'));
       if (p.undef) parts.push(p.undef + ' undefined macro' + (p.undef === 1 ? '' : 's'));
@@ -4680,7 +5191,7 @@ function updateAll() {
   lineStarts = computeLineStarts(text);
 
   var res = analyze(text, { venue: prefs.venue });
-  currentIssues = res.issues;
+  lastAnalysis = res;
 
   /* stats — counted like OpenReview's own counter (TextAreaWidget.js):
      value.trim().length, i.e. UTF-16 units after trimming. */
@@ -4697,6 +5208,22 @@ function updateAll() {
 
   wordStat.textContent = fmt(words) + ' words';
   mathStat.textContent = fmt(res.mathCount) + ' math span' + (res.mathCount === 1 ? '' : 's');
+
+  renderIssues();
+  scheduleCompaction();
+  renderDraftTabs();
+}
+
+/* The analyzer's hazards for analyzedText plus what MathJax reported in the
+   last typeset, as cards. Also called on its own when a typeset changes the
+   TeX problems, which needs neither a new analysis nor a new compaction. */
+function renderIssues() {
+  var text = analyzedText, res = lastAnalysis;
+  if (!res) return;
+  texCardsStale = texReportsFor !== text;
+  currentIssues = res.issues.concat(texProblemIssues(text, res.spans, texReports, res.issues,
+    { stale: texCardsStale, analyze: { venue: prefs.venue } }));
+  currentIssues.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
 
   var n = currentIssues.length;
   var hasErr = currentIssues.some(function (x) { return x.sev === 'err'; });
@@ -4736,8 +5263,6 @@ function updateAll() {
   var fixable = currentIssues.reduce(function (acc, iss) { return acc + (iss.fix && !iss.fix.manual ? 1 : 0); }, 0);
   fixAllBtn.hidden = fixable === 0;
   fixAllBtn.textContent = 'Fix all (' + fixable + ')';
-  scheduleCompaction();
-  renderDraftTabs();
 }
 
 /* ---- drafts: one per reviewer, a general response, a follow-up ---- */
@@ -5045,7 +5570,8 @@ var splitResult = null;
 function renderSplit() {
   var limit = Math.max(0, parseInt(limitInput.value, 10) || 0), venue = venueById(prefs.venue);
   var compact = splitCompactBox.checked ? compactResult(true) : null;
-  splitResult = limit ? splitComment(compact ? compact.text : ta.value, limit, { label: splitLabelBox.checked }) : null;
+  /* The comment as posted: its first block may read differently untrimmed. */
+  splitResult = limit ? splitComment((compact ? compact.text : ta.value).trim(), limit, { label: splitLabelBox.checked }) : null;
   splitDraftsBtn.disabled = !splitResult || splitResult.parts.length < 2;
   if (!splitResult) {
     splitNote.textContent = limit ? 'Splitting needs Marked, which did not load.' : 'Set a character limit first.';
@@ -5273,7 +5799,7 @@ function afterSourceChange() {
 }
 
 function applyIssueFix(iss) {
-  if (!iss || !iss.fix) return;
+  if (!iss || !iss.fix || !draftReady || ta.readOnly) return;
   var text = ta.value;
   /* Matching bytes are not enough: the same "\{" may now sit inside code. */
   if (text !== analyzedText || !editsStillValid(text, iss.fix.edits)) {
@@ -5281,8 +5807,14 @@ function applyIssueFix(iss) {
     showToast('The draft moved on — hazards refreshed, try again');
     return;
   }
-  var first = iss.fix.edits.slice().sort(function (a, b) { return a.start - b.start; })[0];
-  setSourceText(applyEditsToText(text, iss.fix.edits), first.start, first.start + first.text.length);
+  /* A TeX fix is checked now, against the whole comment compiled by MathJax. */
+  var edits = iss.fix.check ? iss.fix.check(window.MJ_READY ? compileFormulas : null) : iss.fix.edits;
+  if (!edits || !editsStillValid(text, edits)) {
+    showToast('MathJax shows that this fix would change something else in the comment: edit the formula by hand.');
+    return;
+  }
+  var first = edits.slice().sort(function (a, b) { return a.start - b.start; })[0];
+  setSourceText(applyEditsToText(text, edits), first.start, first.start + first.text.length);
   revealOffset(first.start);
   afterSourceChange();
   showToast('Fixed — ' + UNDO_HINT + ' undoes it');
@@ -5306,7 +5838,9 @@ function applyAllFixes() {
   var nowOver = limit > 0 && text.trim().length > limit && startText.trim().length <= limit;
   showToast('Applied ' + applied + ' fix' + (applied === 1 ? '' : 'es') +
     (grew ? ' (' + (grew > 0 ? '+' : '−') + fmt(Math.abs(grew)) + ' character' + (Math.abs(grew) === 1 ? '' : 's') + ')' : '') +
-    (left ? ' — ' + left + ' hazard' + (left === 1 ? '' : 's') + ' still need you' : ' — no hazards left') +
+    (left ? ' — ' + left + ' hazard' + (left === 1 ? '' : 's') + ' still need you'
+      : !window.MJ_READY ? ' — MathJax has not loaded yet, so the formulas are not checked'
+      : texCardsStale ? ' — MathJax is checking the formulas again' : ' — no hazards left') +
     '. ' + (nowOver ? 'The draft is now ' + fmt(text.trim().length - limit) + ' over the limit. ' : '') +
     UNDO_HINT + ' undoes the pass.');
 }

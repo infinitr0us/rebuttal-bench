@@ -141,6 +141,78 @@ try {
     const s = mjStatus.textContent;
     return /1 TeX error/.test(s) && /1 undefined macro/.test(s) || s;`);
 
+  await check('TeX problems become hazard cards, and an undefined macro is fixed from its card', `
+    setSourceText('Bold $\\\\bm{x}$ and $\\\\bm y$, then $x^2^3$.', 0); updateAll(); renderPreview(); await wait(2500);
+    const titles = currentIssues.map((i) => i.title);
+    const card = currentIssues.find((i) => i.title === '\\\\bm is not defined in MathJax');
+    if (!card || !titles.includes('MathJax cannot typeset this formula')) return titles;
+    const btn = document.querySelector('#lintList .fixbtn[data-fix="' + currentIssues.indexOf(card) + '"]');
+    if (!btn || !btn.title.includes('Not part of Fix all') || !fixAllBtn.hidden) return btn ? btn.title : 'no fix button';
+    btn.click(); await wait(2500);
+    const fixed = ta.value, left = currentIssues.map((i) => i.title);
+    ta.focus(); document.execCommand('undo'); await wait(300);
+    return fixed === 'Bold $\\\\boldsymbol{x}$ and $\\\\boldsymbol y$, then $x^2^3$.' &&
+      left.join() === 'MathJax cannot typeset this formula' &&
+      ta.value === 'Bold $\\\\bm{x}$ and $\\\\bm y$, then $x^2^3$.' || { fixed, left, undone: ta.value };`);
+
+  await check('the preview shows the comment as posted, without its leading whitespace', `
+    setSourceText('    python eval.py --seed 1', 0); updateAll(); renderPreview(); await wait(1500);
+    const pre = document.querySelector('#preview pre'), p = document.querySelector('#preview p');
+    const card = currentIssues.some((i) => i.title === 'Posting removes the leading whitespace');
+    return !pre && p && p.textContent === 'python eval.py --seed 1' && card ||
+      { pre: !!pre, p: p && p.textContent, titles: currentIssues.map((i) => i.title) };`);
+
+  await check('a TeX fix waits for the typeset of the text it would change', `
+    const isBm = (i) => i.title === '\\\\bm is not defined in MathJax';
+    setSourceText('Bold $\\\\bm{x}$.', 0); updateAll(); renderPreview(); await wait(2500);
+    const ready = currentIssues.some((i) => isBm(i) && i.fix);
+    setSourceText('Bold $\\\\bm{x}$ and more.', 0); updateAll(); /* the preview has not caught up yet */
+    const waiting = currentIssues.find(isBm), held = !!waiting && !waiting.fix &&
+      !document.querySelector('#lintList .fixbtn[data-fix="' + currentIssues.indexOf(waiting) + '"]');
+    renderPreview(); await wait(2500);
+    const back = currentIssues.some((i) => isBm(i) && i.fix);
+    return ready && held && back || { ready, held, back };`);
+
+  await check('a TeX error card follows the formula MathJax reported, after an edit', `
+    /* No help from the editor's own refresh: only the typeset may redraw. */
+    setSourceText('$a\\\\label{s}$ then $x\\\\label{s}$', 0); clearTimeout(timer); updateAll(); renderPreview(); await wait(2500);
+    setSourceText('$x\\\\label{s}$ then $x\\\\label{s}$', 0); clearTimeout(timer); updateAll(); renderPreview(); await wait(2500);
+    const card = currentIssues.find((i) => i.title === 'MathJax cannot typeset this formula');
+    return !!card && card.start === ta.value.lastIndexOf('$x') || { card, titles: currentIssues.map((i) => i.title) };`);
+
+  await check('a delimiter declared in one preview is gone in the next', `
+    setSourceText('$\\\\DeclarePairedDelimiter{\\\\lens}{\\\\lVert}{\\\\rVert}\\\\lens{x}$', 0); updateAll(); renderPreview(); await wait(2500);
+    const defined = mjStatus.textContent === 'MathJax ready';
+    setSourceText('$\\\\lens{x}$', 0); updateAll(); renderPreview(); await wait(2500);
+    return defined && /1 undefined macro/.test(mjStatus.textContent) || { defined, status: mjStatus.textContent };`);
+
+  await check('options set by \\\\mathtoolsset are gone in the next preview', `
+    setSourceText('$\\\\mathtoolsset{prescript-sub-format=\\\\bm}\\\\prescript{1}{2}{X}$', 0); updateAll(); renderPreview(); await wait(2500);
+    const before = mjStatus.textContent;
+    setSourceText('$\\\\prescript{1}{2}{X}$', 0); updateAll(); renderPreview(); await wait(2500);
+    return /undefined/.test(before) && mjStatus.textContent === 'MathJax ready' || { before, after: mjStatus.textContent };`);
+
+  await check('a TeX fix that would change another formula is refused when clicked', `
+    const src = '$\\\\def\\\\q{1}\\\\def\\\\boldsymbol#1{\\\\def\\\\q{2}#1}$ then $\\\\bm{x}$ then $\\\\q$';
+    setSourceText(src, 0); clearTimeout(timer); updateAll(); renderPreview(); await wait(2500);
+    const card = currentIssues.find((i) => i.title === '\\\\bm is not defined in MathJax');
+    const btn = card && document.querySelector('#lintList .fixbtn[data-fix="' + currentIssues.indexOf(card) + '"]');
+    if (!btn) return { titles: currentIssues.map((i) => i.title) };
+    btn.click(); await wait(100);
+    return ta.value === src && /would change something else/.test(toast.textContent) || { value: ta.value, toast: toast.textContent };`);
+
+  await check('red \\\\verb text is not reported as an undefined macro', `
+    setSourceText('$\\\\color{red}\\\\verb!\\\\bm!$', 0); updateAll(); renderPreview(); await wait(2500);
+    return mjStatus.textContent === 'MathJax ready' && !currentIssues.length || { status: mjStatus.textContent, titles: currentIssues.map((i) => i.title) };`);
+
+  await check('Fix all does not promise "no hazards left" before MathJax has checked the result', `
+    setSourceText('$\\\\{x\\\\} + \\\\bm{x}$', 0); updateAll(); renderPreview(); await wait(2500);
+    fixAllBtn.click(); await wait(50);
+    const msg = toast.textContent;
+    await wait(2500);
+    const card = currentIssues.some((i) => i.title === '\\\\bm is not defined in MathJax');
+    return !/no hazards left/.test(msg) && card || { msg, titles: currentIssues.map((i) => i.title) };`);
+
   await check('clicking a hazard on a long wrapped line scrolls it into view', `
     setSourceText('word '.repeat(2500) + 'then $\\\\{x$ end', 0); updateAll(); await wait(200);
     ta.scrollTop = 0;
@@ -489,6 +561,17 @@ try {
     switchDraft(origId);
     limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
     return shown && copiedOk && made && ta.value === original || { shown, copiedOk, made, n, value: ta.value.slice(0, 40) };`);
+
+  await check('Split cuts the comment as posted: an indented first fence stays one block', `
+    const src = '    \`\`\`text\\n\\nCost $5 to $10.\\n\\n\`\`\`';
+    limitInput.value = '17'; limitInput.dispatchEvent(new Event('input'));
+    splitLabelBox.checked = false;
+    setSourceText(src, 0); updateAll(); await wait(50);
+    document.getElementById('splitBtn').click(); await wait(100);
+    const parts = splitResult.parts.map((p) => p.text);
+    closeSplit(); splitLabelBox.checked = true;
+    limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
+    return parts.length === 1 && parts[0] === src.trim() || { parts };`);
 
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',

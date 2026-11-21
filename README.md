@@ -56,6 +56,13 @@ leave the browser: they autosave on this device only.
   say; *Delete* removes it. Every draft autosaves on its own, undo never crosses from one draft
   into another, and several windows of the page can be open at once without losing a draft (a
   draft deleted in one window comes back if another window still has it open).
+- **Before posting.** Cards also point out placeholders left in the text (`TODO`, `XX.X`,
+  `Table X`, `[cite]`, `??`), invisible characters and ligatures (`ﬁ`) that a copy from a PDF
+  brings along, and a start that posting reads differently: OpenReview trims a comment when it
+  posts it, so an indented first line is no longer a code block. Once MathJax has typeset the
+  preview, every formula it cannot typeset gets a card with its error message, and every macro
+  it does not know (`\bm`, `\argmax`, `\R`) gets one card for all the formulas that use it,
+  with a replacement MathJax has (`\boldsymbol`) where there is one.
 - **Status bar.** Characters counted the way OpenReview's own counter does (trimmed length),
   the length of the selection, the number of formulas MathJax will typeset, hazards, and
   MathJax problems (TeX errors *and* undefined macros).
@@ -66,12 +73,14 @@ leave the browser: they autosave on this device only.
 | Stage | OpenReview (openreview-web) | This page |
 | --- | --- | --- |
 | Markdown | Marked 15.0.6, GFM, custom renderer in `client/view.js` (`setupMarked`): raw HTML shown as text, images only from `/images/`, task checkboxes as `[x]` | same |
-| Sanitizing | DOMPurify 3.4.13, tag allowlist from `lib/utils.js`, hook in `app/AppInit.js` | same |
+| Sanitizing | DOMPurify 3.4.17, tag allowlist from `lib/utils.js`, hook in `app/AppInit.js` | same |
 | Math | MathJax 3.2.2 `tex-chtml-full`, `$…$`/`\(…\)` inline, `$$…$$`/`\[…\]` display, bare `\begin{…}` environments and `\ref`/`\eqref` (`lib/mathjax-config.js` + MathJax defaults; equations are not numbered) | same; each preview starts from a fresh TeX state, as a posted comment does |
 | Styles | `.note-content-value.markdown-rendered`: Noto Sans 12px/18px (`styles/utils/_mixins.scss`) | same; 100 % zoom is 1:1 |
 
+The preview shows the comment as posted: OpenReview trims a text field before it posts it
+(`constructEdit` in `client/view-v2.js`), and so does the preview.
 Line *wrapping* still depends on the reader's window width and reply depth. The table was
-verified against openreview-web at commit `45c27aa` (2026-09-22); `npm run check-upstream`
+verified against openreview-web at commit `be86e65` (2026-11-20); `npm run check-upstream`
 reports when any of those sources change.
 
 ## How the hazard analyzer works
@@ -93,6 +102,13 @@ reports when any of those sources change.
    `<sub>`), HTML comments (a hidden note to a co-author is published), images not under
    `/images/`, footnotes, and LaTeX pasted from the paper outside math (`\textbf{}`, `\cite{}`,
    ` ``quotes'' `, ties like `Table~1`, two of which can even pair into strikethrough).
+7. The last checks look at the draft as a whole: placeholders, invisible characters and
+   ligatures. All checks read the comment as posted, which OpenReview trims; a card says when
+   the trim changes how the start reads.
+8. After each typeset, what MathJax reported for each formula is matched to its source formula,
+   so its card points at the right place even while you keep typing. A replacement for an
+   unknown macro is offered only once the preview shows exactly the text in the editor, and only
+   when the whole comment, checked again with it, keeps every other formula intact.
 
 Because **Fix all** runs unattended, a fix is only offered when it can't damage correct text;
 ambiguous cases get a warning without a fix, or a fix that only a click on its card applies.

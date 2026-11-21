@@ -33,4 +33,24 @@ function renderedWithMathML(src) {
   return doc.document.body.firstElementChild.innerHTML;
 }
 
-module.exports = { mathml, renderedWithMathML };
+// What the page's texProblems() reports after the preview typesets the posted
+// (trimmed) comment: per formula in document order, its undefined macros and
+// TeX errors. One document, so \newcommand carries over as in the preview.
+function texReports(src) {
+  const doc = mathDocument(renderHtml(src.trim()));
+  doc.findMath();
+  const out = [];
+  for (const item of doc.math) {
+    if (item.display === null) continue;
+    const r = { tex: item.math, undef: [], errors: [] };
+    item.compile(doc);
+    item.root.walkTree((n) => {
+      if (n.isKind('merror')) r.errors.push(String(n.attributes.get('data-mjx-error') || 'TeX error'));
+      else if (n.isKind('mtext') && n.attributes.getExplicit('mathcolor') === 'red' && n.getText().startsWith('\\')) r.undef.push(n.getText());
+    });
+    out.push(r);
+  }
+  return out;
+}
+
+module.exports = { mathml, renderedWithMathML, texReports };

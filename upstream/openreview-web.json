@@ -1,6 +1,6 @@
 {
-  "commit": "45c27aaa16ab4e92616c5dac7fd216edfa638da2",
-  "date": "2026-09-22T18:50:49Z",
+  "commit": "be86e65168dfae3de8d69bb303ca9f0703b6e828",
+  "date": "2026-11-20T20:36:34Z",
   "excerpts": {
     "MathJax config": {
       "file": "lib/mathjax-config.js",
@@ -24,7 +24,7 @@
     },
     "Library versions (package-lock)": {
       "file": "package-lock.json",
-      "text": "marked 15.0.6\ndompurify 3.4.13"
+      "text": "marked 15.0.6\ndompurify 3.4.17"
     },
     "Note rendering call": {
       "file": "components/NoteContent.js",
@@ -33,6 +33,10 @@
     "Character counter": {
       "file": "components/EditorComponents/TextAreaWidget.js",
       "text": "const charsRemaining = maxLength - contentLength\ncontentLength={convertToString(value)?.trim()?.length ?? 0}"
+    },
+    "Posting trims text fields": {
+      "file": "client/view-v2.js",
+      "text": "fieldDescription.value.param.input === 'textarea'\neditContentFieldValue.value.param.input === 'textarea' ||\nnewVal = newVal?.trim()\nvalueObj.param?.input === 'textarea' ||\nnewVal = newVal?.trim()"
     },
     "Markdown note styles": {
       "file": "styles/utils/_mixins.scss",
