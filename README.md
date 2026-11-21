@@ -54,7 +54,8 @@ leave the browser: they autosave on this device only.
   follow-up. Each tab shows its length (red over the limit), so the answers can be balanced at
   a glance. *Rename* (or F2, or a double-click on the open tab) names it after a reviewer's ID,
   say; *Delete* removes it. Every draft autosaves on its own, undo never crosses from one draft
-  into another, and several windows of the page can be open at once without losing a draft.
+  into another, and several windows of the page can be open at once without losing a draft (a
+  draft deleted in one window comes back if another window still has it open).
 - **Status bar.** Characters counted the way OpenReview's own counter does (trimmed length),
   the length of the selection, the number of formulas MathJax will typeset, hazards, and
   MathJax problems (TeX errors *and* undefined macros).
