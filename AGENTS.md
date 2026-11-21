@@ -212,39 +212,35 @@ cases, Chrome probes); keep their rules:
   `tests/history.test.js`). `keepVersion` runs before every bulk change of the editor (Fix all,
   Apply to source, Clear, Load example, a restore; none on a read-only draft) and `saveDraftNow`
   keeps one every `HISTORY_EVERY`. A history write that does not fit keeps fewer versions there
-  and the rest in memory (`historyUnsaved`), written by `retryHistory` after a draft save. Only a
-  quota error on a draft key (body, list, pending or deleting mark) drops all history and retries
-  once (`fallbackSet` → `isQuotaError`, `dropAllHistory`); preferences never do. Deleting a draft
-  deletes its history, here and, through tombstones, in other windows and after a boot
-  (`pruneHistory`). Two windows adding versions of one draft at the same moment can lose one of
-  the two versions.
+  and the rest in memory (`historyUnsaved`), written by `retryHistory` after a draft save or a
+  confirmed store write. Only a quota error on a draft key (body, list, pending or deleting mark)
+  drops the stored history and retries once (`fallbackSet` → `isQuotaError`, `dropAllHistory`);
+  versions waiting in memory stay, and preferences never drop anything. Deleting a draft deletes
+  its history, here and, through tombstones, in other windows and after a boot (`pruneHistory`,
+  which first merges the newest stored list). Two windows adding versions of one draft at the
+  same moment can lose one of the two versions.
 - **Dialogs are modal** (`setModal`: everything behind History and Split is `inert`, so no draft
   switch or keystroke reaches the editor while one is open) and **bound to their draft**: a draft
-  switch (`openDraft`) closes History, Split and Import table. `restoreVersion` refuses a version
-  of another draft (`historyFor`), and refuses when another window saved newer text since this
-  editor loaded it (reload first); otherwise it keeps the editor's text as a version first.
-  Copy in a dialog passes its button to `copyText`, whose fallback then never selects the editor.
-  `renderHistory` keeps the focus on the same version through a redraw.
-- **Files**: `knownDraftText(id)` is a draft's text or null while it loads or was never read
-  (`bodyKnown`: set by a successful read, `createDraft` or a successful save; not by the 8 s
-  watchdog unless this browser has a copy). An edited editor is the author's text; an unchanged one
-  yields to a newer copy another window saved; the example stands for an empty draft. Export
-  writes `draftsFile` with every known text and names the others before leaving them out;
-  Download refuses an unknown text. Import reads a `.json` export (`readDraftsFile`, no limit on
-  the number of drafts, format version 1) or any other text file as one literal draft, decoded
-  strictly as UTF-8 or UTF-16 with one BOM (`decodeTextFile`), and is dropped when the open draft
-  or a dialog changed while the file was read (`importFor`). It takes in other windows' drafts,
-  saves the open draft through `secureOpenDraft` (the ordinary save; its body and pending mark
-  must both be stored), and `importPlan` adds only texts no known draft has (an unknown text
-  keeps only its name), under names no draft has. `createDraft` stores a body before giving it a
-  tab and returns null when it does not fit; `commitNewDrafts` then stores the list and, when
-  that does not fit, takes the new drafts out again (`discardNewDrafts`, with tombstones).
-  Split's "Open the parts as drafts" does the same, all parts or none. A failed write of the open
-  draft is retried with the editor's current text (`retryLocalWrites`), so an undone edit cannot
-  come back. Nothing is ever replaced or merged into a draft.
-- Known limits of Files: two windows importing the same file at the same instant can each add it
-  (two identical drafts, nothing lost); a browser that lets the page read local storage but not
-  write it, while an asynchronous store works, reports no space for an import.
+  switch (`openDraft`) closes History, Split and Import table and drops an offer to convert a
+  pasted table; the table dialog and the offer also check their draft before they insert.
+  `restoreVersion` refuses a version of another draft (`historyFor`), and refuses when the stored
+  copy (read from localStorage itself, not this window's copy in memory) differs from both the
+  editor and `savedText`: another window saved since (reload first). Otherwise it keeps the
+  editor's text as a version first. Copy in a dialog passes its button to `copyText`, whose
+  fallback then never selects the editor. `renderHistory` keeps the focus on the same version.
+- **Export** only reads: `knownDraftText(id)` is a draft's text or null while it loads or was never
+  read (`bodyKnown`: set by a successful read, `createDraft` or a save by this window, which also
+  counts while an older read is outstanding; the 8 s watchdog only when this browser has a copy).
+  An edited editor is the author's text; an unchanged one yields to a newer copy another window
+  saved; the example stands for an empty draft. Export writes `draftsFile` with every known text
+  and names the others before leaving them out; Download refuses an unknown text. Importing
+  drafts is not part of the page: it was reviewed three times and kept losing text in corner
+  cases (storage full, other windows or devices writing, the asynchronous store), so it waits on
+  the `feature/import` branch for a design that stages new drafts privately until the whole
+  operation is stored.
+- A list write refused for lack of space is retried through `saveDraftMeta`, which merges the
+  copy stored here (another window's newer list) before writing: `retryLocalWrites` never writes
+  this window's old list over it.
 
 ## Splitting
 
@@ -280,7 +276,7 @@ status bar's TeX-error and undefined-macro counts and their hazard cards (a macr
 card, with undo; no fix before the typeset of the current text; a card that follows its formula
 after an edit; red `\verb` text not taken for a macro; Fix all's message while MathJax catches
 up), the preview of the trimmed comment, History (a version before Fix all, Restore with undo,
-deleted with its draft, dropped when a draft needs the space), Export and Import, a fresh TeX
+deleted with its draft, dropped when a draft needs the space, a conflict with another window), Export, a fresh TeX
 state per preview (no duplicate `\label` errors, deleted `\newcommand`s, `\definecolor`s and
 `\DeclarePairedDelimiter`s forgotten), drafts (a fresh one, switching, undo isolation, rename and delete,
 across a reload and with a slow store), manual fixes outside Fix

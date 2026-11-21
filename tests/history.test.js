@@ -1,7 +1,7 @@
 'use strict';
-// Earlier versions of a draft (parseHistory, historyAdd, historyDue) and
-// drafts as files (draftsFile, readDraftsFile, importPlan). The page keeps
-// versions in this browser only; these are the rules it applies to them.
+// Earlier versions of a draft (parseHistory, historyAdd, historyDue,
+// mergeHistory) and the export file (draftsFile). The page keeps versions in
+// this browser only; these are the rules it applies to them.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadAnalyzer } = require('./lib/page');
@@ -61,59 +61,14 @@ test('while editing, a version is due every HISTORY_EVERY', () => {
   assert.equal(A.historyDue(1000, 1000 + A.HISTORY_EVERY), true);
 });
 
-test('an exported file reads back as the same drafts', () => {
+test('an export holds every draft, by name and exact text, in tab order', () => {
   const drafts = [{ name: 'Reviewer aBcD', text: 'Thanks $x$!\n\n| a |\n|-|\n| 1 |' }, { name: 'General', text: '' }];
   const file = A.draftsFile(drafts, Date.UTC(2026, 10, 21));
-  const parsed = JSON.parse(file);
-  assert.equal(parsed.format, 'rebuttal-bench-drafts');
-  assert.equal(parsed.exported, '2026-11-21T00:00:00.000Z');
-  const back = plain(A.readDraftsFile(file, 'rebuttal-drafts-2026-11-21.json'));
-  assert.deepEqual(back, { drafts, error: null });
-});
-
-test('reading files for import', () => {
-  const md = plain(A.readDraftsFile('# Answer\r\n\r\nText.', 'C:\\Users\\me\\Reviewer   9xY2.md'));
-  assert.deepEqual(md, { drafts: [{ name: 'Reviewer 9xY2', text: '# Answer\n\nText.' }], error: null });
-  assert.equal(A.readDraftsFile('x', '').drafts[0].name, 'Imported');
-  // A draft that starts with a brace is still a draft.
-  assert.deepEqual(plain(A.readDraftsFile('{x} is the set.', 'set.txt')).drafts, [{ name: 'set', text: '{x} is the set.' }]);
-  assert.match(A.readDraftsFile('{"a": 1}', 'other.json').error, /not exported by Rebuttal Bench/);
-  assert.match(A.readDraftsFile('{"format": "rebuttal-bench-drafts", "drafts": []}', 'x.json').error, /no drafts/);
-  assert.match(A.readDraftsFile('PK\u0003\u0004\u0000\u0000', 'paper.docx').error, /not a text file/);
-  // Every draft Export wrote comes back, however many.
-  const many = { format: 'rebuttal-bench-drafts', drafts: Array.from({ length: 80 }, (_, i) => ({ name: 'D' + i, text: 't' + i })) };
-  assert.equal(A.readDraftsFile(JSON.stringify(many), 'x.json').drafts.length, 80);
-  // A Markdown or text file is one draft, even when its text is JSON, or an export.
-  for (const text of ['{"score": 4}', JSON.stringify(many)]) {
-    assert.deepEqual(plain(A.readDraftsFile(text, 'A.md')), { drafts: [{ name: 'A', text }], error: null });
-  }
-  assert.match(A.readDraftsFile(JSON.stringify({ ...many, version: 2 }), 'x.json').error, /newer version/);
-  const odd = { format: 'rebuttal-bench-drafts', drafts: [{ name: 7, text: 'kept' }, { name: 'no text' }, null, { name: ' Spaced\tname ', text: 'a\r\nb' }] };
-  assert.deepEqual(plain(A.readDraftsFile(JSON.stringify(odd), 'x.json')).drafts,
-    [{ name: 'Imported', text: 'kept' }, { name: 'Spaced name', text: 'a\nb' }]);
-});
-
-test('an import adds only new texts, under names no draft has, and replaces nothing', () => {
-  const existing = [{ name: 'Draft 1', text: 'mine' }, { name: 'Reviewer aBcD', text: 'answer' }];
-  const plan = plain(A.importPlan(existing, [
-    { name: 'Reviewer aBcD', text: 'answer' },     // already here
-    { name: 'Reviewer aBcD', text: 'other answer' }, // same name, new text
-    { name: 'reviewer abcd', text: 'third' },       // names compare without case
-    { name: 'General', text: 'g' },
-    { name: 'General', text: 'g' },                  // twice in the file
-  ]));
-  assert.deepEqual(plan, {
-    add: [
-      { name: 'Reviewer aBcD (2)', text: 'other answer' },
-      { name: 'reviewer abcd (3)', text: 'third' },
-      { name: 'General', text: 'g' },
-    ],
-    same: 2,
+  assert.ok(file.endsWith('\n'));
+  assert.deepEqual(JSON.parse(file), {
+    format: 'rebuttal-bench-drafts', version: 1, exported: '2026-11-21T00:00:00.000Z', drafts,
   });
-  // A draft whose text is not known here keeps its name but matches no text,
-  // not even one an archive could hold.
-  assert.deepEqual(plain(A.importPlan([{ name: 'B', text: null }], [{ name: 'B', text: '\u0000unknown d2' }, { name: 'X', text: '' }])),
-    { add: [{ name: 'B (2)', text: '\u0000unknown d2' }, { name: 'X', text: '' }], same: 0 });
-  // Texts that look like object keys are ordinary texts.
-  assert.equal(A.importPlan([], [{ name: 'x', text: '__proto__' }, { name: 'y', text: 'constructor' }]).add.length, 2);
+  // Control characters and lone surrogates survive the JSON round trip.
+  const odd = [{ name: 'x', text: '\u0000\u001b\ud800 end' }];
+  assert.deepEqual(JSON.parse(A.draftsFile(odd, 0)).drafts, odd);
 });

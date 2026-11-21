@@ -539,24 +539,20 @@ try {
     return shown[0] === 'before Fix all:Set $a\\\\,b$ here.' && restored === 'Set $a\\\\,b$ here.' && closed &&
       kept[0] === 'before a restore' && ta.value === fixed || { shown, restored, closed, kept, undone: ta.value, fixed };`);
 
-  await check('Export writes every draft; Import adds new ones as tabs and replaces none', `
-    let saved = null;
+  await check('Export writes every draft by name and text; Download writes the open one', `
+    const files = [];
     const realDownload = downloadFile;
-    downloadFile = function (name, content) { saved = { name, content }; return true; };
-    exportAllDrafts();
+    downloadFile = function (name, content) { files.push({ name, content }); return true; };
+    exportAllDrafts(); exportOpenDraft();
     downloadFile = realDownload;
-    if (!saved || !/^rebuttal-drafts-\\d{4}-\\d\\d-\\d\\d\\.json$/.test(saved.name)) return saved;
-    const file = JSON.parse(saved.content), before = draftMeta.list.length;
-    importDrafts(saved.content, saved.name);
-    const sameMsg = toast.textContent, sameCount = draftMeta.list.length;
-    importDrafts(JSON.stringify({ format: 'rebuttal-bench-drafts', drafts: [{ name: file.drafts[0].name, text: 'An imported answer.' }] }), 'x.json');
-    await wait(50);
-    const added = draftMeta.list.length === before + 1 && ta.value === 'An imported answer.' &&
-      draftById(draftMeta.active).name === file.drafts[0].name + ' (2)';
-    importDrafts('Plain **text**.', 'Reviewer 9xY2.md'); await wait(50);
-    const md = draftById(draftMeta.active).name === 'Reviewer 9xY2' && ta.value === 'Plain **text**.';
-    return file.drafts.length === before && sameCount === before && /already here/.test(sameMsg) && added && md ||
-      { names: file.drafts.map((d) => d.name), before, sameMsg, list: draftMeta.list.map((d) => d.name), value: ta.value };`);
+    const [all, one] = files;
+    if (!all || !/^rebuttal-drafts-\\d{4}-\\d\\d-\\d\\d\\.json$/.test(all.name)) return files;
+    const file = JSON.parse(all.content);
+    const same = file.drafts.length === draftMeta.list.length &&
+      draftMeta.list.every((d, i) => file.drafts[i].name === d.name && file.drafts[i].text === draftText(d.id));
+    const open = draftById(draftMeta.active);
+    return same && one && one.name === open.name + '.md' && one.content === ta.value ||
+      { names: file.drafts.map((d) => d.name), one: one && one.name };`);
 
   await check('a deleted draft takes its history along; a draft that needs the space comes before earlier versions', `
     window.confirm = () => true;
@@ -604,29 +600,6 @@ try {
     window.confirm = () => true; deleteDraft(a); await wait(50);
     return inert && focusKept && closed && kept && draftMeta.active === 'd1' || { inert, focusKept, closed, kept, active: draftMeta.active };`);
 
-  await check('Import saves the open draft first and adds only drafts whose text fits', `
-    setSourceText('First draft $x$. An edit not saved yet.', 0);
-    const setItem = Storage.prototype.setItem;
-    Storage.prototype.setItem = function (k, v) {
-      if (String(v).indexOf('BIG') === 0) throw new DOMException('full', 'QuotaExceededError');
-      return setItem.call(this, k, v);
-    };
-    try {
-      importDrafts(JSON.stringify({ format: 'rebuttal-bench-drafts', drafts: [
-        { name: 'Small', text: 'A small answer.' }, { name: 'Big', text: 'BIG answer' }] }), 'x.json');
-    } finally { Storage.prototype.setItem = setItem; }
-    await wait(50);
-    const names = draftMeta.list.map((d) => d.name), msg = toast.textContent;
-    const savedFirst = localStorage.getItem(DRAFT_KEY) === 'First draft $x$. An edit not saved yet.';
-    const small = draftMeta.list.find((d) => d.name === 'Small');
-    const smallStored = !!small && localStorage.getItem(keyOfDraft(small.id)) === 'A small answer.';
-    window.confirm = () => true;
-    if (small) deleteDraft(small.id);
-    switchDraft('d1'); await wait(50);
-    setSourceText('First draft $x$.', 0); saveDraftNow();
-    return savedFirst && smallStored && names.indexOf('Big') < 0 && /No space left for “Big”/.test(msg) ||
-      { savedFirst, smallStored, names, msg };`);
-
   await check('Export names a draft that has not loaded instead of writing it as blank', `
     const id = createDraft('Loading one', 'its text'); saveDraftMeta();
     fallbackDel(keyOfDraft(id)); delete draftTexts[id]; bodyState[id] = 'loading';
@@ -638,12 +611,6 @@ try {
     downloadFile = realDownload;
     bodyState[id] = 'ready'; window.confirm = () => true; deleteDraft(id); switchDraft('d1');
     return /“Loading one” has not loaded/.test(asked) && !downloaded || { asked, downloaded };`);
-
-  await check('Import reads UTF-8 and UTF-16 files and refuses other encodings', `
-    const latin1 = decodeTextFile(new Uint8Array([0x63, 0x61, 0x66, 0xE9]));
-    const utf16 = decodeTextFile(new Uint8Array([0xFF, 0xFE, 0x63, 0x00, 0xE9, 0x00]));
-    const utf8 = decodeTextFile(new Uint8Array([0xEF, 0xBB, 0xBF, 0x63, 0xC3, 0xA9]));
-    return !!latin1.error && utf16.text === 'c\\u00e9' && utf8.text === 'c\\u00e9' || { latin1, utf16, utf8 };`);
 
   await check('A version that does not fit waits in memory and is written once there is space', `
     dropHistory('d1');
@@ -660,32 +627,6 @@ try {
     dropHistory('d1');
     return waiting && written || { waiting, written };`);
 
-  await check('an import whose list of drafts does not fit adds nothing, and leaves no text behind', `
-    const before = draftMeta.list.map((d) => d.id).join();
-    const setItem = Storage.prototype.setItem;
-    Storage.prototype.setItem = function (k, v) {
-      if (k === DRAFTS_KEY) throw new DOMException('full', 'QuotaExceededError');
-      return setItem.call(this, k, v);
-    };
-    try { importDrafts('An answer that has no room.', 'Lost.md', draftMeta.active); } finally { Storage.prototype.setItem = setItem; }
-    saveDraftMeta(); await wait(50);
-    const left = Object.keys(localStorage).filter((k) => (localStorage.getItem(k) || '').indexOf('An answer that has no room.') >= 0);
-    return draftMeta.list.map((d) => d.id).join() === before && !left.length && /nothing was imported/.test(toast.textContent) ||
-      { list: draftMeta.list.map((d) => d.name), left, toast: toast.textContent };`);
-
-  await check('an edit undone after its save failed does not come back on the next save', `
-    const setItem = Storage.prototype.setItem;
-    Storage.prototype.setItem = function (k, v) {
-      if (k === DRAFT_KEY) throw new DOMException('full', 'QuotaExceededError');
-      return setItem.call(this, k, v);
-    };
-    try { setSourceText('Discard this edit', 0); saveDraftNow(); } finally { Storage.prototype.setItem = setItem; }
-    const failed = !!memNewer[DRAFT_KEY];
-    setSourceText('First draft $x$.', 0); clearTimeout(draftTimer); clearTimeout(timer);
-    retryLocalWrites();
-    return failed && localStorage.getItem(DRAFT_KEY) === 'First draft $x$.' && !memNewer[DRAFT_KEY] ||
-      { failed, stored: localStorage.getItem(DRAFT_KEY) };`);
-
   await check('Restore does not replace text another window saved since this one loaded it', `
     keepVersion('test', 'An older version.');
     localStorage.setItem(DRAFT_KEY, 'Saved by another window.'); /* as another window's autosave */
@@ -697,38 +638,78 @@ try {
     localStorage.setItem(DRAFT_KEY, 'First draft $x$.'); dropHistory('d1');
     return kept && historyDialog.hidden && /Another window saved a newer version/.test(msg) || { kept, msg, value: ta.value };`);
 
-  await check('Split saves the draft first, and makes all parts drafts or none', `
-    limitInput.value = '40'; limitInput.dispatchEvent(new Event('input')); splitLabelBox.checked = false;
-    setSourceText('First part of the answer here.\\n\\nSecond part of the answer here.', 0); updateAll();
-    document.getElementById('splitBtn').click(); await wait(50);
-    const n = splitResult.parts.length, before = draftMeta.list.length;
+  await check('Restore sees another window’s save even behind this window’s own refused write', `
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      if (k === DRAFT_KEY) throw new DOMException('full', 'QuotaExceededError');
+      return setItem.call(this, k, v);
+    };
+    try { setSourceText('A long edit that does not fit.', 0); saveDraftNow(); } finally { Storage.prototype.setItem = setItem; }
+    keepVersion('test', 'An older version.'); /* the refused write let stored versions go */
+    setItem.call(localStorage, DRAFT_KEY, 'Final from another window.');
+    document.querySelector('#draftTools [data-act="history"]').click(); await wait(50);
+    const btn = [...historyList.querySelectorAll('[data-restore]')].find((b) => historyShown[+b.getAttribute('data-restore')].text === 'An older version.');
+    btn.click(); await wait(50);
+    const kept = localStorage.getItem(DRAFT_KEY) === 'Final from another window.' && ta.value === 'A long edit that does not fit.';
+    const msg = toast.textContent;
+    setSourceText('First draft $x$.', 0); saveDraftNow(); dropHistory('d1');
+    return kept && /Another window saved a newer version/.test(msg) && localStorage.getItem(DRAFT_KEY) === 'First draft $x$.' ||
+      { kept, msg, stored: localStorage.getItem(DRAFT_KEY) };`);
+
+  await check('versions waiting in memory survive when stored versions give way to a draft', `
+    keepVersion('test', 'Stored version.');
+    historyUnsaved.d1 = [{ at: Date.now(), why: 'test', text: 'Waiting in memory.' }]; /* did not fit */
+    dropAllHistory();
+    const kept = readHistory('d1').some((v) => v.text === 'Waiting in memory.');
+    dropHistory('d1');
+    return kept || readHistory('d1');`);
+
+  await check('an offer to convert a pasted table expires when the open draft changes', `
+    const origId = draftMeta.active;
+    const tsv = 'A\\tB\\n1\\t2';
+    pastedTable = { draft: origId, source: tsv, start: 0, end: tsv.length }; tableOffer.hidden = false;
+    document.querySelector('#draftTools .dadd').click(); await wait(50);
+    const gone = !pastedTable && tableOffer.hidden;
+    setSourceText(tsv, 0); clearTimeout(timer);
+    pastedTable = { draft: origId, source: tsv, start: 0, end: tsv.length }; /* as if left over */
+    document.getElementById('convertPaste').click(); await wait(50);
+    const refused = !tableDialog.open;
+    if (tableDialog.open) tableDialog.close();
+    window.confirm = () => true; deleteDraft(draftMeta.active); switchDraft(origId);
+    return gone && refused || { gone, refused };`);
+
+  await check('a list write retried after running out of space merges with another window’s list', `
     const setItem = Storage.prototype.setItem;
     Storage.prototype.setItem = function (k, v) {
       if (k === DRAFTS_KEY) throw new DOMException('full', 'QuotaExceededError');
       return setItem.call(this, k, v);
     };
-    try { splitDraftsBtn.click(); } finally { Storage.prototype.setItem = setItem; }
-    saveDraftMeta(); await wait(50);
-    const sourceSaved = localStorage.getItem(DRAFT_KEY) === 'First part of the answer here.\\n\\nSecond part of the answer here.';
-    const none = draftMeta.list.length === before && !splitDialog.hidden;
-    /* Copy from the dialog keeps the focus there, with the editor behind it untouched. */
+    try { saveDraftMeta(); } finally { Storage.prototype.setItem = setItem; }
+    const refused = !!memNewer[DRAFTS_KEY];
+    /* Meanwhile another window adds a draft and saves the list. */
+    const theirs = JSON.parse(localStorage.getItem(DRAFTS_KEY));
+    theirs.list.push({ id: 'dotherwindow1', name: 'From another window', at: Date.now() });
+    theirs.saved = Date.now();
+    setItem.call(localStorage, DRAFTS_KEY, JSON.stringify(theirs));
+    setItem.call(localStorage, DRAFT_KEY + '-dotherwindow1', 'Its text.');
+    retryLocalWrites();
+    const merged = JSON.parse(localStorage.getItem(DRAFTS_KEY)).list.some((d) => d.id === 'dotherwindow1');
+    window.confirm = () => true; deleteDraft('dotherwindow1'); switchDraft('d1');
+    return refused && merged && !memNewer[DRAFTS_KEY] || { refused, merged };`);
+
+  await check('Split’s Copy keeps the focus in its dialog when the clipboard refuses', `
+    limitInput.value = '40'; limitInput.dispatchEvent(new Event('input'));
+    setSourceText('First part of the answer here.\\n\\nSecond part of the answer here.', 0); updateAll();
+    document.getElementById('splitBtn').click(); await wait(50);
     const realWrite = navigator.clipboard && navigator.clipboard.writeText;
     if (navigator.clipboard) navigator.clipboard.writeText = () => Promise.reject(new Error('denied'));
     splitParts.querySelector('[data-copy="0"]').click(); await wait(100);
     const focusKept = !!document.activeElement && document.activeElement.matches('[data-copy="0"]');
     if (navigator.clipboard) navigator.clipboard.writeText = realWrite;
-    closeSplit(); splitLabelBox.checked = true;
+    closeSplit();
     limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
     setSourceText('First draft $x$.', 0); saveDraftNow();
-    return n === 2 && sourceSaved && none && focusKept || { n, sourceSaved, none, focusKept, count: draftMeta.list.length };`);
-
-  await check('a file read while the page moved on is not imported', `
-    const before = draftMeta.list.length;
-    importDrafts('Late file.', 'Late.md', 'dnotopen');
-    const refused = /changed while the file was being read/.test(toast.textContent) && draftMeta.list.length === before;
-    const bad = decodeTextFile(new Uint8Array([0xFF, 0xFE, 0x41, 0x00, 0x42]));
-    const twice = decodeTextFile(new Uint8Array([0xFF, 0xFE, 0xFF, 0xFE, 0x41, 0x00]));
-    return refused && !!bad.error && twice.text === '\\ufeffA' || { refused, bad, twice };`);
+    return focusKept || document.activeElement && document.activeElement.outerHTML.slice(0, 80);`);
 
   await check('Export asks about a draft whose read never answered, and forgets a deleted draft’s unsaved versions', `
     const id = createDraft('Never answered', ''); saveDraftMeta();
