@@ -282,6 +282,35 @@ try {
     box.click(); await wait(500);
     return off && prefs.compact.tables === true || { off, now: prefs.compact.tables };`);
 
+  await check('a new draft starts empty, and each draft keeps its own text', `
+    setSourceText('First draft $x$.', 0); ta.dispatchEvent(new Event('input')); await wait(50);
+    document.querySelector('#draftTabs .dadd').click(); await wait(50);
+    const fresh = ta.value === '' && draftMeta.list.length === 2 && draftMeta.active === 'd2';
+    setSourceText('Second draft $y$.', 0); ta.dispatchEvent(new Event('input')); await wait(50);
+    document.querySelector('#draftTabs .dtab[data-id="d1"]').click(); await wait(50);
+    const counts = [...document.querySelectorAll('#draftTabs .dcount')].map((e) => e.textContent).join(',');
+    return fresh && ta.value === 'First draft $x$.' && counts === '16,17' || { fresh, value: ta.value, counts };`);
+
+  await check('undo after switching drafts cannot bring the other draft in', `
+    ta.focus(); document.execCommand('undo'); await wait(50); document.execCommand('undo'); await wait(50);
+    return ta.value === 'First draft $x$.' || ta.value;`);
+
+  await load();
+  await check('the drafts and the open one survive a reload', `
+    return draftMeta.list.length === 2 && draftMeta.active === 'd1' && ta.value === 'First draft $x$.' &&
+      draftTexts.d2 === 'Second draft $y$.' || { meta: draftMeta, value: ta.value, d2: draftTexts.d2 };`);
+
+  await check('a draft can be renamed and deleted', `
+    window.prompt = () => '  Reviewer   aBcD ';
+    window.confirm = () => true;
+    document.querySelector('#draftTabs .dtab[data-id="d2"]').click(); await wait(50);
+    document.querySelector('#draftTabs .dtab[data-id="d2"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    const renamed = draftById('d2').name === 'Reviewer aBcD';
+    document.querySelector('#draftTabs .dclose').click(); await wait(50);
+    return renamed && draftMeta.list.length === 1 && draftMeta.active === 'd1' && ta.value === 'First draft $x$.' &&
+      !document.querySelector('#draftTabs .dclose') && localStorage.getItem('rebuttal-bench-draft-d2') === null ||
+      { renamed, meta: draftMeta, value: ta.value };`);
+
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).
@@ -327,6 +356,16 @@ try {
       !compactList.querySelector('input[data-trick="tables"]').checked || { restored: prefsRestored, tables: prefs.compact.tables };`);
   await inPage(`localStorage.setItem('stub:delay', '50');
     compactList.querySelector('input[data-trick="tables"]').click(); await wait(300); return true;`);
+
+  await load();
+  await inPage(`document.querySelector('#draftTabs .dadd').click(); await wait(50);
+    setSourceText('Typed in a second draft $z$.', 0); ta.dispatchEvent(new Event('input')); return draftMeta.active;`);
+  await load(); /* before the 700 ms autosave reaches the store */
+  await check('with an asynchronous store, text typed in a second draft just before a reload is kept', `
+    const ok = draftMeta.list.length === 2 && ta.value === 'Typed in a second draft $z$.' && draftTexts.d1 === 'Theirs $b$.';
+    window.confirm = () => true;
+    document.querySelector('#draftTabs .dclose').click(); await wait(300);
+    return ok && draftMeta.list.length === 1 || { meta: draftMeta, value: ta.value, d1: draftTexts.d1 };`);
 
   results.push([errors.length === 0, 'no uncaught page errors', errors.join(' | ')]);
 } catch (e) {

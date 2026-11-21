@@ -35,6 +35,10 @@ leave the browser: they autosave on this device only.
   guide states no limit. Each preset's tooltip names its official source and the date it was
   checked; rules change every year. At any venue, a link that may name the authors (a personal
   repository or page, a shared drive, an e-mail address) gets a note.
+- **Drafts.** One tab per text you are writing: an answer per reviewer, a general response, a
+  follow-up. Each tab shows its length (red over the limit), so the answers can be balanced at
+  a glance; double-click the open tab to rename it (a reviewer's ID, say), × deletes it. Every
+  draft autosaves on its own, and undo never crosses from one draft into another.
 - **Status bar.** Characters counted the way OpenReview's own counter does (trimmed length),
   the length of the selection, the number of formulas MathJax will typeset, hazards, and
   MathJax problems (TeX errors *and* undefined macros).

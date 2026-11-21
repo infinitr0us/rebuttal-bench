@@ -99,6 +99,21 @@ caller passes `render` (the page: `renderOpenReviewMarkdown`; the tests: `render
   will reject anyway (each rejection costs renders; the budget is 400 checks).
 - Add cases to `tests/compact.test.js` in both directions, as for fixes.
 
+## Drafts and storage
+
+- Each draft's text has its own storage key: the first draft (`d1`) keeps `rebuttal-bench-draft`, the
+  key every older version used, so existing drafts carry over; the others use
+  `rebuttal-bench-draft-d2` and so on. `rebuttal-bench-drafts` lists the drafts (names, which one is
+  open) and is parsed by the pure `parseDraftMeta`, which turns anything unreadable into the single
+  draft of older versions. Draft ids only grow (`next`), so a deleted draft's key is never reused.
+- Every key goes through the same autosave logic (`storeDraft`, `loadDraft`, `flushDraftLocally`,
+  pending marker `<key>-pending`), including its handling of a slow asynchronous store. A draft
+  being switched away from is flushed like a page being left.
+- A draft switch puts in a **fresh textarea** (`freshEditor`): Chrome replays its undo history into
+  whatever the textarea holds, so a plain value assignment would let Ctrl+Z pour one draft's edits
+  into another. Therefore **attach editor listeners with `onEditor(type, fn)`**, never
+  `ta.addEventListener`, and read `ta` at call time rather than keeping a reference to it.
+
 ## Venue presets
 
 `VENUES` holds each venue's limit, link rule and official source, checked on `VENUES_CHECKED`.
@@ -120,7 +135,8 @@ limit, a moved file or marker, an unreadable snapshot; it never overwrites one w
 `npm run smoke`: it drives the installed Chrome/Edge headlessly (DevTools protocol, no
 dependencies) and checks Fix all + single-step undo, undoable *Clear* and *Load example*, the
 status bar's TeX-error and undefined-macro counts, a fresh TeX state per preview (no duplicate
-`\label` errors, deleted `\newcommand`s and `\definecolor`s forgotten), manual fixes outside Fix
+`\label` errors, deleted `\newcommand`s and `\definecolor`s forgotten), drafts (a fresh one, switching, undo isolation, rename and delete,
+across a reload and with a slow store), manual fixes outside Fix
 all, Fix all's added-character count, the selection count, venue presets, Copy compact and Apply to
 source (with undo), the compact chip state, compaction switches across a reload, jumping to a hazard on a
 long soft-wrapped line, refusing a stale one-click fix, draft persistence across a reload (also

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Drafts
+- A tab per draft (an answer per reviewer, a general response, a follow-up), each with its length
+  against the limit; double-click to rename, × to delete. Each draft autosaves under its own key
+  with the same protection against a slow asynchronous store; existing drafts carry over as the
+  first tab. Switching drafts gives the editor a fresh undo history, so Ctrl+Z cannot carry text
+  from one draft into another.
+
 ## 3.2.0 (2026-11-21)
 
 From a brainstorm on 2026-11-21 (Claude, Codex and Fable) about per-comment character limits and

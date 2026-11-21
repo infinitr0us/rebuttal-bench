@@ -378,6 +378,39 @@ window.MathJax = {
   }
   .pane-head .hint { font-size: 11.5px; color: var(--dim); }
 
+  /* drafts */
+  .drafts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 18px 7px;
+    background: var(--head-bg);
+    border-top: 1px solid var(--line);
+  }
+  .drafts:empty { display: none; }
+  .dtab, .dadd, .dclose {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.4;
+    padding: 2px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--btn-bg);
+    color: var(--dim);
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dtab[aria-selected="true"] { border-color: var(--accent); color: var(--text); }
+  .dtab:hover, .dadd:hover { background: var(--btn-hover); color: var(--text); }
+  .dtab .dcount { margin-left: 7px; color: var(--dim); }
+  .dtab .dcount.over { color: var(--err); }
+  .dclose { padding: 2px 7px; margin-left: -3px; }
+  .dclose:hover { border-color: var(--err); color: var(--err); }
+  .dadd { border-style: dashed; }
+
   /* editor */
   #src {
     flex: 1 1 auto;
@@ -770,6 +803,7 @@ window.MathJax = {
 <main>
   <section class="pane" aria-label="Source editor">
     <div class="pane-head"><h2>Source</h2><span class="hint">exactly what you'll paste into OpenReview, or its compact form</span></div>
+    <div class="drafts" id="draftTabs" role="tablist" aria-label="Drafts"></div>
     <textarea id="src" spellcheck="false" placeholder="Type or paste your rebuttal…"></textarea>
     <div class="lint">
       <div class="lint-head"><span>Hazards</span> <span id="lintCount" class="zero">0</span><button type="button" id="fixAllBtn" hidden title="Rewrite every hazard that has a mechanical fix. One Ctrl+Z undoes the whole pass.">Fix all</button></div>
@@ -2982,6 +3016,35 @@ function compactText(text, enabled, render, limits) {
   };
 }
 
+/* ---- drafts (pure): the stored list of drafts ----
+   {active, list: [{id, name}], next}: ids are "d1", "d2", ...; "next" only
+   grows, so a deleted draft's id (and storage key) is never reused. Anything
+   unreadable falls back to the single draft every older version had. */
+function parseDraftMeta(raw) {
+  var meta = null;
+  try { meta = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { meta = null; }
+  var seen = {}, list = [];
+  (meta && Array.isArray(meta.list) ? meta.list : []).forEach(function (d) {
+    if (!d || typeof d.id !== 'string' || !/^d[1-9]\d{0,5}$/.test(d.id) || seen[d.id]) return;
+    seen[d.id] = true;
+    var name = typeof d.name === 'string' ? d.name.replace(/\s+/g, ' ').trim().slice(0, 40) : '';
+    list.push({ id: d.id, name: name || 'Draft ' + d.id.slice(1) });
+  });
+  if (!list.length) list = [{ id: 'd1', name: 'Draft 1' }];
+  var active = meta && typeof meta.active === 'string' && seen[meta.active] ? meta.active : list[0].id;
+  var next = 1;
+  list.forEach(function (d) { next = Math.max(next, parseInt(d.id.slice(1), 10) + 1); });
+  if (meta && typeof meta.next === 'number' && meta.next > next && meta.next < 1e6) next = Math.floor(meta.next);
+  return { active: active, list: list, next: next };
+}
+
+function newDraftName(list) {
+  var names = {}, n = list.length + 1;
+  list.forEach(function (d) { names[d.name.toLowerCase()] = true; });
+  while (names['draft ' + n]) n++;
+  return 'Draft ' + n;
+}
+
 function escHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -3105,6 +3168,25 @@ var compactList = document.getElementById('compactList');
 var compactFoot = document.getElementById('compactFoot');
 var applyCompactBtn = document.getElementById('applyCompactBtn');
 var selStat = document.getElementById('selStat');
+
+/* Listeners on the editor go through onEditor, so that a fresh textarea (a
+   draft switch puts one in, see openDraft) gets every one of them. */
+var editorHandlers = [];
+function onEditor(type, fn) {
+  editorHandlers.push([type, fn]);
+  ta.addEventListener(type, fn);
+}
+/* Chrome keeps one undo history per page and replays it into whatever text
+   the textarea holds now: after a plain value assignment, Ctrl+Z could pour
+   the previous draft's edits into this one. A new element has no history. */
+function freshEditor(value) {
+  var next = ta.cloneNode(false), focused = document.activeElement === ta;
+  next.value = value;
+  editorHandlers.forEach(function (h) { next.addEventListener(h[0], h[1]); });
+  ta.parentNode.replaceChild(next, ta);
+  ta = next;
+  if (focused) ta.focus();
+}
 var venueSelect = document.getElementById('venue');
 VENUES.forEach(function (v) {
   var opt = document.createElement('option');
@@ -3211,38 +3293,56 @@ function savePrefs() {
 }
 
 /* ---- draft autosave ---- */
-/* Drafts go to localStorage at once and to the asynchronous store (when the
-   page runs where there is one) in the background. pagehide cannot wait for
-   the latter, so the last keystrokes are flushed locally and marked pending,
-   together with the stored draft they were based on. At the next start the
-   pending copy wins, unless the store has changed since (another device). */
-var DRAFT_PENDING_KEY = 'rebuttal-bench-draft-pending';
-var remoteDraft = null;  /* the draft the asynchronous store last confirmed */
-var draftReady = false;  /* the saved draft has been restored */
+/* Each draft lives under its own key: the first under DRAFT_KEY, as before
+   there were several, the others under DRAFT_KEY + '-d2' and so on. A draft
+   goes to localStorage at once and to the asynchronous store (when the page
+   runs where there is one) in the background. pagehide cannot wait for the
+   latter, so the last keystrokes are flushed locally and marked pending (the
+   key + '-pending'), together with the stored draft they were based on. At
+   the next start the pending copy wins, unless the store has changed since
+   (another device). */
+var DRAFTS_KEY = 'rebuttal-bench-drafts'; /* the list of drafts: names, which one is open */
+var draftMeta = parseDraftMeta(null);
+var draftKey = DRAFT_KEY;  /* the storage key of the draft in the editor */
+var draftTexts = {};       /* id -> text of every draft not in the editor */
+var remoteDrafts = {};     /* key -> the draft the asynchronous store last confirmed */
+var draftReady = false;    /* the saved drafts have been restored */
 var draftTimer = null;
-function storeDraft(value) {
-  var localOk = fallbackSet(DRAFT_KEY, value);
+function keyOfDraft(id) { return id === 'd1' ? DRAFT_KEY : DRAFT_KEY + '-' + id; }
+function pendingKey(key) { return key + '-pending'; }
+function storeDraft(value, key) {
+  key = key || draftKey;
+  var localOk = fallbackSet(key, value);
   if (!canArtifactStore) return Promise.resolve(localOk);
-  return window.storage.set(DRAFT_KEY, value, false).then(function () {
-    remoteDraft = value;
-    if (fallbackGet(DRAFT_KEY) === value) fallbackDel(DRAFT_PENDING_KEY);
+  return window.storage.set(key, value, false).then(function () {
+    remoteDrafts[key] = value;
+    if (fallbackGet(key) === value) fallbackDel(pendingKey(key));
     return true;
   }).catch(function () { return localOk; });
 }
-function loadDraft() {
-  var local = fallbackGet(DRAFT_KEY), pending = null;
-  try { pending = JSON.parse(fallbackGet(DRAFT_PENDING_KEY) || 'null'); } catch (e) {}
+/* For when the asynchronous store may not get the text in time (leaving the
+   page, switching drafts): keep it locally and mark it pending. */
+function flushDraftLocally(value, key) {
+  fallbackSet(key, value);
+  if (canArtifactStore && value !== remoteDrafts[key]) {
+    fallbackSet(pendingKey(key), JSON.stringify({ base: remoteDrafts.hasOwnProperty(key) ? remoteDrafts[key] : null }));
+  }
+}
+function loadDraft(key) {
+  key = key || draftKey;
+  var local = fallbackGet(key), pending = null;
+  try { pending = JSON.parse(fallbackGet(pendingKey(key)) || 'null'); } catch (e) {}
   if (!canArtifactStore || !pending || typeof local !== 'string') {
-    return storeGet(DRAFT_KEY).then(function (value) {
-      if (canArtifactStore && typeof value === 'string') remoteDraft = value;
+    return storeGet(key).then(function (value) {
+      if (canArtifactStore && typeof value === 'string') remoteDrafts[key] = value;
       return { value: value, pending: false };
     });
   }
-  return window.storage.get(DRAFT_KEY, false).then(function (r) {
+  return window.storage.get(key, false).then(function (r) {
     var remote = r ? r.value : null;
     if (remote === null || remote === pending.base) return { value: local, pending: true };
-    fallbackDel(DRAFT_PENDING_KEY); /* saved elsewhere since: that draft is newer */
-    remoteDraft = remote;
+    fallbackDel(pendingKey(key)); /* saved elsewhere since: that draft is newer */
+    remoteDrafts[key] = remote;
     return { value: remote, pending: false };
   }, function () {
     return { value: local, pending: true };
@@ -3482,7 +3582,117 @@ function updateAll() {
   fixAllBtn.hidden = fixable === 0;
   fixAllBtn.textContent = 'Fix all (' + fixable + ')';
   scheduleCompaction();
+  renderDraftTabs();
 }
+
+/* ---- drafts: one per reviewer, a general response, a follow-up ---- */
+var draftTabs = document.getElementById('draftTabs');
+
+function draftById(id) {
+  for (var i = 0; i < draftMeta.list.length; i++) if (draftMeta.list[i].id === id) return draftMeta.list[i];
+  return null;
+}
+function draftText(id) { return id === draftMeta.active ? ta.value : (draftTexts[id] || ''); }
+function saveDraftMeta() { return storeSet(DRAFTS_KEY, JSON.stringify(draftMeta)); }
+
+/* Each tab shows the draft's length as OpenReview counts it, red when over
+   the limit, so four answers can be balanced at a glance. */
+function renderDraftTabs() {
+  if (!draftReady) return;
+  var limit = Math.max(0, parseInt(limitInput.value, 10) || 0), html = '';
+  draftMeta.list.forEach(function (d) {
+    var active = d.id === draftMeta.active, n = draftText(d.id).trim().length;
+    html += '<button type="button" role="tab" class="dtab" data-id="' + d.id + '" aria-selected="' + active + '" title="' +
+      escAttr(active ? d.name + ': double-click to rename' : 'Open ' + d.name) + '">' + escHtml(d.name) +
+      '<span class="dcount' + (limit > 0 && n > limit ? ' over' : '') + '">' + fmt(n) + '</span></button>';
+    if (active && draftMeta.list.length > 1) {
+      html += '<button type="button" class="dclose" data-close="' + d.id + '" title="Delete this draft" aria-label="' +
+        escAttr('Delete the draft ' + d.name) + '">×</button>';
+    }
+  });
+  html += '<button type="button" class="dadd" title="A new draft: one per reviewer, a general response, a follow-up">+ Draft</button>';
+  draftTabs.innerHTML = html;
+}
+
+/* Put draft `id` in a fresh editor, with an undo history of its own: Ctrl+Z
+   can never bring another draft's text into this one. */
+function openDraft(id) {
+  draftMeta.active = id;
+  draftKey = keyOfDraft(id);
+  freshEditor(draftTexts[id] || '');
+  delete draftTexts[id];
+  ta.scrollTop = 0;
+  saveStateEl.textContent = '';
+  updateAll();
+  renderPreview();
+}
+
+function switchDraft(id) {
+  if (!draftReady || id === draftMeta.active || !draftById(id)) return;
+  /* The leaving draft is written now: locally at once (marked pending until
+     the asynchronous store confirms it), so neither a reload nor a closed tab
+     can lose its last keystrokes. */
+  clearTimeout(draftTimer);
+  var leaving = ta.value;
+  draftTexts[draftMeta.active] = leaving;
+  flushDraftLocally(leaving, draftKey);
+  storeDraft(leaving, draftKey);
+  openDraft(id);
+  saveDraftMeta();
+}
+
+function addDraft() {
+  if (!draftReady) return;
+  var id = 'd' + draftMeta.next++, key = keyOfDraft(id);
+  draftMeta.list.push({ id: id, name: newDraftName(draftMeta.list) });
+  fallbackDel(pendingKey(key));
+  storeDraft('', key);
+  draftTexts[id] = '';
+  switchDraft(id);
+  ta.focus();
+}
+
+function renameDraft(id) {
+  var d = draftById(id);
+  if (!d) return;
+  var name = window.prompt('Name this draft (a reviewer’s ID, "General", "Follow-up", ...):', d.name);
+  if (name === null) return;
+  name = name.replace(/\s+/g, ' ').trim().slice(0, 40);
+  if (!name) return;
+  d.name = name;
+  saveDraftMeta();
+  renderDraftTabs();
+}
+
+function deleteDraft(id) {
+  var d = draftById(id);
+  if (!d || draftMeta.list.length < 2) return;
+  if (draftText(id).trim() && !window.confirm('Delete the draft “' + d.name + '”? Its text cannot be brought back.')) return;
+  var i = draftMeta.list.indexOf(d), key = keyOfDraft(id);
+  draftMeta.list.splice(i, 1);
+  delete draftTexts[id];
+  delete remoteDrafts[key];
+  fallbackDel(pendingKey(key));
+  storeDel(key);
+  if (id === draftMeta.active) {
+    clearTimeout(draftTimer);
+    openDraft(draftMeta.list[Math.max(0, i - 1)].id);
+  }
+  saveDraftMeta();
+  renderDraftTabs();
+}
+
+draftTabs.addEventListener('click', function (e) {
+  var close = e.target.closest('.dclose');
+  if (close) { deleteDraft(close.getAttribute('data-close')); return; }
+  if (e.target.closest('.dadd')) { addDraft(); return; }
+  var tab = e.target.closest('.dtab');
+  if (tab) switchDraft(tab.getAttribute('data-id'));
+});
+draftTabs.addEventListener('dblclick', function (e) {
+  var tab = e.target.closest('.dtab');
+  if (tab && tab.getAttribute('data-id') === draftMeta.active) renameDraft(draftMeta.active);
+});
 
 /* ---- compaction: applied on copy, the editor keeps the readable text ---- */
 
@@ -3691,7 +3901,7 @@ function updateSelection() {
   selStat.textContent = fmt(n) + ' selected';
 }
 ['select', 'selectionchange', 'keyup', 'mouseup', 'input', 'blur'].forEach(function (ev) {
-  ta.addEventListener(ev, updateSelection);
+  onEditor(ev, updateSelection);
 });
 document.addEventListener('selectionchange', function () { if (document.activeElement === ta) updateSelection(); });
 
@@ -3737,12 +3947,11 @@ function schedule() {
   timer = setTimeout(function () { updateAll(); renderPreview(); }, 220);
 }
 
-ta.addEventListener('input', function () { userEdited = true; clearTimeout(compactTimer); saveDraftSoon(); schedule(); });
+onEditor('input', function () { userEdited = true; clearTimeout(compactTimer); saveDraftSoon(); schedule(); });
 /* beforeunload is not delivered reliably (mobile, bfcache); pagehide is. */
 function flushDraft() {
   if (!draftReady && !userEdited) return; /* nothing restored or typed yet: keep the saved draft */
-  fallbackSet(DRAFT_KEY, ta.value);
-  if (canArtifactStore && ta.value !== remoteDraft) fallbackSet(DRAFT_PENDING_KEY, JSON.stringify({ base: remoteDraft }));
+  flushDraftLocally(ta.value, draftKey);
 }
 window.addEventListener('beforeunload', flushDraft);
 window.addEventListener('pagehide', flushDraft);
@@ -3785,7 +3994,7 @@ Array.prototype.forEach.call(document.querySelectorAll('.fs-ctl button'), functi
   });
 });
 
-ta.addEventListener('scroll', function () {
+onEditor('scroll', function () {
   if (!syncBox.checked) return;
   var denom = ta.scrollHeight - ta.clientHeight;
   if (denom <= 0) return;
@@ -3890,8 +4099,18 @@ storeGet(PREFS_KEY).then(function (v) {
   /* What was written while waiting lacked the stored values; write the merge. */
   if (Object.keys(prefsTouched).length) savePrefs();
   applyPrefs();
-  return loadDraft();
-}).then(function (draft) {
+  return storeGet(DRAFTS_KEY);
+}).then(function (rawMeta) {
+  draftMeta = parseDraftMeta(rawMeta);
+  draftKey = keyOfDraft(draftMeta.active);
+  return Promise.all(draftMeta.list.map(function (d) { return loadDraft(keyOfDraft(d.id)); }));
+}).then(function (loaded) {
+  var draft = null;
+  draftMeta.list.forEach(function (d, i) {
+    if (d.id === draftMeta.active) { draft = loaded[i]; return; }
+    draftTexts[d.id] = typeof loaded[i].value === 'string' ? loaded[i].value : '';
+    if (loaded[i].pending) storeDraft(draftTexts[d.id], keyOfDraft(d.id));
+  });
   draftReady = true;
   if (userEdited) {
     /* The user started typing before storage answered; keep their text. */
@@ -3902,6 +4121,7 @@ storeGet(PREFS_KEY).then(function (v) {
   } else {
     ta.value = EXAMPLE;
   }
+  renderDraftTabs();
   updateAll();
   renderPreview();
 });
