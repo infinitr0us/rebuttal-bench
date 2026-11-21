@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased (branch feature/compaction)
+
+From a brainstorm on 2026-11-21 (Claude, Codex and Fable) about per-comment character limits and
+what else a rebuttal author needs.
+
+### Compaction: fewer characters, the same rendering
+- *Copy compact* copies a shorter form of the source; the editor keeps the readable text. The
+  status bar shows the compact count, and the character chip turns amber when only the compact
+  form fits the limit. *Apply to source* rewrites the editor instead (one undo).
+- Tricks, each with a switch and its saving in the *Compaction* panel: table cell padding and
+  delimiter rows (`| --- | :---: |` becomes `|-|:-:|`), links that repeat their URL, heading
+  syntax, horizontal rules, the space after `>`, spaces after list markers, indented paragraph
+  lines, trailing spaces (a two-space break becomes a backslash break), extra blank lines,
+  character references (`&plusmn;` becomes `±`). Off by default: outer table pipes, and
+  one-symbol formulas as characters (`$\pm$` becomes `±`, which changes the font of the symbol).
+- Every edit is checked against the rendered comment and dropped if anything would differ; see
+  README, "How compaction stays safe". A draft with two space-aligned results tables shrinks by
+  about 20%.
+
+### Checks
+- OpenReview shows these as typed, and they are now reported: raw HTML (`<br>` in a table cell,
+  `<sub>`, `<b>`), HTML comments (an error: reviewers can read them), images not under
+  `/images/`, footnotes, LaTeX outside math (`\textbf`, `\emph`, `\texttt`, `\url`, `\href`,
+  `\underline`, `\cite`, ` ``quotes'' `, ties such as `Table~1`, which can pair into
+  strikethrough), and `####` headings, which look like body text.
+- Links under the chosen venue's rule: an error at NeurIPS, AAAI and ACL ARR (no links), an error
+  for shortened URLs at ICML; a note at any venue for links that may name the authors.
+- Fixes that need the author's judgment (formatting conversions, deleting a comment, dropping a
+  link) apply only from their card; Fix all leaves them alone and does not count them.
+
+### Page
+- A *Venue* menu sets the limit and link rule (NeurIPS 10,000 per review, ICML 5,000 per round,
+  AAAI 2,500 for all reviews, ACL ARR 5,000 per response, ICLR none stated), each with its
+  official source and the date it was checked (2026-11-21).
+- The status bar shows the length of the selection; Fix all says how many characters it added
+  and warns when that took the draft over the limit.
+
+### Project
+- `tests/compact.test.js`, `tests/links.test.js` and a padded-tables fixture; `tests/lib/pipeline.js`
+  exports `renderHtml`; new regression cases for the literal-text checks; smoke checks for copy,
+  apply and undo, the chip, switches across a reload, venue presets, the selection count and
+  manual fixes.
+
 ## 3.1.0 (2026-10-02)
 
 From a review of 3.0.0 on 2026-10-01 (Claude and Codex, each finding reproduced against the real

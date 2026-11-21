@@ -10,13 +10,32 @@ Open `rebuttal-bench.html` in a browser (double-click is fine). It needs an inte
 for its pinned CDN libraries and the Noto Sans font. Drafts autosave in the browser, on this
 device only.
 
-- **Hazards** — click a card to jump to the spot; **Fix: …** rewrites the source; **Fix all**
+- **Hazards.** Click a card to jump to the spot; **Fix: …** rewrites the source; **Fix all**
   applies every mechanical fix, repeating (up to eight rounds) until nothing is left. One
-  Ctrl+Z (⌘Z) undoes a fix, a whole Fix-all pass, *Clear* or *Load example*.
-- **Status bar** — characters counted the way OpenReview's own counter does (trimmed length),
-  the number of formulas MathJax will typeset, hazards, and MathJax problems (TeX errors *and*
-  undefined macros).
-- **Escape cheat sheet** — under the hazards list.
+  Ctrl+Z (⌘Z) undoes a fix, a whole Fix-all pass, *Clear* or *Load example*. Some fixes need
+  your judgment (turning `<b>` or `\textbf{}` into Markdown, deleting an HTML comment, dropping
+  a link): their cards say "Not part of Fix all", and only a click on the card applies them.
+  Fix all's message says how many characters the pass added.
+- **Compaction.** *Copy compact* copies a shorter form of your source that OpenReview renders
+  exactly the same: table padding and long delimiter rows (`| --- |` becomes `|-|`), links
+  that repeat their URL, closing `#`s, extra blank lines and spaces, character references.
+  The editor keeps your readable text; the status bar shows the compact count, and the
+  character chip turns amber when only the compact form fits the limit. The *Compaction* panel
+  under the hazards shows what each trick saves, with a switch for each; *Apply to source*
+  rewrites the editor instead (one undo). Two tricks are off by default: dropping the outer
+  pipes of table rows (harder to read as plain text), and writing one-symbol formulas as
+  characters (`$\pm$` becomes `±`, `$\uparrow$` `↑`), which sets them in the text font instead
+  of MathJax's.
+- **Venue.** Sets the limit and checks links against the venue's rebuttal rules: NeurIPS
+  (10,000 per review), AAAI (2,500 for all reviews) and ACL Rolling Review (5,000 per response)
+  allow no links at all, ICML (5,000 per round) no non-anonymized or shortened URLs. ICLR's
+  guide states no limit. Each preset's tooltip names its official source and the date it was
+  checked; rules change every year. At any venue, a link that may name the authors (a personal
+  repository or page, a shared drive, an e-mail address) gets a note.
+- **Status bar.** Characters counted the way OpenReview's own counter does (trimmed length),
+  the length of the selection, the number of formulas MathJax will typeset, hazards, and
+  MathJax problems (TeX errors *and* undefined macros).
+- **Escape cheat sheet.** Under the compaction panel.
 
 ## How faithful is the preview?
 
@@ -46,9 +65,32 @@ reports when any of those sources change.
 5. Checks then look for Markdown that damages each formula: consumed `\,` `\{` `\|` …, collapsed
    `\\` row breaks, emphasis eating `_` or `*`, currency dollars pairing up, and more; and for
    `\ref`/`\eqref` copied from the paper, which OpenReview shows as `(???)`.
+6. Other checks look for what OpenReview shows as typed: raw HTML (`<br>` in a table cell,
+   `<sub>`), HTML comments (a hidden note to a co-author is published), images not under
+   `/images/`, footnotes, and LaTeX pasted from the paper outside math (`\textbf{}`, `\cite{}`,
+   ` ``quotes'' `, ties like `Table~1`, two of which can even pair into strikethrough).
 
 Because **Fix all** runs unattended, a fix is only offered when it can't damage correct text;
-ambiguous cases get a warning without a fix.
+ambiguous cases get a warning without a fix, or a fix that only a click on its card applies.
+
+## How compaction stays safe
+
+Each trick proposes edits, and an edit is kept only if the whole comment still renders to the
+same sanitized HTML (so MathJax receives the same text) and the analyzer reports no hazard it
+did not report before. A batch that fails is split until the offending edits are found, so a
+trick never has to be right about every corner of Markdown: what would change the rendering is
+simply dropped. Two refinements:
+
+- The whitespace tricks (paragraph indentation, single trailing spaces) change only whitespace
+  that the note's `white-space: normal` collapses. They are compared on collapsed text (tags and
+  attributes untouched) and must leave every formula byte for byte the same, since `\text{}`
+  keeps its spaces.
+- The opt-in symbol trick does change the rendering. Each formula it replaces, and the
+  character replacing it, must both render exactly as a neutral placeholder at that spot, so
+  the new HTML is the old one with that text swapped and nothing else moved.
+
+On a draft with two space-aligned results tables the default tricks save about 20% (394 of
+2,011 characters; `tests/fixtures/padded-tables.md`); a draft written tersely saves nothing.
 
 ## Development
 
@@ -58,7 +100,7 @@ Requires Node.js 22+.
 npm install
 npm test                          # regression cases, the example, page checks, short fuzz
 npm run fuzz -- 20000 42 blocks   # long fuzz: iterations, seed, alphabet (inline | blocks)
-npm run smoke                     # headless Chrome/Edge: undo, jump, status bar, persistence
+npm run smoke                     # headless Chrome/Edge: undo, jump, status bar, persistence, copy
 npm run check-upstream            # did openreview-web change anything the page mirrors?
                                   #   exit 1: something changed; 2: the check itself failed
 ```
@@ -67,6 +109,9 @@ npm run check-upstream            # did openreview-web change anything the page 
 rebuttal-bench.html        the app (single self-contained file, no build step)
 tests/
   regression.test.js       hazard + Fix-all cases, broken and correct input
+  compact.test.js          compaction: what each trick saves, what it must leave alone
+  links.test.js            links under each venue's rules
+  fixtures/                realistic drafts used by the tests
   example.test.js          the built-in example must end clean and fully typeset
   fuzz.test.js             analyzer vs. real Marked + DOMPurify + MathJax
   page.test.js             scripts parse, CDN versions match package.json, …

@@ -24,8 +24,9 @@ User-facing documentation is in `README.md`; history of changes in `CHANGELOG.md
 3. Markup — header controls, stats bar, editor + hazards + cheat sheet, preview, footer.
 4. Main `<script>`, split by two banner comments that the tests rely on (keep them verbatim):
    - `/* ================= pure analysis ================= */` — everything the analyzer needs,
-     plus the pure Fix-all engine (`fixAllText`). **Must stay DOM-free**: the tests run this
-     section in a Node VM with only `window.marked` available.
+     plus the pure Fix-all engine (`fixAllText`), the compaction engine (`compactText`) and the
+     venue presets (`VENUES`). **Must stay DOM-free**: the tests run this section in a Node VM
+     with only `window.marked` available.
    - `/* ================= dom wiring ================= */` — rendering, persistence, UI events.
 
 ## The analyzer's model
@@ -48,9 +49,14 @@ User-facing documentation is in `README.md`; history of changes in `CHANGELOG.md
 - `scanMath` — real spans (what MathJax typesets) plus *recovered* spans: leftover delimiters
   paired across a boundary purely to explain breakage (`why`: blank, block, table, code,
   braces). Recovered spans are never counted as math.
-- `analyze` — the checks, numbered in the source. Each returns hazards
+- `analyze(src, opts)` — the checks, numbered in the source. Each returns hazards
   `{sev, title, detail(HTML), start, end, fix}`; a fix is a list of edits carrying `was`
-  (the text they expect), so stale fixes are refused.
+  (the text they expect), so stale fixes are refused. Checks 9–14 report what OpenReview shows
+  as typed (raw HTML, HTML comments, external images, footnotes, h4–h6, LaTeX outside math);
+  check 15 reports links under `opts.venue`'s rule (an id from `VENUES`; only the page passes
+  it, so Fix all and compaction never see venue hazards).
+- `collectMarkedRanges` also records link reference definitions (`definitions`), which Marked
+  consumes without a token, through a block extension that only observes.
 
 ## Autofix rules
 
@@ -59,6 +65,39 @@ User-facing documentation is in `README.md`; history of changes in `CHANGELOG.md
 - Every fix touching one `$` goes through `literalDollar`, so Fix all can't stack two edits on the
   same dollar sign.
 - Add regression cases for both the broken input and nearby correct input (`fixed: null`).
+- A fix that needs the author's judgment (it changes wording or formatting, or the input could
+  be intended) is **manual**: build it with `manual()` in `analyze`. `fixAllText` skips it, the
+  Fix all button does not count it, and its card says "Not part of Fix all". Even so, verify
+  in a regression case that the fixed text renders as promised.
+
+## Compaction
+
+`compactText(text, enabled, render, maxChecks)` rewrites the source with the tricks in
+`COMPACT_TRICKS` (each `{id, on, find(text, ctx), label, hint}`; `on` is the default). The
+caller passes `render` (the page: `renderOpenReviewMarkdown`; the tests: `renderHtml` from
+`tests/lib/pipeline.js`). The rules:
+
+- **A trick only proposes; the check decides.** An edit is kept only if the comment still
+  renders to the same sanitized HTML as the text the trick started from and `analyze` reports no
+  hazard the original did not. Failing batches are bisected. Do not weaken this to make a trick
+  "work": a candidate the check rejects is reported as left alone (`kept`), which is fine.
+- `ws: true` tricks (whitespace only) compare `collapseWhitespace(html)` and require the
+  analyzer's formulas (`mathSignature`) to stay identical; they must stay out of math, code,
+  inline HTML and link syntax. This relies on the note text being `white-space: normal`
+  (`_mixins.scss`, watched by `npm run check-upstream`).
+- `look: true` tricks change the rendering on purpose and stay off by default. Their edits are
+  checked with placeholders (`sameButSwapped`): old and new text must each render exactly as a
+  neutral placeholder at that spot. `e.shown` is what the page shows for the old text when that
+  differs from the source (Markdown escapes).
+- `findX` functions must not throw on any input and should avoid proposing edits the check
+  will reject anyway (each rejection costs renders; the budget is 400 checks).
+- Add cases to `tests/compact.test.js` in both directions, as for fixes.
+
+## Venue presets
+
+`VENUES` holds each venue's limit, link rule and official source, checked on `VENUES_CHECKED`.
+When a call for papers changes, update the entry, its source and the date together, and keep
+`tests/links.test.js` passing. Do not add a venue without an official page that states its rule.
 
 ## Staying in sync with OpenReview
 
@@ -75,7 +114,9 @@ limit, a moved file or marker, an unreadable snapshot; it never overwrites one w
 `npm run smoke`: it drives the installed Chrome/Edge headlessly (DevTools protocol, no
 dependencies) and checks Fix all + single-step undo, undoable *Clear* and *Load example*, the
 status bar's TeX-error and undefined-macro counts, a fresh TeX state per preview (no duplicate
-`\label` errors, deleted `\newcommand`s and `\definecolor`s forgotten), jumping to a hazard on a
+`\label` errors, deleted `\newcommand`s and `\definecolor`s forgotten), manual fixes outside Fix
+all, Fix all's added-character count, the selection count, venue presets, Copy compact and Apply to
+source (with undo), the compact chip state, compaction switches across a reload, jumping to a hazard on a
 long soft-wrapped line, refusing a stale one-click fix, draft persistence across a reload (also
 with a stubbed asynchronous `window.storage`: keystrokes before a reload, a draft saved elsewhere,
 leaving before the restore), `/images/` attributes, the theme toggle, and that no page errors
