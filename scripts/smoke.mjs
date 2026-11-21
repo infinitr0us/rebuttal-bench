@@ -636,7 +636,7 @@ try {
     const kept = ta.value === 'First draft $x$.' && localStorage.getItem(DRAFT_KEY) === 'Saved by another window.';
     const msg = toast.textContent;
     localStorage.setItem(DRAFT_KEY, 'First draft $x$.'); dropHistory('d1');
-    return kept && historyDialog.hidden && /Another window saved a newer version/.test(msg) || { kept, msg, value: ta.value };`);
+    return kept && historyDialog.hidden && /saved a newer version/.test(msg) || { kept, msg, value: ta.value };`);
 
   await check('Restore sees another window’s save even behind this window’s own refused write', `
     const setItem = Storage.prototype.setItem;
@@ -653,7 +653,7 @@ try {
     const kept = localStorage.getItem(DRAFT_KEY) === 'Final from another window.' && ta.value === 'A long edit that does not fit.';
     const msg = toast.textContent;
     setSourceText('First draft $x$.', 0); saveDraftNow(); dropHistory('d1');
-    return kept && /Another window saved a newer version/.test(msg) && localStorage.getItem(DRAFT_KEY) === 'First draft $x$.' ||
+    return kept && /saved a newer version/.test(msg) && localStorage.getItem(DRAFT_KEY) === 'First draft $x$.' ||
       { kept, msg, stored: localStorage.getItem(DRAFT_KEY) };`);
 
   await check('versions waiting in memory survive when stored versions give way to a draft', `
@@ -677,25 +677,6 @@ try {
     if (tableDialog.open) tableDialog.close();
     window.confirm = () => true; deleteDraft(draftMeta.active); switchDraft(origId);
     return gone && refused || { gone, refused };`);
-
-  await check('a list write retried after running out of space merges with another window’s list', `
-    const setItem = Storage.prototype.setItem;
-    Storage.prototype.setItem = function (k, v) {
-      if (k === DRAFTS_KEY) throw new DOMException('full', 'QuotaExceededError');
-      return setItem.call(this, k, v);
-    };
-    try { saveDraftMeta(); } finally { Storage.prototype.setItem = setItem; }
-    const refused = !!memNewer[DRAFTS_KEY];
-    /* Meanwhile another window adds a draft and saves the list. */
-    const theirs = JSON.parse(localStorage.getItem(DRAFTS_KEY));
-    theirs.list.push({ id: 'dotherwindow1', name: 'From another window', at: Date.now() });
-    theirs.saved = Date.now();
-    setItem.call(localStorage, DRAFTS_KEY, JSON.stringify(theirs));
-    setItem.call(localStorage, DRAFT_KEY + '-dotherwindow1', 'Its text.');
-    retryLocalWrites();
-    const merged = JSON.parse(localStorage.getItem(DRAFTS_KEY)).list.some((d) => d.id === 'dotherwindow1');
-    window.confirm = () => true; deleteDraft('dotherwindow1'); switchDraft('d1');
-    return refused && merged && !memNewer[DRAFTS_KEY] || { refused, merged };`);
 
   await check('Split’s Copy keeps the focus in its dialog when the clipboard refuses', `
     limitInput.value = '40'; limitInput.dispatchEvent(new Event('input'));

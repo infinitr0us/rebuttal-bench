@@ -8,24 +8,25 @@
   *Load example* and a restore, and one every 10 minutes while you edit: up to 20 per draft, in
   this browser only. *Restore* is undoable; *Copy* copies a version.
 - Versions never cost a draft: when a draft cannot be saved for lack of space, the stored ones
-  give way (versions waiting in memory stay), and deleting a draft deletes its versions, in other
-  windows too. Restore refuses to replace text another window saved since this one loaded it.
+  give way (versions waiting in memory stay and are written once there is room), and deleting a
+  draft deletes its versions, in other windows too.
+- Restore writes like typing, so it waits until this window has the draft's latest text: it
+  refuses while the draft has not loaded completely, and when another window or device has
+  saved it since this one loaded it.
 - *Export all drafts* writes every draft to one `.json` file, and *Download this draft* the open
-  one as `.md`, as a backup. A draft that has not loaded is named and left out, never written as
-  blank. Importing drafts is not included yet: three Codex reviews kept finding ways for it to
-  lose text when storage is full or several windows write at once, so it waits for a safer
-  design.
+  one as `.md`, as a backup; neither changes anything stored. A draft that has not loaded is
+  named and left out, never written as blank. Importing drafts is not included yet: three Codex
+  reviews kept finding ways for it to lose text when storage is full or several windows write at
+  once, so it waits for a safer design.
 - History, Split and Import table are bound to the open draft: they close when it changes, and
   nothing behind them can be reached while they are open.
 
 ### Fixes
 - An offer to convert a pasted table could, after a switch to a draft with the same text, insert
   into that other draft.
-- After the list of drafts could not be saved for lack of space, its retry could write over a
-  newer list another window had saved, hiding that window's new draft.
 
 ### Project
-- `tests/history.test.js` and thirteen smoke checks.
+- `tests/history.test.js` and twelve smoke checks. Four Codex reviews (`reviews/2026-11-21`).
 
 ## 3.4.0 (2026-11-21)
 

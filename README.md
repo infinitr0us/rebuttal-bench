@@ -59,8 +59,8 @@ leave the browser: they autosave on this device only.
 - **History and export.** *History* lists earlier versions of the open draft: one is kept before
   *Fix all*, *Apply to source*, *Clear*, *Load example* and a restore, and one every 10 minutes
   while you edit (up to 20 per draft, in this browser only). *Restore* is one more edit, so one
-  undo takes it back; it refuses when another window has saved the draft since this one loaded
-  it. The same dialog exports every draft as one `.json` file, or the open draft as `.md`, as a
+  undo takes it back; it waits until the draft has loaded completely, and refuses when another
+  window or device has saved the draft since this one loaded it. The same dialog exports every draft as one `.json` file, or the open draft as `.md`, as a
   backup. The online page and a downloaded copy of it keep separate drafts; to move a draft
   between them, download it and paste its text into a new draft.
 - **Before posting.** Cards also point out placeholders left in the text (`TODO`, `XX.X`,

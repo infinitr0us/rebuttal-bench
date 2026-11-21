@@ -212,35 +212,45 @@ cases, Chrome probes); keep their rules:
   `tests/history.test.js`). `keepVersion` runs before every bulk change of the editor (Fix all,
   Apply to source, Clear, Load example, a restore; none on a read-only draft) and `saveDraftNow`
   keeps one every `HISTORY_EVERY`. A history write that does not fit keeps fewer versions there
-  and the rest in memory (`historyUnsaved`), written by `retryHistory` after a draft save or a
-  confirmed store write. Only a quota error on a draft key (body, list, pending or deleting mark)
-  drops the stored history and retries once (`fallbackSet` → `isQuotaError`, `dropAllHistory`);
-  versions waiting in memory stay, and preferences never drop anything. Deleting a draft deletes
-  its history, here and, through tombstones, in other windows and after a boot (`pruneHistory`,
-  which first merges the newest stored list). Two windows adding versions of one draft at the
-  same moment can lose one of the two versions.
+  and the rest in memory (`historyUnsaved`); a bulk change's version (`hold`) stays in memory
+  until it is written while no draft write waits for space (`draftWritesWaiting`).
+  `retryHistory` runs after a draft save, a confirmed store write, a storage event and on leaving
+  the page. Only a quota error on a draft key (body, list, pending or deleting mark) drops the
+  stored history and retries once (`fallbackSet` → `isQuotaError`, `dropAllHistory`); versions
+  waiting in memory stay, and preferences never drop anything. Deleting a draft deletes its
+  history, here and, through tombstones, in other windows and after a boot (`pruneHistory`, which
+  first merges this window's list with both the in-memory and the stored copy: `storedValue`).
+  Two windows adding versions of one draft at the same moment can lose one of the two versions.
 - **Dialogs are modal** (`setModal`: everything behind History and Split is `inert`, so no draft
   switch or keystroke reaches the editor while one is open) and **bound to their draft**: a draft
   switch (`openDraft`) closes History, Split and Import table and drops an offer to convert a
-  pasted table; the table dialog and the offer also check their draft before they insert.
-  `restoreVersion` refuses a version of another draft (`historyFor`), and refuses when the stored
-  copy (read from localStorage itself, not this window's copy in memory) differs from both the
-  editor and `savedText`: another window saved since (reload first). Otherwise it keeps the
-  editor's text as a version first. Copy in a dialog passes its button to `copyText`, whose
-  fallback then never selects the editor. `renderHistory` keeps the focus on the same version.
-- **Export** only reads: `knownDraftText(id)` is a draft's text or null while it loads or was never
-  read (`bodyKnown`: set by a successful read, `createDraft` or a save by this window, which also
-  counts while an older read is outstanding; the 8 s watchdog only when this browser has a copy).
-  An edited editor is the author's text; an unchanged one yields to a newer copy another window
-  saved; the example stands for an empty draft. Export writes `draftsFile` with every known text
-  and names the others before leaving them out; Download refuses an unknown text. Importing
-  drafts is not part of the page: it was reviewed three times and kept losing text in corner
-  cases (storage full, other windows or devices writing, the asynchronous store), so it waits on
-  the `feature/import` branch for a design that stages new drafts privately until the whole
-  operation is stored.
-- A list write refused for lack of space is retried through `saveDraftMeta`, which merges the
-  copy stored here (another window's newer list) before writing: `retryLocalWrites` never writes
-  this window's old list over it.
+  pasted table; the table dialog and the offer also check their draft before they insert. Copy in
+  a dialog passes its button to `copyText`, whose fallback then never selects the editor.
+  `renderHistory` keeps the focus on the same version.
+- **Restore writes like typing**, so `restoreVersion` refuses unless this window has the draft's
+  latest text: a version of the open draft (`historyFor`), its text read completely (`bodyKnown`,
+  `bodyState` ready: not the example or an old copy after a read that failed), the copy
+  localStorage holds (`storedValue`, not this window's copy in memory) equal to the editor or
+  `savedText`, and with the asynchronous store a fresh read equal to the last confirmed value, the
+  editor or `savedText` (another device). Every condition is checked again just before writing.
+  When this window holds text it has not saved, the refusal says to copy it before reloading.
+- **Export only reads**: it never adopts or saves the list. `knownDraftText(id)` is a draft's text
+  or null while it loads or was never read (`bodyKnown`: set by a successful read, `createDraft`, a
+  save or a switch's flush by this window, which also counts while an older read is outstanding;
+  the 8 s watchdog only when this browser has a copy). An edited editor (`ta.value !== savedText`)
+  is the author's text; an unchanged one yields to the newest copy (`fallbackGet`, which includes
+  a newer text read from the store that did not fit here); the example stands for an empty draft.
+  Export all merges, in a private copy, this window's list with the stored one (drafts another
+  window just added), writes `draftsFile` with every known text and names the others before
+  leaving them out; Download refuses an unknown text. Importing drafts is not part of the page:
+  it was reviewed three times and kept losing text in corner cases (storage full, other windows
+  or devices writing, the asynchronous store), so it waits on the `feature/import` branch for a
+  design that stages new drafts privately until the whole operation is stored.
+- Known limits shared with 3.4.0, found by the History reviews: a refused write of the list or of
+  a draft is retried with this window's old value (`retryLocalWrites`), which can write over a
+  newer one another window saved meanwhile, or bring back an edit undone after the refusal; a
+  pending mark that does not fit can let a reload choose the store's older text over a saved
+  local edit. Fixing them needs the same redesign as Import.
 
 ## Splitting
 
