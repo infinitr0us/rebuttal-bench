@@ -6,7 +6,8 @@ User-facing documentation is in `README.md`; history of changes in `CHANGELOG.md
 ## Ground rules
 
 - **One self-contained HTML file, no build step.** `rebuttal-bench.html` must keep working when
-  opened from disk or shared as a single file. Libraries come only from cdnjs / jsDelivr, pinned
+  opened from disk or shared as a single file. (`index.html` only redirects the GitHub Pages
+  site root to it; `.nojekyll` makes Pages serve the files as they are.) Libraries come only from cdnjs / jsDelivr, pinned
   to exact versions that must equal the `devDependencies` in `package.json` (a test enforces it).
 - **Match the surrounding style**: ES5 (`var`, `function`, no arrow functions or modules) in the
   page, 2-space indent, LF line endings (`.gitattributes`), comments that explain *why*.

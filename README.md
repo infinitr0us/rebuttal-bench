@@ -8,9 +8,10 @@ Rebuttal Bench is an independent tool. It is not affiliated with or endorsed by 
 
 ## Using it
 
-Open `rebuttal-bench.html` in a browser (double-click is fine). It needs an internet connection
-for its pinned CDN libraries and the Noto Sans font. Drafts autosave in the browser, on this
-device only.
+Use it online at **https://infinitr0us.github.io/rebuttal-bench/**, or download
+`rebuttal-bench.html` and open it in a browser (double-click is fine). Either way it needs an
+internet connection for its pinned CDN libraries and the Noto Sans font, and your drafts never
+leave the browser: they autosave on this device only.
 
 - **Hazards.** Click a card to jump to the spot; **Fix: …** rewrites the source; **Fix all**
   applies every mechanical fix, repeating (up to eight rounds) until nothing is left. One
@@ -112,6 +113,7 @@ npm run check-upstream            # did openreview-web change anything the page 
 
 ```
 rebuttal-bench.html        the app (single self-contained file, no build step)
+index.html                 redirects the GitHub Pages site root to the app
 tests/
   regression.test.js       hazard + Fix-all cases, broken and correct input
   compact.test.js          compaction: what each trick saves, what it must leave alone
@@ -127,6 +129,7 @@ tests/
 scripts/smoke.mjs          browser smoke test over the DevTools protocol
 scripts/check-upstream.mjs compares openreview-web against upstream/openreview-web.json
 AGENTS.md                  engineering notes for contributors and coding agents
+.github/workflows/test.yml CI: npm test and the browser smoke test on every push and pull request
 ```
 
 When adding or changing a check or fix, add regression cases for the broken input it repairs

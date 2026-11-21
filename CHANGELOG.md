@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (branch feature/compaction)
+## 3.2.0 (2026-11-21)
 
 From a brainstorm on 2026-11-21 (Claude, Codex and Fable) about per-comment character limits and
 what else a rebuttal author needs.
@@ -47,6 +47,9 @@ what else a rebuttal author needs.
   exports `renderHtml`; new regression cases for the literal-text checks; smoke checks for copy,
   apply and undo, the chip, switches across a reload, venue presets, the selection count and
   manual fixes.
+- Published on GitHub under the MIT licence, with the page on GitHub Pages and CI running
+  `npm test` and the smoke test. `upstream/openreview-web.json` keeps openreview-web's AGPL-3.0
+  licence (see `upstream/README.md`).
 
 ## 3.1.0 (2026-10-02)
 
