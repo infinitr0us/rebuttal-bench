@@ -8,8 +8,8 @@
   with the same protection against a slow asynchronous store; existing drafts carry over as the
   first tab. Switching drafts gives the editor a fresh undo history, so Ctrl+Z cannot carry text
   from one draft into another. Several windows, several devices sharing an asynchronous store, a
-  slow or failing store or a reload at any moment cannot lose or mix up a draft (two Codex reviews
-  probed this with 49 scenarios and Chrome checks): random draft ids, the list merged with every
+  slow or failing store or a reload at any moment cannot lose or mix up a draft (three Codex reviews
+  probed this with over 60 scenarios and Chrome checks): random draft ids, the list merged with every
   other copy rather than overwritten, writes queued in order and marked pending until confirmed,
   deletions retried until confirmed, only real edits written back, nothing typed before the open
   draft is restored, and any draft body missing from the list given its tab back. The tabs work
