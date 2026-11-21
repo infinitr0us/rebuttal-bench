@@ -152,6 +152,39 @@ test('ragged spreadsheet rows preserve their text within the header width', () =
   });
 });
 
+test('spreadsheet and bare tabular cells can contain a whole LaTeX array', () => {
+  const formula = raw`\begin{array}{cc}1&0\\0&1\end{array}`;
+  const cell = raw`$\begin{array}{cc}1&0\\\\0&1\end{array}$`;
+  for (const format of ['csv', 'tsv', 'latex']) {
+    const src = format === 'csv' ? 'Model,Projection,Count\nBase,"$' + formula + '$","1,234"'
+      : format === 'tsv' ? 'Model\tProjection\tCount\nBase\t$' + formula + '$\t1,234'
+      : raw`Model & Projection & Count \\` + '\nBase & $' + formula + '$ & 1,234';
+    const lastAlign = format === 'latex' ? ':-' : '-:';
+    check(src, {
+      format, padded: '| Model | Projection                               | Count |\n' +
+        '| :-    | :-                                       | ' + lastAlign + '    |\n| Base  | ' + cell + ' | 1,234 |',
+      compact: '|Model|Projection|Count|\n|:-|:-|' + lastAlign + '|\n|Base|' + cell + '|1,234|',
+      cells: [['Model', 'Projection', 'Count'], ['Base', '$' + formula + '$', '1,234']],
+      math: ['I:' + formula], align: ['left', 'left', format === 'latex' ? 'left' : 'right'],
+    });
+  }
+});
+
+test('a formatting command in an array preserves the math mode of its argument', () => {
+  check(raw`\begin{array}{lr}\text{Model}&\text{Score}\\\hline\textcolor{red}{\alpha} & \underline{x_1}\end{array}`, {
+    format: 'latex',
+    padded: raw`| $\text{Model}$ | $\text{Score}$ |
+| :-             | -:             |
+| $\alpha$       | $x_1$          |`,
+    compact: raw`|$\text{Model}$|$\text{Score}$|
+|:-|-:|
+|$\alpha$|$x_1$|`,
+    cells: [[raw`$\text{Model}$`, raw`$\text{Score}$`], [raw`$\alpha$`, '$x_1$']],
+    math: [raw`I:\text{Model}`, raw`I:\text{Score}`, raw`I:\alpha`, 'I:x_1'], align: ['left', 'right'],
+    warnings: [[1, raw`Removed color formatting (\textcolor).`], [1, 'Removed underline formatting.']],
+  });
+});
+
 test('a pipe following a literal backslash in a footnote stays in the same cell', () => {
   const src = raw`Method & Note \\ Base & \footnote{mesh \| x}`;
   const content = '`\\footnote{mesh \\`\\|` x}`';

@@ -2425,7 +2425,7 @@ function tableMath(tex) {
       (ch === '_' && !(/[A-Za-z0-9]/.test(tex.charAt(at - 1)) && /[A-Za-z0-9]/.test(tex.charAt(at + n + 1))));
     if (ch === '<') return bs(2 * n) + '&lt;';
     if (ch === '&' && /^&(?:#\w+|\w+);/.test(tex.slice(at + n))) return bs(2 * n) + '&amp;';
-    return bs(2 * n - (n && !isPunct(ch) ? 1 : 0) + (shield ? 1 : 0)) + ch;
+    return bs(2 * n - (n % 2 && ch && !isPunct(ch) ? 1 : 0) + (shield ? 1 : 0)) + ch;
   });
 }
 
@@ -2491,7 +2491,7 @@ function readSpreadsheet(text, sep) {
   }
   if (rows.length < 2 || rows[0].cells.length < 2 ||
       !rows.slice(1).some(function (row) { return row.cells.length > 1; })) return null;
-  var number = '[+\\-−]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:e[+\\-]?\\d+)?';
+  var number = '[+\\-−]?(?:(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d*)?|\\.\\d+)(?:e[+\\-]?\\d+)?';
   var numeric = new RegExp('^(?:±\\s*)?' + number + '\\s*%?(?:\\s*±\\s*' + number + '\\s*%?)?\\**$', 'i');
   var align = rows[0].cells.map(function (_, col) {
     return rows.slice(1).every(function (row) { return numeric.test(row.cells[col] || ''); }) ? '-:' : ':-';
@@ -2535,6 +2535,18 @@ function readLatexTable(input) {
     text += p >= 0 ? line.slice(0, p) : line + (index + 1 < lines.length ? '\n' : '');
   });
   var env = /\\begin\s*\{(tabular\*?|tabularx|array)\}/.exec(text);
+  /* An array inside a formula belongs to its cell. A formula that wraps
+     the entire input, on the other hand, can itself be the table to import. */
+  for (var dollar = 0; env && dollar < env.index; dollar++) {
+    if (text[dollar] !== '$' || countBackslashesBefore(text, dollar) % 2) continue;
+    var mathEnd = tableMathEnd(text, dollar);
+    if (mathEnd > env.index) {
+      var outside = text.slice(0, dollar) + text.slice(mathEnd);
+      if (outside.indexOf('&') >= 0 && outside.indexOf('\\\\') >= 0) env = null;
+      break;
+    }
+    if (mathEnd > dollar) dollar = mathEnd - 1;
+  }
   var pos = 0, spec = '', endEnv = '', inArray = false;
   if (env) {
     pos = env.index + env[0].length;
@@ -2618,30 +2630,35 @@ function readLatexTable(input) {
 
 function latexCellText(raw, at, span, warn, inArray, depth) {
   if (depth > 64) return tableLiteral(raw);
-  /* An array's ordinary entries are already in math mode. */
-  if (inArray && raw && raw.indexOf('$') < 0 && !/\\(?:multi(?:row|column)|textbf|textit|emph|makecell|(?:cell|row|text)?color)\b/.test(raw)) {
-    return '$' + tableMath(raw) + '$';
-  }
   var out = '', literal = '';
-  function flush() { out += tableLiteral(literal); literal = ''; }
-  function nested(arg) { return latexCellText(arg.text, at + arg.start, span, warn, false, depth + 1); }
+  function flush() {
+    /* An array entry and the content of a color or span command inside it
+       inherit math mode. Keep adjacent TeX tokens together as one formula. */
+    out += inArray && literal.trim() ? '$' + tableMath(literal.trim()) + '$' : tableLiteral(literal);
+    literal = '';
+  }
+  function nested(arg, math) { return latexCellText(arg.text, at + arg.start, span, warn, math, depth + 1); }
   for (var i = 0; i < raw.length;) {
     var ch = raw[i], arg, end;
     if (ch === '$' && (end = tableMathEnd(raw, i)) > i) {
       flush(); out += tableMath(raw.slice(i, end)); i = end; continue;
     }
     if (ch === '{' && (arg = tableGroup(raw, i))) {
-      flush();
       var style = /^\s*\\(bf|it)\b\s*/.exec(arg.text);
+      if (inArray && !style) { literal += raw.slice(i, arg.end); i = arg.end; continue; }
+      flush();
       if (style) { arg.start += style[0].length; arg.text = arg.text.slice(style[0].length); }
       var mark = !style ? '' : style[1] === 'bf' ? '**' : '*';
       out += mark + nested(arg).trim() + mark;
       i = arg.end; continue;
     }
-    if (ch !== '\\') { literal += ch === '~' ? ' ' : ch; i++; continue; }
+    if (ch !== '\\') { literal += !inArray && ch === '~' ? ' ' : ch; i++; continue; }
     var token = /^\\([a-zA-Z]+|[\s\S])/.exec(raw.slice(i));
     if (!token) { literal += ch; i++; continue; }
     var name = token[1], after = i + token[0].length;
+    if (inArray && !/^(?:multirow|multicolumn|textbf|textit|emph|makecell|underline|(?:cell|row|text)?color|cite|ref|footnote)$/.test(name)) {
+      literal += token[0]; i = after; continue;
+    }
     if (name.length === 1 && !/[A-Za-z]/.test(name)) {
       if (name === '\\') {
         literal = literal.replace(/\s+$/, '') + ' ';
@@ -2660,7 +2677,7 @@ function latexCellText(raw, at, span, warn, inArray, depth) {
       out += fence + nested(last).trim() + fence;
     } else if (/^(makecell|underline)$/.test(name)) {
       if (name === 'underline') warn('Removed underline formatting.', at + i);
-      out += nested(last);
+      out += nested(last, inArray && name === 'underline');
     } else if (/^(multicolumn|multirow)$/.test(name)) {
       var count = Number(args[0].text);
       /* A typo in a pasted span must not allocate billions of empty cells. */
@@ -2668,10 +2685,10 @@ function latexCellText(raw, at, span, warn, inArray, depth) {
         if (name === 'multicolumn') span.cols = count; else span.rows = count;
       }
       warn('Flattened \\' + name + ' into ordinary cells.', at + i);
-      out += nested(last);
+      out += nested(last, inArray);
     } else if (/^(?:cell|row|text)?color$/.test(name)) {
       warn('Removed color formatting (\\' + name + ').', at + i);
-      if (name === 'textcolor') out += nested(last);
+      if (name === 'textcolor') out += nested(last, inArray);
     } else {
       /* In particular, a bare \ref would typeset as (???). A code span keeps
          the complete paper command legible for the author to replace. */
@@ -2687,8 +2704,14 @@ function latexCellText(raw, at, span, warn, inArray, depth) {
 function importTable(text, options) {
   if (typeof text !== 'string') return null;
   text = text.replace(/\r\n?/g, '\n');
-  var t = readLatexTable(text) || (text.indexOf('\t') >= 0 && readSpreadsheet(text, '\t')) ||
+  var sheet = (text.indexOf('\t') >= 0 && readSpreadsheet(text, '\t')) ||
     (text.indexOf(',') >= 0 && readSpreadsheet(text, ','));
+  /* A spreadsheet can itself contain a TeX array. Prefer the enclosing grid
+     unless its apparent header is a LaTeX preamble or alignment row. */
+  var first = text.replace(/^(?:[ \t]*\n)+/, '').split('\n', 1)[0];
+  var latexHeader = /^\s*(?:%|\\(?:begin|toprule|hline|centering)\b|\\\[)/.test(first) ||
+    /&.*\\\\\s*(?:%.*)?$/.test(first);
+  var t = (!latexHeader && sheet) || readLatexTable(text) || sheet;
   if (!t) return null;
   var head = [], body = [];
   t.rows.forEach(function (row, index) {
