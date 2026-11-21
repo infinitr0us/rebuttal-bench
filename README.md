@@ -35,6 +35,13 @@ leave the browser: they autosave on this device only.
   guide states no limit. Each preset's tooltip names its official source and the date it was
   checked; rules change every year. At any venue, a link that may name the authors (a personal
   repository or page, a shared drive, an e-mail address) gets a note.
+- **Split into comments.** Where the venue allows several comments (NeurIPS does since 2026,
+  ICLR's discussion is open), *Split into comments…* in the Compaction panel cuts a draft that is
+  over the limit into parts under it, numbered like (1/3): only between paragraphs, table rows
+  (the header goes with every piece), list items or sentences, never inside a formula or code.
+  Each part can be copied, or opened as drafts of its own. Since each comment is typeset on its
+  own, it warns when a part uses a `\newcommand` or `\label` from another part, and repeats link
+  reference definitions where they are needed. With a one-response venue chosen, it says so.
 - **Drafts.** One tab per text you are writing: an answer per reviewer, a general response, a
   follow-up. Each tab shows its length (red over the limit), so the answers can be balanced at
   a glance. *Rename* (or F2, or a double-click on the open tab) names it after a reviewer's ID,

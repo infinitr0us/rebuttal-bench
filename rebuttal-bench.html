@@ -590,6 +590,64 @@ window.MathJax = {
   .compact-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
   #compactFoot { font-size: 11.5px; color: var(--dim); }
 
+  /* dialogs */
+  .modal {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 6vh 16px;
+    background: rgba(0, 0, 0, 0.35);
+  }
+  .modal-box {
+    display: flex;
+    flex-direction: column;
+    width: min(760px, 100%);
+    max-height: 88vh;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px 6px; }
+  .modal-head h3 { margin: 0; font-size: 15px; }
+  .modal-x { border: none; background: none; font-size: 18px; color: var(--dim); cursor: pointer; }
+  .modal-note { margin: 0 18px 8px; font-size: 12.5px; line-height: 1.5; color: var(--dim); }
+  .modal-note.warn { color: var(--title-warn); }
+  .modal-opts { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 18px 10px; font-size: 12.5px; color: var(--dim); }
+  .modal-opts input { accent-color: var(--accent); }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 10px 18px 14px; }
+  .split-parts { flex: 1; min-height: 0; overflow-y: auto; padding: 0 18px; }
+  .split-part { margin: 0 0 10px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .split-part-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 10px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--dim);
+    border-bottom: 1px solid var(--line);
+  }
+  .split-part-head .over { color: var(--err); }
+  .split-part-head button { margin-left: auto; }
+  .split-part pre {
+    margin: 0;
+    padding: 8px 10px;
+    max-height: 140px;
+    overflow: auto;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text);
+    background: var(--snippet-bg);
+  }
+  .split-warn { margin: 0; padding: 6px 10px; font-size: 12px; color: var(--title-warn); border-bottom: 1px solid var(--line); }
+
   /* cheat sheet */
   .cheat {
     border-top: 1px solid var(--line);
@@ -820,6 +878,7 @@ window.MathJax = {
         <div id="compactList"></div>
         <div class="compact-actions">
           <button type="button" id="applyCompactBtn" title="Replace the editor text with the compact form (one undo brings it back)">Apply to source</button>
+          <button type="button" id="splitBtn" title="Cut this draft into several comments under the limit, where the venue allows several">Split into comments…</button>
           <span id="compactFoot"></span>
         </div>
       </div>
@@ -856,6 +915,25 @@ window.MathJax = {
 <footer>
   Pipeline mirror: Marked 15.0.6 in GFM mode with OpenReview’s HTML/image/checkbox renderers → DOMPurify 3.4.13 with OpenReview’s tag allowlist → MathJax 3.2.2 <code>tex-chtml-full</code> with <code>ui/safe</code>. Preview styling mirrors <code>.note-content .markdown-rendered</code> from the live openreview.net stylesheet — Noto Sans 12px/18px, 8px block gaps, rule-only tables — so at 100% zoom it is 1:1 with the site. Line <em>wrapping</em> still depends on the reader’s window width and reply depth, which no previewer can pin down. This follows the current <a href="https://github.com/openreview/openreview-web" target="_blank" rel="noopener">openreview-web implementation</a>; the live service can change, so give the posted comment one last glance. Drafts autosave only on this device. Rebuttal Bench is an independent tool, not affiliated with or endorsed by OpenReview.
 </footer>
+
+<div class="modal" id="splitDialog" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="splitTitle">
+    <div class="modal-head">
+      <h3 id="splitTitle">Split into several comments</h3>
+      <button type="button" class="modal-x" data-close aria-label="Close">×</button>
+    </div>
+    <p class="modal-note" id="splitNote"></p>
+    <div class="modal-opts">
+      <label><input type="checkbox" id="splitCompact" checked> Split the compact form</label>
+      <label><input type="checkbox" id="splitLabel" checked> Number the parts, like (1/3)</label>
+    </div>
+    <div id="splitParts" class="split-parts"></div>
+    <div class="modal-actions">
+      <button type="button" id="splitDraftsBtn" class="primary" title="One new draft per part; the draft you split stays as it is">Open the parts as drafts</button>
+      <button type="button" data-close>Close</button>
+    </div>
+  </div>
+</div>
 
 <div class="toast" id="toast" role="status"></div>
 
@@ -1579,16 +1657,20 @@ var VENUES_CHECKED = '2026-11-21';
 var VENUES = [
   { id: 'neurips', name: 'NeurIPS', limit: 10000, links: 'none',
     rule: '10,000 characters per review, no links; several comments may total more (2025 FAQ, 2026 handbook and July 2026 newsletter)',
-    source: 'https://neurips.cc/Conferences/2026/MainTrackHandbook' },
+    source: 'https://neurips.cc/Conferences/2026/MainTrackHandbook',
+    parts: 'Several comments are allowed, even totalling more than 10,000 characters (July 2026 newsletter).' },
   { id: 'icml', name: 'ICML', limit: 5000, links: 'anon',
     rule: '5,000 characters per discussion round (rebuttal, reviewer follow-up, author follow-up); no non-anonymized, personal-website or shortened URLs (2026)',
-    source: 'https://icml.cc/Conferences/2026/ReviewerInstructions' },
+    source: 'https://icml.cc/Conferences/2026/ReviewerInstructions',
+    parts: 'ICML has one response per discussion round: a split may not be accepted.' },
   { id: 'aaai', name: 'AAAI', limit: 2500, links: 'none',
     rule: 'one rebuttal of 2,500 characters for all reviews; responses with URLs may be withheld; no new results (AAAI-26)',
-    source: 'https://aaai.org/conference/aaai/aaai-26/aaai-26-faq-for-authors-rebuttal/' },
+    source: 'https://aaai.org/conference/aaai/aaai-26/aaai-26-faq-for-authors-rebuttal/',
+    parts: 'AAAI allows a single rebuttal for all reviews: a split will not be accepted.' },
   { id: 'arr', name: 'ACL ARR (ACL, NAACL, EMNLP)', limit: 5000, links: 'none',
     rule: 'one general response plus one per review, 5,000 characters each; text only, no external links (desk rejection)',
-    source: 'https://aclrollingreview.org/authors' },
+    source: 'https://aclrollingreview.org/authors',
+    parts: 'ARR allows one response per review (plus one general response): a split may not be accepted.' },
   { id: 'iclr', name: 'ICLR', limit: null, links: 'any',
     rule: 'the author guide sets no limit: read it off the counter under the OpenReview comment box',
     source: 'https://iclr.cc/Conferences/2027/AuthorGuidelines' }
@@ -3112,6 +3194,157 @@ function newDraftName(list) {
   return 'Draft ' + n;
 }
 
+/* ---- splitting a long comment into several (pure) ----
+   Where a venue allows several comments (NeurIPS since 2026, ICLR), a draft
+   over the limit can be posted in parts. Parts are cut only between blocks;
+   a block too long for one part is cut between table rows (the header goes
+   with every piece), list items or sentences, never inside a formula, code
+   or a link. Each posted comment is typeset on its own, so macros and labels
+   defined in one part do not exist in another: those uses are reported, and
+   link reference definitions are repeated in every part that needs them. */
+var SPLIT_LABEL_RESERVE = 9; /* "(99/99)" and a blank line */
+
+function splitComment(text, limit, opts) {
+  opts = opts || {};
+  var numbered = opts.label !== false;
+  var model = collectMarkedRanges(text);
+  if (!model || !(limit > 0)) return null;
+  var res = analyze(text);
+  var fixed = makeMask(text.length, res.spans.concat(model.ranges.filter(function (r) {
+    return r.type === 'code' || r.type === 'codespan' || r.type === 'link' || r.type === 'image' || r.type === 'html';
+  })));
+  var budget = Math.max(1, limit - (numbered ? SPLIT_LABEL_RESERVE : 0));
+
+  var blocks = model.ranges.filter(function (r) { return r.depth === 0 && !r.inline && r.type !== 'space'; });
+  blocks.sort(function (a, b) { return a.start - b.start; });
+
+  /* A unit is a piece of source that goes into one part whole. */
+  var units = [];
+  function trimEnd(a, b) { while (b > a && /\s/.test(text[b - 1])) b--; return b; }
+  function pushPieces(pieces) { pieces.forEach(function (p) { units.push(p); }); }
+  /* Greedy runs of consecutive [a, b) slices, each run at most `room` long. */
+  function runs(cuts, room, prefix) {
+    var out = [], from = 0;
+    for (var k = 1; k <= cuts.length; k++) {
+      var piece = prefix + text.slice(cuts[from].start, trimEnd(cuts[from].start, cuts[k - 1].end));
+      var next = k < cuts.length ? prefix + text.slice(cuts[from].start, trimEnd(cuts[from].start, cuts[k].end)) : null;
+      if (next === null || next.length > room) {
+        out.push(piece);
+        from = k;
+      }
+    }
+    return out;
+  }
+  blocks.forEach(function (b) {
+    var end = trimEnd(b.start, b.end), raw = text.slice(b.start, end);
+    if (raw.length <= budget) { units.push(raw); return; }
+    var lines, starts;
+    if (b.type === 'table') {
+      /* Header and delimiter row go with every piece. */
+      lines = compactLines(text, b.start, end);
+      if (lines.length > 3) {
+        var head = text.slice(lines[0].start, lines[1].end) + '\n';
+        pushPieces(runs(lines.slice(2), budget, head));
+        return;
+      }
+    } else if (b.type === 'list') {
+      starts = model.ranges.filter(function (r) {
+        return r.type === 'list_item' && r.depth === 1 && r.start >= b.start && r.end <= b.end;
+      }).sort(function (x, y) { return x.start - y.start; });
+      if (starts.length > 1) {
+        /* An item runs to the next one, so a loose list stays loose; an
+           ordered list keeps counting, since a piece starts with its item's
+           own number. */
+        pushPieces(runs(starts.map(function (r, i) {
+          return { start: r.start, end: i + 1 < starts.length ? starts[i + 1].start : end };
+        }), budget, ''));
+        return;
+      }
+    } else if (b.type === 'paragraph') {
+      var cuts = [], from = b.start, re = /[.!?]["')\]]?[ \t]+(?=[A-Z0-9$\\(\[*_])/g, m;
+      re.lastIndex = b.start;
+      var para = text.slice(0, end);
+      while ((m = re.exec(para))) {
+        var at = m.index + m[0].length;
+        if (fixed[m.index] || fixed[at - 1]) continue;
+        cuts.push({ start: from, end: at });
+        from = at;
+      }
+      if (cuts.length) {
+        cuts.push({ start: from, end: end });
+        pushPieces(runs(cuts, budget, ''));
+        return;
+      }
+    }
+    units.push(raw); /* cannot be cut: its part will be over the limit */
+  });
+
+  var parts = [], cur = '';
+  units.forEach(function (u) {
+    if (cur && cur.length + 2 + u.length > budget) { parts.push(cur); cur = ''; }
+    cur = cur ? cur + '\n\n' + u : u;
+  });
+  if (cur || !parts.length) parts.push(cur);
+
+  /* Link reference definitions render nothing, but each part that uses one
+     needs its own copy. */
+  var defs = (model.definitions || []).map(function (d) {
+    var raw = text.slice(d.start, trimEnd(d.start, d.end));
+    var label = /^ {0,3}\[([^\]]+)\]:/.exec(raw);
+    return label ? { label: label[1].replace(/\s+/g, ' ').toLowerCase(), raw: raw } : null;
+  }).filter(Boolean);
+  parts = parts.map(function (p) {
+    var used = defs.filter(function (d) {
+      return p.toLowerCase().indexOf('[' + d.label + ']') !== -1 && p.indexOf(d.raw) === -1;
+    });
+    return used.length ? p + '\n\n' + used.map(function (d) { return d.raw; }).join('\n') : p;
+  });
+
+  var n = parts.length, warnings = [];
+  if (numbered && n > 1) parts = parts.map(function (p, i) { return '(' + (i + 1) + '/' + n + ')\n\n' + p; });
+
+  /* What each part defines and uses, for the fresh TeX state of each comment. */
+  var defRe = /\\(?:newcommand|renewcommand|providecommand|DeclareMathOperator)\*?\s*\{?\s*\\([A-Za-z]+)|\\def\s*\\([A-Za-z]+)/g;
+  var info = parts.map(function (p) {
+    var defined = {}, labels = {}, m2;
+    defRe.lastIndex = 0;
+    while ((m2 = defRe.exec(p))) defined[m2[1] || m2[2]] = true;
+    var labRe = /\\label\{([^}]*)\}/g;
+    while ((m2 = labRe.exec(p))) labels[m2[1]] = true;
+    return { defined: defined, labels: labels, text: p };
+  });
+  info.forEach(function (pi, j) {
+    var reported = {};
+    info.forEach(function (other, i) {
+      if (i === j) return;
+      Object.keys(other.defined).forEach(function (name) {
+        if (pi.defined[name] || reported['\\' + name]) return;
+        if (new RegExp('\\\\' + name + '(?![A-Za-z])').test(pi.text)) {
+          reported['\\' + name] = true;
+          warnings.push({ part: j + 1, message: 'Part ' + (j + 1) + ' uses \\' + name + ', defined in part ' + (i + 1) +
+            ': each comment is typeset on its own, so repeat the definition.' });
+        }
+      });
+      Object.keys(other.labels).forEach(function (lab) {
+        if (pi.labels[lab] || reported[lab]) return;
+        if (new RegExp('\\\\(?:eq)?ref\\{' + escRe(lab) + '\\}').test(pi.text)) {
+          reported[lab] = true;
+          warnings.push({ part: j + 1, message: 'Part ' + (j + 1) + ' refers to \\label{' + lab + '} in part ' + (i + 1) +
+            ': OpenReview will show (???).' });
+        }
+      });
+    });
+  });
+
+  return {
+    parts: parts.map(function (p) {
+      return { text: p, length: p.trim().length, hazards: analyze(p).issues.length };
+    }),
+    warnings: warnings,
+    over: parts.filter(function (p) { return p.trim().length > limit; }).length
+  };
+}
+
 function escHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -4096,6 +4329,82 @@ window.addEventListener('storage', function (e) {
   renderDraftTabs();
 });
 
+/* ---- splitting into several comments ---- */
+var splitDialog = document.getElementById('splitDialog');
+var splitParts = document.getElementById('splitParts');
+var splitNote = document.getElementById('splitNote');
+var splitCompactBox = document.getElementById('splitCompact');
+var splitLabelBox = document.getElementById('splitLabel');
+var splitDraftsBtn = document.getElementById('splitDraftsBtn');
+var splitResult = null;
+
+function renderSplit() {
+  var limit = Math.max(0, parseInt(limitInput.value, 10) || 0), venue = venueById(prefs.venue);
+  var compact = splitCompactBox.checked ? compactResult(true) : null;
+  splitResult = limit ? splitComment(compact ? compact.text : ta.value, limit, { label: splitLabelBox.checked }) : null;
+  splitDraftsBtn.disabled = !splitResult || splitResult.parts.length < 2;
+  if (!splitResult) {
+    splitNote.textContent = limit ? 'Splitting needs Marked, which did not load.' : 'Set a character limit first.';
+    splitParts.innerHTML = '';
+    return;
+  }
+  var n = splitResult.parts.length;
+  splitNote.textContent = (n === 1
+    ? 'This draft fits in one comment of ' + fmt(limit) + ' characters.'
+    : n + ' comments of at most ' + fmt(limit) + ' characters, cut between paragraphs, table rows (the header goes with each piece), list items or sentences.') +
+    (splitResult.over ? ' ' + splitResult.over + ' part' + (splitResult.over === 1 ? ' holds a block' : 's hold blocks') + ' that cannot be cut and stay' + (splitResult.over === 1 ? 's' : '') + ' over the limit.' : '') +
+    (venue && venue.parts && n > 1 ? ' ' + venue.parts : '');
+  splitNote.classList.toggle('warn', !!splitResult.over || !!(venue && venue.parts && n > 1 && /split (will|may) not/.test(venue.parts)));
+  var html = '';
+  splitResult.parts.forEach(function (p, i) {
+    html += '<div class="split-part"><div class="split-part-head"><span>Part ' + (i + 1) + ' of ' + n + '</span>' +
+      '<span class="' + (p.length > limit ? 'over' : '') + '">' + fmt(p.length) + ' / ' + fmt(limit) + '</span>' +
+      (p.hazards ? '<span>' + p.hazards + ' hazard' + (p.hazards === 1 ? '' : 's') + ' on its own</span>' : '') +
+      '<button type="button" data-copy="' + i + '">Copy part ' + (i + 1) + '</button></div>';
+    splitResult.warnings.forEach(function (w) {
+      if (w.part === i + 1) html += '<p class="split-warn">' + escHtml(w.message) + '</p>';
+    });
+    html += '<pre>' + escHtml(p.text) + '</pre></div>';
+  });
+  splitParts.innerHTML = html;
+}
+
+function openSplit() {
+  splitDialog.hidden = false;
+  renderSplit();
+  splitDialog.querySelector('.modal-x').focus();
+}
+function closeSplit() {
+  splitDialog.hidden = true;
+  ta.focus();
+}
+
+document.getElementById('splitBtn').addEventListener('click', openSplit);
+splitCompactBox.addEventListener('change', renderSplit);
+splitLabelBox.addEventListener('change', renderSplit);
+splitDialog.addEventListener('click', function (e) {
+  if (e.target === splitDialog || e.target.closest('[data-close]')) { closeSplit(); return; }
+  var copy = e.target.closest('[data-copy]');
+  if (copy && splitResult) {
+    var i = parseInt(copy.getAttribute('data-copy'), 10);
+    copyText(splitResult.parts[i].text, 'Copied part ' + (i + 1) + ' of ' + splitResult.parts.length);
+  }
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && !splitDialog.hidden) closeSplit();
+});
+splitDraftsBtn.addEventListener('click', function () {
+  if (!splitResult || splitResult.parts.length < 2 || !draftReady) return;
+  var base = draftById(draftMeta.active).name.slice(0, 30), n = splitResult.parts.length, first = null;
+  splitResult.parts.forEach(function (p, i) {
+    var id = createDraft(base + ' (' + (i + 1) + '/' + n + ')', p.text);
+    if (!first) first = id;
+  });
+  closeSplit();
+  switchDraft(first);
+  showToast(n + ' new drafts, one per part; the draft you split is unchanged.');
+});
+
 /* ---- compaction: applied on copy, the editor keeps the readable text ---- */
 
 /* One row per trick, built once so a focused checkbox survives updates. */
@@ -4157,7 +4466,8 @@ function updateCompaction() {
   applyCompactBtn.disabled = !r || r.text === ta.value;
   compactSum.textContent = !r ? 'unavailable' : saved > 0 ? '−' + fmt(saved) + ' characters' : 'nothing to save';
   compactSum.classList.toggle('zero', saved <= 0);
-  compactFoot.textContent = r && !r.complete ? 'Stopped early on this long draft: the result is safe, but could be shorter. Copy compact and Apply to source try harder.' : '';
+  compactFoot.textContent = r && !r.complete ? 'Stopped early on this long draft: the result is safe, but could be shorter. Copy compact and Apply to source try harder.'
+    : limit > 0 && after > limit ? 'Still over the limit: Split into comments cuts it into parts.' : '';
 
   Array.prototype.forEach.call(compactList.querySelectorAll('.trick'), function (row, i) {
     var t = COMPACT_TRICKS[i], s = r ? r.tricks[i] : null, gain = row.querySelector('.gain');
