@@ -101,18 +101,38 @@ caller passes `render` (the page: `renderOpenReviewMarkdown`; the tests: `render
 
 ## Drafts and storage
 
-- Each draft's text has its own storage key: the first draft (`d1`) keeps `rebuttal-bench-draft`, the
-  key every older version used, so existing drafts carry over; the others use
-  `rebuttal-bench-draft-d2` and so on. `rebuttal-bench-drafts` lists the drafts (names, which one is
-  open) and is parsed by the pure `parseDraftMeta`, which turns anything unreadable into the single
-  draft of older versions. Draft ids only grow (`next`), so a deleted draft's key is never reused.
-- Every key goes through the same autosave logic (`storeDraft`, `loadDraft`, `flushDraftLocally`,
-  pending marker `<key>-pending`), including its handling of a slow asynchronous store. A draft
-  being switched away from is flushed like a page being left.
+Several windows of the page, a slow asynchronous store and a reload at any moment must never lose or
+mix up a draft. The rules that guarantee it:
+
+- **Keys.** Each draft's text has its own key: the first draft (`d1`) keeps `rebuttal-bench-draft`,
+  the key every older version used, so existing drafts carry over; the others use
+  `rebuttal-bench-draft-<id>` with a **random id** (`newDraftId`), so two windows adding a draft at
+  once cannot pick the same key. `rebuttal-bench-drafts` holds the list `{active, list: [{id, name,
+  at}], gone}`: `at` is when an entry was created or renamed, `gone` records deletions.
+- **The list is merged, never overwritten.** `saveDraftMeta` merges with the latest local copy first
+  (`mergeDraftMeta`: every draft either side knows, the newer name, deletions from both; the draft open
+  in this window survives a deletion from elsewhere), boot merges the stored list with this browser's
+  copy, a `storage` event merges another window's change, and `recoverDraftBodies` gives a tab back to
+  any local draft body that is missing from the list. All of this is pure and unit-tested in
+  `tests/drafts.test.js`.
+- **One autosave logic for every key**, the list included: `storeDraft`, `loadDraft`,
+  `flushDraftLocally`, pending marker `<key>-pending`. Remote writes and deletions of a key go through
+  `remoteWrite`, one at a time, in order, latest value only, so an older write finishing last cannot
+  roll a draft back or bring a deleted one back. `confirmRemote` moves a pending marker's base to each
+  value the store confirms; `loadDraft` remembers the base when it keeps a pending local copy; a value
+  loaded from the store refreshes the local copy.
+- **Only changed text is written.** Switching away writes the draft only if it differs from what was
+  opened (`openedText`); opening reads the local copy, which every window of the browser keeps
+  current. A draft only looked at can therefore never overwrite a newer copy.
+- **Nothing is typed or saved before the drafts are restored** (`draftReady`): the editor is
+  read-only, `setSourceText`, Clear, Load example and the autosave do nothing, because the draft the
+  text would belong to is not known yet. Save messages only speak for the draft and text they saved.
 - A draft switch puts in a **fresh textarea** (`freshEditor`): Chrome replays its undo history into
   whatever the textarea holds, so a plain value assignment would let Ctrl+Z pour one draft's edits
   into another. Therefore **attach editor listeners with `onEditor(type, fn)`**, never
   `ta.addEventListener`, and read `ta` at call time rather than keeping a reference to it.
+- Two windows editing *the same* draft at the same time still means the last save wins, as with a
+  single draft before.
 
 ## Splitting
 
