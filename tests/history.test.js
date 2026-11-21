@@ -49,6 +49,12 @@ test('history is capped by count and by characters, and always keeps the newest'
   assert.equal(A.historyAdd([], huge, '', 1).length, 1, 'a single huge version is still kept');
 });
 
+test('versions waiting in memory merge with the stored ones, each once', () => {
+  const stored = [{ at: 3, why: 'b', text: 'three' }, { at: 1, why: 'a', text: 'one' }];
+  const waiting = [{ at: 4, why: 'c', text: 'four' }, { at: 3, why: 'b', text: 'three' }];
+  assert.deepEqual(plain(A.mergeHistory(waiting, stored)).map((v) => v.text), ['four', 'three', 'one']);
+});
+
 test('while editing, a version is due every HISTORY_EVERY', () => {
   assert.equal(A.historyDue(0, 1000), true);
   assert.equal(A.historyDue(1000, 1000 + A.HISTORY_EVERY - 1), false);
@@ -74,8 +80,14 @@ test('reading files for import', () => {
   assert.match(A.readDraftsFile('{"a": 1}', 'other.json').error, /not exported by Rebuttal Bench/);
   assert.match(A.readDraftsFile('{"format": "rebuttal-bench-drafts", "drafts": []}', 'x.json').error, /no drafts/);
   assert.match(A.readDraftsFile('PK\u0003\u0004\u0000\u0000', 'paper.docx').error, /not a text file/);
+  // Every draft Export wrote comes back, however many.
   const many = { format: 'rebuttal-bench-drafts', drafts: Array.from({ length: 80 }, (_, i) => ({ name: 'D' + i, text: 't' + i })) };
-  assert.equal(A.readDraftsFile(JSON.stringify(many), 'x.json').drafts.length, 50);
+  assert.equal(A.readDraftsFile(JSON.stringify(many), 'x.json').drafts.length, 80);
+  // A Markdown or text file is one draft, even when its text is JSON, or an export.
+  for (const text of ['{"score": 4}', JSON.stringify(many)]) {
+    assert.deepEqual(plain(A.readDraftsFile(text, 'A.md')), { drafts: [{ name: 'A', text }], error: null });
+  }
+  assert.match(A.readDraftsFile(JSON.stringify({ ...many, version: 2 }), 'x.json').error, /newer version/);
   const odd = { format: 'rebuttal-bench-drafts', drafts: [{ name: 7, text: 'kept' }, { name: 'no text' }, null, { name: ' Spaced\tname ', text: 'a\r\nb' }] };
   assert.deepEqual(plain(A.readDraftsFile(JSON.stringify(odd), 'x.json')).drafts,
     [{ name: 'Imported', text: 'kept' }, { name: 'Spaced name', text: 'a\nb' }]);

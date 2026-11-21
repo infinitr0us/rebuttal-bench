@@ -4266,6 +4266,17 @@ function historyAdd(list, text, why, now) {
   return capHistory([{ at: now, why: why, text: text }].concat(list));
 }
 
+/* Two lists of versions of one draft as one (the same version once). */
+function mergeHistory(a, b) {
+  var seen = Object.create(null), out = [];
+  a.concat(b).forEach(function (v) {
+    var k = v.at + '|' + v.text;
+    if (!seen[k]) { seen[k] = true; out.push(v); }
+  });
+  out.sort(function (x, y) { return y.at - x.at; });
+  return capHistory(out);
+}
+
 /* While editing, a version is kept every HISTORY_EVERY; `newest` is the
    time of the newest version (0: none). */
 function historyDue(newest, now) {
@@ -4286,21 +4297,25 @@ function draftsFile(drafts, now) {
   }, null, 2) + '\n';
 }
 
-/* The drafts in a file chosen for import: all drafts of a file Export wrote,
-   or the whole text of any other text file as one draft named after it.
-   `error` says why nothing can be imported. */
+/* The drafts in a file chosen for import: every draft of a .json file Export
+   wrote, or the whole text of any other text file (.md, .txt) as one draft
+   named after it, even when that text looks like JSON. `error` says why
+   nothing can be imported. */
 function readDraftsFile(content, fileName) {
   content = String(content);
   if (/\u0000/.test(content)) return { drafts: [], error: 'This is not a text file.' };
-  var v = null;
-  if (/^\s*\{/.test(content)) { try { v = JSON.parse(content); } catch (e) { v = null; } }
-  if (v && typeof v === 'object') {
-    if (v.format !== DRAFTS_FILE || Object.prototype.toString.call(v.drafts) !== '[object Array]') {
+  if (/\.json$/i.test(String(fileName || ''))) {
+    var v = null;
+    try { v = JSON.parse(content); } catch (e) { v = null; }
+    if (!v || typeof v !== 'object' || v.format !== DRAFTS_FILE || Object.prototype.toString.call(v.drafts) !== '[object Array]') {
       return { drafts: [], error: 'This JSON file was not exported by Rebuttal Bench.' };
+    }
+    if (v.version !== undefined && v.version !== 1) {
+      return { drafts: [], error: 'This file comes from a newer version of Rebuttal Bench: update the page and import it again.' };
     }
     var drafts = [];
     v.drafts.forEach(function (d) {
-      if (d && typeof d.text === 'string' && drafts.length < 50) {
+      if (d && typeof d.text === 'string') {
         drafts.push({ name: cleanDraftName(d.name) || 'Imported', text: d.text.replace(/\r\n?/g, '\n') });
       }
     });
@@ -4649,12 +4664,18 @@ function fallbackGet(key) {
   if (canLocalRead && !memNewer[key]) { try { return localStorage.getItem(key); } catch (e) {} }
   return Object.prototype.hasOwnProperty.call(memStore, key) ? memStore[key] : null;
 }
+function isQuotaError(e) {
+  return !!e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014);
+}
 function fallbackSet(key, val) {
   var ok = false;
   if (canLocalRead) {
     try { localStorage.setItem(key, val); ok = true; } catch (e) {
-      /* Out of space: a draft comes before its earlier versions. */
-      if (dropAllHistory()) { try { localStorage.setItem(key, val); ok = true; } catch (e2) {} }
+      /* Out of space: a draft (its text, the list, a pending or deleting
+         mark) comes before earlier versions; preferences do not. */
+      if (isQuotaError(e) && key.indexOf(DRAFT_KEY) === 0 && dropAllHistory()) {
+        try { localStorage.setItem(key, val); ok = true; } catch (e2) {}
+      }
     }
   }
   memStore[key] = val;
@@ -4944,6 +4965,7 @@ function saveDraftNow() {
   var done = storeDraft(value, key);
   if (!memNewer[key]) savedText = value; /* only once it is really stored here */
   if (key === draftKey) keepVersionWhileEditing(value);
+  retryHistory(); /* versions that waited for space a save may have freed */
   done.then(function (persisted) {
     if (key === draftKey && value === ta.value) saveStateEl.textContent = persisted ? 'Draft saved' : 'Draft in memory only';
   });
@@ -5336,6 +5358,7 @@ function saveDraftMeta() {
       fallbackSet(DRAFTS_KEY, JSON.stringify(draftMeta));
       if (fallbackGet(DRAFTS_KEY) !== r.value) markPending(DRAFTS_KEY);
       draftMeta.list.forEach(function (d) { if (!bodyState[d.id]) startBodyLoad(d.id); });
+      pruneHistory();
       renderDraftTabs();
     }
     return true;
@@ -5397,6 +5420,7 @@ function renderDraftTabs() {
   var again = focusId ? draftTabs.querySelector('.dtab[data-id="' + focusId + '"]')
     : focusAct ? draftTools.querySelector('.dtool[data-act="' + focusAct + '"]') : null;
   if (again) again.focus();
+  if (historyDialog && !historyDialog.hidden) renderHistory(); /* a rename, here or elsewhere */
 }
 
 /* Put draft `id` in a fresh editor, with an undo history of its own: Ctrl+Z
@@ -5405,6 +5429,7 @@ function renderDraftTabs() {
    whose text has not been read yet (or could not be) is read first, with the
    editor locked meanwhile. */
 function openDraft(id) {
+  if (historyDialog && !historyDialog.hidden) closeHistory(); /* its versions belong to the draft left */
   var local = fallbackGet(keyOfDraft(id)); /* read before `id` becomes the open draft */
   var text = typeof local === 'string' ? local : (draftTexts[id] || '');
   var state = bodyState[id] || 'ready';
@@ -5463,21 +5488,31 @@ function switchDraft(id) {
 }
 
 /* A new draft with its own key and text, not yet open; the caller saves the
-   list (saveDraftMeta, or switchDraft, which does). */
+   list (saveDraftMeta, or switchDraft, which does). Its text is stored
+   before it gets a tab: null, and no draft, when this browser has no room
+   for it (a tab whose text lived in memory only would reopen blank). */
 function createDraft(name, text) {
   var id = newDraftId();
   while (draftById(id) || draftMeta.gone[id] !== undefined || fallbackGet(keyOfDraft(id)) !== null) id = newDraftId();
+  var key = keyOfDraft(id);
+  flushDraftLocally(text, key); /* pending until the store has it */
+  if (memNewer[key]) {
+    fallbackDel(key);
+    fallbackDel(pendingKey(key));
+    return null;
+  }
   draftMeta.list.push({ id: id, name: name.slice(0, 40), at: Date.now() });
   bodyState[id] = 'ready';
-  flushDraftLocally(text, keyOfDraft(id)); /* pending until the store has it */
-  storeDraft(text, keyOfDraft(id));
+  storeDraft(text, key);
   draftTexts[id] = text;
   return id;
 }
 
 function addDraft() {
   if (!draftReady) return;
-  switchDraft(createDraft(newDraftName(draftMeta.list), ''));
+  var id = createDraft(newDraftName(draftMeta.list), '');
+  if (!id) { showToast('No space left in this browser for another draft. Export your drafts, then delete some.'); return; }
+  switchDraft(id);
   ta.focus();
 }
 
@@ -5563,6 +5598,7 @@ window.addEventListener('storage', function (e) {
   if (!draftReady || e.key !== DRAFTS_KEY || typeof e.newValue !== 'string') return;
   if (adoptDraftMeta(parseDraftMeta(e.newValue))) saveDraftMeta();
   draftMeta.list.forEach(function (d) { if (!bodyState[d.id]) bodyState[d.id] = 'ready'; });
+  pruneHistory();
   renderDraftTabs();
 });
 
@@ -5608,11 +5644,13 @@ function renderSplit() {
 
 function openSplit() {
   splitDialog.hidden = false;
+  setModal(splitDialog, true);
   renderSplit();
   splitDialog.querySelector('.modal-x').focus();
 }
 function closeSplit() {
   splitDialog.hidden = true;
+  setModal(splitDialog, false);
   ta.focus();
 }
 
@@ -5632,14 +5670,17 @@ document.addEventListener('keydown', function (e) {
 });
 splitDraftsBtn.addEventListener('click', function () {
   if (!splitResult || splitResult.parts.length < 2 || !draftReady) return;
-  var base = draftById(draftMeta.active).name.slice(0, 30), n = splitResult.parts.length, first = null;
+  var base = draftById(draftMeta.active).name.slice(0, 30), n = splitResult.parts.length, first = null, made = 0;
   splitResult.parts.forEach(function (p, i) {
-    var id = createDraft(base + ' (' + (i + 1) + '/' + n + ')', p.text);
+    var id = made === i ? createDraft(base + ' (' + (i + 1) + '/' + n + ')', p.text) : null;
+    if (id) made++;
     if (!first) first = id;
   });
   closeSplit();
+  if (!first) { showToast('No space left in this browser for the parts. Export your drafts, then delete some.'); return; }
   switchDraft(first);
-  showToast(n + ' new drafts, one per part; the draft you split is unchanged.');
+  showToast(made === n ? n + ' new drafts, one per part; the draft you split is unchanged.'
+    : 'Only ' + made + ' of ' + n + ' parts fit in this browser: copy the others from the split instead.');
 });
 
 /* ---- history: earlier versions of each draft, in this browser only ----
@@ -5650,26 +5691,39 @@ var historyDialog = document.getElementById('historyDialog');
 var historyList = document.getElementById('historyList');
 var historyTitle = document.getElementById('historyTitle');
 var importFile = document.getElementById('importFile');
-var memHistory = {};   /* without readable localStorage: this window's versions */
-var historyNewest = {}; /* id -> time of its newest version, so the autosave need not read the list */
-var historyShown = [];  /* the versions the dialog lists */
+var memHistory = {};     /* without readable localStorage: this window's versions */
+var historyUnsaved = {}; /* id -> versions that did not fit yet: kept here, written when space returns */
+var historyNewest = {};  /* id -> time of its newest version, so the autosave need not read the list */
+var historyShown = [];   /* the versions the dialog lists */
+var historyFor = null;   /* and the draft they belong to */
 
 function readHistory(id) {
   var list = memHistory[id] || [];
   if (canLocalRead) { try { list = parseHistory(localStorage.getItem(HISTORY_PREFIX + id)); } catch (e) {} }
+  if (historyUnsaved[id]) list = mergeHistory(historyUnsaved[id], list);
   historyNewest[id] = list.length ? list[0].at : 0;
   return list;
 }
+/* Write a draft's versions. A full storage keeps fewer versions there, and
+   the rest here, to be written once a draft save has freed space. */
 function writeHistory(id, list) {
   historyNewest[id] = list.length ? list[0].at : 0;
   if (!canLocalRead) { memHistory[id] = list; return; }
-  /* A full storage keeps fewer versions; when not even one fits, the stored
-     ones stay as they were. */
+  var fits = list;
   for (;;) {
-    try { localStorage.setItem(HISTORY_PREFIX + id, JSON.stringify(list)); return; } catch (e) {}
-    if (list.length <= 1) return;
-    list = list.slice(0, Math.ceil(list.length / 2));
+    try {
+      localStorage.setItem(HISTORY_PREFIX + id, JSON.stringify(fits));
+      break;
+    } catch (e) {
+      if (fits.length <= 1) { fits = []; break; }
+      fits = fits.slice(0, Math.ceil(fits.length / 2));
+    }
   }
+  if (fits.length < list.length) historyUnsaved[id] = list;
+  else delete historyUnsaved[id];
+}
+function retryHistory() {
+  Object.keys(historyUnsaved).forEach(function (id) { writeHistory(id, readHistory(id)); });
 }
 /* Keep `text` (the editor's by default) as the open draft's newest version. */
 function keepVersion(why, text) {
@@ -5685,23 +5739,56 @@ function keepVersionWhileEditing(text) {
 }
 function dropHistory(id) {
   delete memHistory[id];
+  delete historyUnsaved[id];
   delete historyNewest[id];
   if (canLocalRead) { try { localStorage.removeItem(HISTORY_PREFIX + id); } catch (e) {} }
 }
-/* Drafts come first: when one cannot be saved for lack of space, all
-   earlier versions give way. True when there were any. */
-function dropAllHistory() {
-  if (!canLocalRead) return false;
+function historyKeys() {
   var keys = [];
+  if (!canLocalRead) return keys;
   try {
     for (var i = 0; i < localStorage.length; i++) {
       var k = localStorage.key(i);
       if (k && k.indexOf(HISTORY_PREFIX) === 0) keys.push(k);
     }
-  } catch (e) { return false; }
+  } catch (e) {}
+  return keys;
+}
+/* Drafts come first: when one cannot be saved for lack of space, all
+   earlier versions give way. True when there were any. */
+function dropAllHistory() {
+  var keys = historyKeys();
   keys.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {} });
   historyNewest = {};
+  historyUnsaved = {};
   return keys.length > 0;
+}
+/* The versions of a draft deleted elsewhere (another window, another
+   device) go with it, unless the draft was re-created since. */
+function pruneHistory() {
+  historyKeys().forEach(function (k) {
+    var id = k.slice(HISTORY_PREFIX.length);
+    if (draftMeta.gone[id] !== undefined && !draftById(id)) dropHistory(id);
+  });
+}
+
+/* The text of draft `id` as far as this window knows it, or null while it
+   is still loading or could not be read. For the open draft that is the
+   editor, unless it is unchanged here and another window of this browser
+   has saved a newer copy since. */
+function knownDraftText(id) {
+  var local = fallbackGet(keyOfDraft(id)), state = bodyState[id] || 'ready';
+  if (id === draftMeta.active) {
+    if (ta.readOnly) return null;
+    var clean = ta.value === savedText && !memNewer[draftKey];
+    if (!clean) return ta.value;
+    if (state === 'failed') return null;
+    if (typeof local === 'string') return local;
+    return ta.value === EXAMPLE ? '' : ta.value; /* the example stands in for a draft never written */
+  }
+  if (state !== 'ready') return null;
+  if (typeof local === 'string') return local;
+  return draftTexts[id] !== undefined ? draftTexts[id] : null;
 }
 
 function versionTime(at) {
@@ -5715,8 +5802,9 @@ function versionTime(at) {
 
 function renderHistory() {
   var d = draftById(draftMeta.active);
+  historyFor = draftMeta.active;
   historyTitle.textContent = 'History of “' + (d ? d.name : 'this draft') + '”';
-  historyShown = readHistory(draftMeta.active);
+  historyShown = readHistory(historyFor);
   var now = ta.value.trim().length;
   if (!historyShown.length) {
     historyList.innerHTML = '<p class="modal-note">No earlier versions of this draft yet.</p>';
@@ -5734,21 +5822,38 @@ function renderHistory() {
   });
   historyList.innerHTML = html;
 }
+
+/* While a dialog of this kind is open, nothing behind it can be reached,
+   by mouse or keyboard: it cannot switch drafts or type into the editor. */
+function setModal(dialog, open) {
+  Array.prototype.forEach.call(document.body.children, function (el) {
+    if (el !== dialog && el.id !== 'toast' && el.tagName !== 'SCRIPT' && el.tagName !== 'DIALOG') el.inert = open;
+  });
+}
 function openHistory() {
   if (!draftReady) return;
   historyDialog.hidden = false;
+  setModal(historyDialog, true);
   renderHistory();
   historyDialog.querySelector('.modal-x').focus();
 }
 function closeHistory() {
+  if (historyDialog.hidden) return;
   historyDialog.hidden = true;
-  ta.focus();
+  setModal(historyDialog, false);
+  var btn = draftTools.querySelector('.dtool[data-act="history"]');
+  (btn || ta).focus();
 }
 
-/* A restore is one more edit: one undo brings the text back, and the text
-   it replaces is kept as a version first. */
+/* A restore is one more edit: one undo brings the text back. The text it
+   replaces is kept as a version first, and so is a newer copy another
+   window saved meanwhile, which this editor has not shown. */
 function restoreVersion(v) {
-  if (!v || !draftReady || ta.readOnly || v.text === ta.value) return;
+  if (!v || !draftReady || ta.readOnly) return;
+  if (historyFor !== draftMeta.active) { closeHistory(); showToast('The open draft changed: open History again'); return; }
+  if (v.text === ta.value) return;
+  var stored = fallbackGet(draftKey);
+  if (typeof stored === 'string' && stored !== ta.value && stored !== savedText) keepVersion('saved in another window', stored);
   keepVersion('before a restore');
   closeHistory();
   setSourceText(v.text, 0);
@@ -5776,39 +5881,94 @@ function fileSafe(name) {
   return name.replace(/[\\\/:*?"<>|\u0000-\u001f]+/g, '-').replace(/^[\s.]+|[\s.]+$/g, '') || 'draft';
 }
 
+/* Every draft whose text is known; the others are named and left out only
+   if the author agrees. */
 function exportAllDrafts() {
   if (!draftReady) return;
-  var loading = 0;
-  var drafts = draftMeta.list.map(function (d) {
-    if (bodyState[d.id] && bodyState[d.id] !== 'ready') loading++;
-    return { name: d.name, text: draftText(d.id) };
+  var latest = fallbackGet(DRAFTS_KEY); /* drafts another window added */
+  if (typeof latest === 'string' && adoptDraftMeta(parseDraftMeta(latest))) saveDraftMeta();
+  var drafts = [], missing = [];
+  draftMeta.list.forEach(function (d) {
+    var text = knownDraftText(d.id);
+    if (text === null) missing.push('“' + d.name + '”');
+    else drafts.push({ name: d.name, text: text });
   });
+  if (!drafts.length) { showToast('No draft has loaded yet: try again in a moment'); return; }
+  if (missing.length && !window.confirm(missing.join(', ') + (missing.length === 1 ? ' has' : ' have') +
+      ' not loaded (still loading, or storage did not answer). Export the other ' + drafts.length + ' without ' +
+      (missing.length === 1 ? 'it' : 'them') + '?')) return;
   var day = new Date().toISOString().slice(0, 10);
   if (!downloadFile('rebuttal-drafts-' + day + '.json', draftsFile(drafts, Date.now()), 'application/json')) {
     showToast('The browser did not allow the download');
     return;
   }
   showToast('Exported ' + drafts.length + ' draft' + (drafts.length === 1 ? '' : 's') +
-    (loading ? '; ' + loading + ' still loading, so this browser’s copy of ' + (loading === 1 ? 'it' : 'them') + ' is in the file' : '') + '.');
+    (missing.length ? '; left out: ' + missing.join(', ') : '') + '.');
+}
+function exportOpenDraft() {
+  if (!draftReady) return;
+  var d = draftById(draftMeta.active), text = knownDraftText(draftMeta.active);
+  if (text === null) { showToast('This draft has not loaded yet: try again in a moment'); return; }
+  if (!downloadFile(fileSafe(d ? d.name : 'draft') + '.md', text, 'text/markdown')) showToast('The browser did not allow the download');
 }
 
+/* An import only adds drafts, and only what this browser can keep: the open
+   draft's edit is saved first, and an imported draft whose text does not
+   fit is not added (createDraft). */
 function importDrafts(content, fileName) {
-  if (!draftReady) return;
+  if (!draftReady || ta.readOnly) { showToast('Wait until the open draft has loaded'); return; }
   var got = readDraftsFile(content, fileName);
   if (got.error) { showToast(got.error); return; }
-  var existing = draftMeta.list.map(function (d) { return { name: d.name, text: draftText(d.id) }; });
-  var plan = importPlan(existing, got.drafts), n = plan.add.length, first = null;
-  if (!n) {
+  var latest = fallbackGet(DRAFTS_KEY); /* drafts another window added */
+  if (typeof latest === 'string' && adoptDraftMeta(parseDraftMeta(latest))) saveDraftMeta();
+  clearTimeout(draftTimer);
+  retryLocalWrites();
+  if (ta.value !== savedText || memNewer[draftKey]) {
+    flushDraftLocally(ta.value, draftKey);
+    storeDraft(ta.value, draftKey);
+    if (!memNewer[draftKey]) savedText = ta.value;
+  }
+  if (memNewer[draftKey]) {
+    showToast('This browser has no space left even for the open draft, so nothing was imported. Export your drafts, then delete some.');
+    return;
+  }
+  /* Only texts known here count as already here. */
+  var existing = [];
+  draftMeta.list.forEach(function (d) {
+    var text = knownDraftText(d.id);
+    existing.push({ name: d.name, text: text === null ? '\u0000unknown ' + d.id : text });
+  });
+  var plan = importPlan(existing, got.drafts), added = [], failed = [];
+  if (!plan.add.length) {
     showToast(plan.same === 1 ? 'That draft is already here.' : 'All ' + plan.same + ' drafts are already here.');
     return;
   }
   plan.add.forEach(function (d) {
-    var id = createDraft(d.name, d.text);
-    if (!first) first = id;
+    var id = failed.length ? null : createDraft(d.name, d.text);
+    if (id) added.push(id);
+    else failed.push('“' + d.name + '”');
   });
+  if (!added.length) {
+    showToast('No space left in this browser for the imported drafts. Export your drafts, then delete some.');
+    return;
+  }
   closeHistory();
-  switchDraft(first); /* also saves the list */
-  showToast('Imported ' + n + ' draft' + (n === 1 ? '' : 's') + (plan.same ? '; ' + plan.same + ' already here' : '') + '.');
+  switchDraft(added[0]); /* also saves the list */
+  var n = added.length;
+  showToast('Imported ' + n + ' draft' + (n === 1 ? '' : 's') + (plan.same ? '; ' + plan.same + ' already here' : '') +
+    (failed.length ? '. No space left for ' + failed.join(', ') + ': export your drafts, delete some, and import again' : '') + '.');
+}
+
+/* Text files as UTF-8 (with or without a byte order mark) or UTF-16 with
+   one; anything else is refused rather than read as replacement characters. */
+function decodeTextFile(bytes) {
+  try {
+    if (bytes[0] === 0xFF && bytes[1] === 0xFE) return { text: new TextDecoder('utf-16le').decode(bytes.subarray(2)) };
+    if (bytes[0] === 0xFE && bytes[1] === 0xFF) return { text: new TextDecoder('utf-16be').decode(bytes.subarray(2)) };
+    return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes) };
+  } catch (e) {
+    return { error: 'This file is not UTF-8 text. Save it as UTF-8 and import it again.' };
+  }
 }
 
 historyDialog.addEventListener('click', function (e) {
@@ -5817,18 +5977,18 @@ historyDialog.addEventListener('click', function (e) {
   if (restore) restoreVersion(historyShown[parseInt(restore.getAttribute('data-restore'), 10)]);
   else if (copy) {
     var v = historyShown[parseInt(copy.getAttribute('data-copy-version'), 10)];
-    if (v) copyText(v.text, 'Copied the version of ' + versionTime(v.at));
+    if (v) copyText(v.text, 'Copied the version of ' + versionTime(v.at), copy);
   }
 });
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape' && !historyDialog.hidden) closeHistory();
 });
-document.getElementById('exportAllBtn').addEventListener('click', exportAllDrafts);
-document.getElementById('exportOneBtn').addEventListener('click', function () {
-  if (!draftReady) return;
-  var d = draftById(draftMeta.active);
-  if (!downloadFile(fileSafe(d ? d.name : 'draft') + '.md', ta.value, 'text/markdown')) showToast('The browser did not allow the download');
+/* Another window renamed the draft or kept a version of it. */
+window.addEventListener('storage', function (e) {
+  if (!historyDialog.hidden && (e.key === HISTORY_PREFIX + historyFor || e.key === DRAFTS_KEY)) renderHistory();
 });
+document.getElementById('exportAllBtn').addEventListener('click', exportAllDrafts);
+document.getElementById('exportOneBtn').addEventListener('click', exportOpenDraft);
 document.getElementById('importBtn').addEventListener('click', function () {
   importFile.value = '';
   importFile.click();
@@ -5836,11 +5996,15 @@ document.getElementById('importBtn').addEventListener('click', function () {
 importFile.addEventListener('change', function () {
   var f = importFile.files && importFile.files[0];
   if (!f) return;
-  if (f.size > 5e6) { showToast('That file is too large to be drafts.'); return; }
+  if (f.size > 30e6) { showToast('That file is too large to be drafts.'); return; }
   var reader = new FileReader();
-  reader.onload = function () { importDrafts(String(reader.result), f.name); };
+  reader.onload = function () {
+    var got = decodeTextFile(new Uint8Array(reader.result));
+    if (got.error) showToast(got.error);
+    else importDrafts(got.text, f.name);
+  };
   reader.onerror = function () { showToast('Could not read that file.'); };
-  reader.readAsText(f);
+  reader.readAsArrayBuffer(f);
 });
 
 /* ---- compaction: applied on copy, the editor keeps the readable text ---- */
@@ -5933,6 +6097,7 @@ compactBox.addEventListener('toggle', function () {
 });
 
 applyCompactBtn.addEventListener('click', function () {
+  if (!draftReady || ta.readOnly) return;
   var r = compactResult(true);
   if (!r || r.text === ta.value) { showToast('Nothing to compact'); return; }
   keepVersion('before Apply to source');
@@ -6024,6 +6189,7 @@ function applyIssueFix(iss) {
 }
 
 function applyAllFixes() {
+  if (!draftReady || ta.readOnly) return; /* a draft still loading cannot change */
   var startText = ta.value;
   var result = fixAllText(startText);
   var text = result.text, applied = result.applied;
@@ -6167,34 +6333,39 @@ onEditor('scroll', function () {
 copyBtn.addEventListener('click', function () {
   copyText(ta.value, 'Copied — paste it straight into OpenReview');
 });
-function copyText(txt, msg) {
+/* `from`: the button in a dialog that asked for the copy, which keeps the
+   focus; the editor behind the dialog is never selected then. */
+function copyText(txt, msg, from) {
   var ok = function () { showToast(msg); };
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(txt).then(ok).catch(function () { fallbackCopy(txt, ok); });
+    navigator.clipboard.writeText(txt).then(ok).catch(function () { fallbackCopy(txt, ok, from); });
   } else {
-    fallbackCopy(txt, ok);
+    fallbackCopy(txt, ok, from);
   }
 }
 /* The editor itself is selected when it holds the text; anything else (the
-   compact form) goes through a temporary off-screen textarea. */
-function fallbackCopy(txt, ok) {
+   compact form, a version in History) goes through a temporary off-screen
+   textarea, next to the button when there is one (outside an inert page). */
+function fallbackCopy(txt, ok, from) {
+  if (from && !from.isConnected) return; /* the dialog was closed meanwhile */
   var box = ta;
-  if (txt !== ta.value) {
+  if (from || txt !== ta.value) {
     box = document.createElement('textarea');
     box.value = txt;
     box.setAttribute('readonly', '');
     box.style.position = 'fixed';
     box.style.left = '-9999px';
-    document.body.appendChild(box);
+    (from ? from.parentNode : document.body).appendChild(box);
   }
   box.focus();
   box.select();
   var copied = false;
   try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
-  if (box !== ta) { document.body.removeChild(box); ta.focus(); }
+  if (box !== ta) { box.parentNode.removeChild(box); (from || ta).focus(); }
   /* execCommand reports failure by returning false, not by throwing. */
   if (copied) ok();
   else showToast(box === ta ? 'Copy failed — select and copy manually'
+    : from ? 'Copy failed: select the text shown and copy it.'
     : 'Copy failed. Use Apply to source, copy from the editor, then undo to get your text back.');
 }
 
@@ -6224,6 +6395,7 @@ document.getElementById('clearBtn').addEventListener('click', function () {
       if (key === draftKey && !ta.value) saveStateEl.textContent = persisted ? 'Blank draft saved' : 'Blank draft in memory only';
     });
     if (!memNewer[key]) savedText = '';
+    retryHistory(); /* the version kept before Clear may fit now */
   }
   updateAll();
   renderPreview();
@@ -6430,6 +6602,7 @@ function finishBoot(draft, note) {
     if (draft.failed) saveStateEl.textContent = 'Could not read this draft from storage: open it again to retry';
   }
   if (metaChanged) saveDraftMeta();
+  pruneHistory();
   renderDraftTabs();
   updateAll();
   renderPreview();

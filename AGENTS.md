@@ -206,16 +206,31 @@ cases, Chrome probes); keep their rules:
   store revisions this lost update cannot be excluded).
 - **History** (earlier versions) is a safety net that must never cost a draft. Each draft's versions
   live under `HISTORY_PREFIX + id` in localStorage only (never the asynchronous store), newest
-  first, capped by `capHistory` (pure: `parseHistory`, `historyAdd`, `historyDue`,
+  first, capped by `capHistory` (pure: `parseHistory`, `historyAdd`, `historyDue`, `mergeHistory`,
   `tests/history.test.js`). `keepVersion` runs before every bulk change of the editor (Fix all,
-  Apply to source, Clear, Load example, a restore) and `saveDraftNow` keeps one every
-  `HISTORY_EVERY`. A history write that does not fit keeps fewer versions; a draft or list write
-  that does not fit drops all history and retries once (`fallbackSet` → `dropAllHistory`).
-  Deleting a draft deletes its history. Two windows adding versions of one draft at the same
-  moment can lose one of the two versions.
-- **Files**: Export writes `draftsFile` (every draft, in tab order); Import reads it, or any text
-  file as one draft (`readDraftsFile`), and `importPlan` adds only texts no draft has, under
-  names no draft has, through `createDraft`. An import never replaces or merges into a draft.
+  Apply to source, Clear, Load example, a restore; none on a read-only draft) and `saveDraftNow`
+  keeps one every `HISTORY_EVERY`. A history write that does not fit keeps fewer versions there
+  and the rest in memory (`historyUnsaved`), written by `retryHistory` after a draft save. Only a
+  quota error on a draft key (body, list, pending or deleting mark) drops all history and retries
+  once (`fallbackSet` → `isQuotaError`, `dropAllHistory`); preferences never do. Deleting a draft
+  deletes its history, here and, through tombstones, in other windows and after a boot
+  (`pruneHistory`). Two windows adding versions of one draft at the same moment can lose one of
+  the two versions.
+- **The History dialog is modal** (`setModal`: everything behind it is `inert`, so no draft switch
+  or keystroke reaches the editor while it is open; the split dialog uses it too). Its versions
+  belong to `historyFor`: a draft switch closes it, and `restoreVersion` refuses a version of
+  another draft. Before a restore it keeps both the editor's text and a newer copy another window
+  saved. Copy passes its button to `copyText`, whose fallback then never selects the editor.
+- **Files**: `knownDraftText(id)` is a draft's text or null while it loads or could not be read
+  (an unchanged editor yields to a newer copy another window saved). Export writes `draftsFile`
+  with every known text and names the others before leaving them out; Download refuses an unknown
+  text. Import reads a `.json` export (`readDraftsFile`, no limit on the number of drafts, format
+  version 1) or any other text file as one literal draft, decoded as UTF-8 or UTF-16 with a BOM
+  and refused otherwise (`decodeTextFile`). It first takes in other windows' drafts and saves the
+  open draft's edit, stops when even that does not fit, and `importPlan` adds only texts no
+  known draft has, under names no draft has. `createDraft` stores a body before giving it a tab,
+  and returns null (no draft) when it does not fit; the import then names what was left out. An
+  import never replaces or merges into a draft.
 
 ## Splitting
 

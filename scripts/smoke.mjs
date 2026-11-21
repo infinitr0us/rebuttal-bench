@@ -558,12 +558,92 @@ try {
       }
       return setItem.call(this, k, v);
     };
-    let ok;
-    try { ok = fallbackSet('rebuttal-bench-smoke-space', 'needed'); } finally { Storage.prototype.setItem = setItem; }
+    let ok, prefsKept;
+    try {
+      /* A preference that does not fit costs no version; a draft does. */
+      fallbackSet(PREFS_KEY + '-smoke', 'x');
+      prefsKept = localStorage.getItem(HISTORY_PREFIX + 'd1') !== null;
+      ok = fallbackSet(DRAFT_KEY + '-smokespace', 'needed');
+    } finally { Storage.prototype.setItem = setItem; }
     const left = Object.keys(localStorage).filter((k) => k.indexOf(HISTORY_PREFIX) === 0).length;
-    localStorage.removeItem('rebuttal-bench-smoke-space');
-    return hadHistory >= 1 && !orphans.length && had && ok === true && left === 0 && ta.value === 'First draft $x$.' ||
-      { ids, hadHistory, orphans, had, ok, left, value: ta.value };`);
+    fallbackDel(DRAFT_KEY + '-smokespace'); fallbackDel(PREFS_KEY + '-smoke');
+    return hadHistory >= 1 && !orphans.length && had && prefsKept && ok === true && left === 0 && ta.value === 'First draft $x$.' ||
+      { ids, hadHistory, orphans, had, prefsKept, ok, left, value: ta.value };`);
+
+  await check('History is modal, its Copy keeps the focus, and Restore stays with its draft', `
+    document.querySelector('#draftTools .dadd').click(); await wait(50);
+    const a = draftMeta.active;
+    setSourceText('A current', 0); updateAll(); keepVersion('test', 'A version');
+    document.querySelector('#draftTools [data-act="history"]').click(); await wait(50);
+    const inert = !!document.getElementById('draftTabs').closest('[inert]') && !!ta.closest('[inert]') && !historyDialog.closest('[inert]');
+    const realWrite = navigator.clipboard && navigator.clipboard.writeText;
+    if (navigator.clipboard) navigator.clipboard.writeText = () => Promise.reject(new Error('denied'));
+    historyList.querySelector('[data-copy-version="0"]').click(); await wait(100);
+    const focusKept = !!document.activeElement && document.activeElement.matches('[data-copy-version="0"]');
+    if (navigator.clipboard) navigator.clipboard.writeText = realWrite;
+    const version = historyShown.find((v) => v.text === 'A version');
+    switchDraft('d1'); await wait(50); /* any way the open draft could change meanwhile */
+    const closed = historyDialog.hidden && !ta.closest('[inert]');
+    restoreVersion(version); await wait(50);
+    const kept = ta.value === 'First draft $x$.';
+    window.confirm = () => true; deleteDraft(a); await wait(50);
+    return inert && focusKept && closed && kept && draftMeta.active === 'd1' || { inert, focusKept, closed, kept, active: draftMeta.active };`);
+
+  await check('Import saves the open draft first and adds only drafts whose text fits', `
+    setSourceText('First draft $x$. An edit not saved yet.', 0);
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      if (String(v).indexOf('BIG') === 0) throw new DOMException('full', 'QuotaExceededError');
+      return setItem.call(this, k, v);
+    };
+    try {
+      importDrafts(JSON.stringify({ format: 'rebuttal-bench-drafts', drafts: [
+        { name: 'Small', text: 'A small answer.' }, { name: 'Big', text: 'BIG answer' }] }), 'x.json');
+    } finally { Storage.prototype.setItem = setItem; }
+    await wait(50);
+    const names = draftMeta.list.map((d) => d.name), msg = toast.textContent;
+    const savedFirst = localStorage.getItem(DRAFT_KEY) === 'First draft $x$. An edit not saved yet.';
+    const small = draftMeta.list.find((d) => d.name === 'Small');
+    const smallStored = !!small && localStorage.getItem(keyOfDraft(small.id)) === 'A small answer.';
+    window.confirm = () => true;
+    if (small) deleteDraft(small.id);
+    switchDraft('d1'); await wait(50);
+    setSourceText('First draft $x$.', 0); saveDraftNow();
+    return savedFirst && smallStored && names.indexOf('Big') < 0 && /No space left for “Big”/.test(msg) ||
+      { savedFirst, smallStored, names, msg };`);
+
+  await check('Export names a draft that has not loaded instead of writing it as blank', `
+    const id = createDraft('Loading one', 'its text'); saveDraftMeta();
+    fallbackDel(keyOfDraft(id)); delete draftTexts[id]; bodyState[id] = 'loading';
+    let asked = '', downloaded = false;
+    window.confirm = (q) => { asked = q; return false; };
+    const realDownload = downloadFile;
+    downloadFile = function () { downloaded = true; return true; };
+    exportAllDrafts();
+    downloadFile = realDownload;
+    bodyState[id] = 'ready'; window.confirm = () => true; deleteDraft(id); switchDraft('d1');
+    return /“Loading one” has not loaded/.test(asked) && !downloaded || { asked, downloaded };`);
+
+  await check('Import reads UTF-8 and UTF-16 files and refuses other encodings', `
+    const latin1 = decodeTextFile(new Uint8Array([0x63, 0x61, 0x66, 0xE9]));
+    const utf16 = decodeTextFile(new Uint8Array([0xFF, 0xFE, 0x63, 0x00, 0xE9, 0x00]));
+    const utf8 = decodeTextFile(new Uint8Array([0xEF, 0xBB, 0xBF, 0x63, 0xC3, 0xA9]));
+    return !!latin1.error && utf16.text === 'c\\u00e9' && utf8.text === 'c\\u00e9' || { latin1, utf16, utf8 };`);
+
+  await check('A version that does not fit waits in memory and is written once there is space', `
+    dropHistory('d1');
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      if (k.indexOf(HISTORY_PREFIX) === 0) throw new DOMException('full', 'QuotaExceededError');
+      return setItem.call(this, k, v);
+    };
+    try { keepVersion('test', 'A version kept for later.'); } finally { Storage.prototype.setItem = setItem; }
+    const waiting = !!historyUnsaved.d1 && localStorage.getItem(HISTORY_PREFIX + 'd1') === null &&
+      readHistory('d1').some((v) => v.text === 'A version kept for later.');
+    retryHistory();
+    const written = !historyUnsaved.d1 && (localStorage.getItem(HISTORY_PREFIX + 'd1') || '').indexOf('A version kept for later.') >= 0;
+    dropHistory('d1');
+    return waiting && written || { waiting, written };`);
 
   await check('a fresh editor after a draft switch still offers to convert a pasted table', `
     const origId = draftMeta.active;
