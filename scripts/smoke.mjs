@@ -186,6 +186,21 @@ try {
     setSourceText('$\\\\lens{x}$', 0); updateAll(); renderPreview(); await wait(2500);
     return defined && /1 undefined macro/.test(mjStatus.textContent) || { defined, status: mjStatus.textContent };`);
 
+  await check('options set by \\\\mathtoolsset are gone in the next preview', `
+    setSourceText('$\\\\mathtoolsset{prescript-sub-format=\\\\bm}\\\\prescript{1}{2}{X}$', 0); updateAll(); renderPreview(); await wait(2500);
+    const before = mjStatus.textContent;
+    setSourceText('$\\\\prescript{1}{2}{X}$', 0); updateAll(); renderPreview(); await wait(2500);
+    return /undefined/.test(before) && mjStatus.textContent === 'MathJax ready' || { before, after: mjStatus.textContent };`);
+
+  await check('a TeX fix that would change another formula is refused when clicked', `
+    const src = '$\\\\def\\\\q{1}\\\\def\\\\boldsymbol#1{\\\\def\\\\q{2}#1}$ then $\\\\bm{x}$ then $\\\\q$';
+    setSourceText(src, 0); clearTimeout(timer); updateAll(); renderPreview(); await wait(2500);
+    const card = currentIssues.find((i) => i.title === '\\\\bm is not defined in MathJax');
+    const btn = card && document.querySelector('#lintList .fixbtn[data-fix="' + currentIssues.indexOf(card) + '"]');
+    if (!btn) return { titles: currentIssues.map((i) => i.title) };
+    btn.click(); await wait(100);
+    return ta.value === src && /would change something else/.test(toast.textContent) || { value: ta.value, toast: toast.textContent };`);
+
   await check('red \\\\verb text is not reported as an undefined macro', `
     setSourceText('$\\\\color{red}\\\\verb!\\\\bm!$', 0); updateAll(); renderPreview(); await wait(2500);
     return mjStatus.textContent === 'MathJax ready' && !currentIssues.length || { status: mjStatus.textContent, titles: currentIssues.map((i) => i.title) };`);
@@ -546,6 +561,17 @@ try {
     switchDraft(origId);
     limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
     return shown && copiedOk && made && ta.value === original || { shown, copiedOk, made, n, value: ta.value.slice(0, 40) };`);
+
+  await check('Split cuts the comment as posted: an indented first fence stays one block', `
+    const src = '    \`\`\`text\\n\\nCost $5 to $10.\\n\\n\`\`\`';
+    limitInput.value = '17'; limitInput.dispatchEvent(new Event('input'));
+    splitLabelBox.checked = false;
+    setSourceText(src, 0); updateAll(); await wait(50);
+    document.getElementById('splitBtn').click(); await wait(100);
+    const parts = splitResult.parts.map((p) => p.text);
+    closeSplit(); splitLabelBox.checked = true;
+    limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
+    return parts.length === 1 && parts[0] === src.trim() || { parts };`);
 
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
