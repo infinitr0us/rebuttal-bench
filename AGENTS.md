@@ -13,7 +13,7 @@ User-facing documentation is in `README.md`; history of changes in `CHANGELOG.md
 - **`npm test` must pass before every commit**, and `npm run smoke` too when the DOM section
   changed. Keep commits small and focused.
 - Both accept `RB_PAGE=<file>` to run against another copy of the page, e.g. an old version
-  from git (`git show 7501f14:rebuttal-bench_v2.html > old.html`), to confirm a new test fails
+  from git (`git show cfb4202:rebuttal-bench_v2.html > old.html`), to confirm a new test fails
   without the fix.
 
 ## Anatomy of `rebuttal-bench.html`
