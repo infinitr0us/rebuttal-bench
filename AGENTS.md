@@ -182,8 +182,9 @@ cases, Chrome probes); keep their rules:
   retried at the next start (`retryDeletes`).
 - **Only a real edit is written.** `savedText` is what this window last saved or loaded for the open
   draft (it advances only once a local write succeeded); switching away, leaving the page, the
-  autosave and Clear write only when the editor differs from it, so an undone edit or a Clear on a
-  blank draft cannot put a stale copy over a newer one. The built-in example counts as saved. A
+  autosave and Clear write only when the editor differs from it or memory holds an edit refused for
+  space (`refusedEdit`), so an undone edit or a Clear on a blank draft cannot put a stale copy over
+  a newer one, and an undone refused edit is not retried later. The built-in example counts as saved. A
   local write refused for lack of space is retried on switching, deleting and leaving
   (`retryLocalWrites`); a remote write is marked pending as soon as it is queued. Delete asks
   whenever the editor or the stored copy holds text, and every control that changes the text needs
@@ -214,7 +215,7 @@ cases, Chrome probes); keep their rules:
   keeps one every `HISTORY_EVERY`. A history write that does not fit keeps fewer versions there
   and the rest in memory (`historyUnsaved`); a bulk change's version (`hold`, even when it is
   already the newest) stays in memory until it is written while no draft write waits for space
-  (`draftWritesWaiting`). `retryHistory` runs after a draft save, a confirmed store write, a
+  (`draftWritesWaiting`) and the draft has been saved since (`historyHeld`). `retryHistory` runs after a draft save, a confirmed store write, a
   storage event and on leaving the page, and prunes deleted drafts first. Only a quota error on a draft key (body, list, pending or deleting mark) drops the
   stored history and retries once (`fallbackSet` → `isQuotaError`, `dropAllHistory`); versions
   waiting in memory stay, and preferences never drop anything. Deleting a draft deletes its

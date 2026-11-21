@@ -5019,9 +5019,13 @@ function saveDraftNow() {
   /* No change from what this window last saved (an edit undone, Clear on a
      blank draft): writing would put this window's possibly older copy over a
      newer one saved elsewhere. */
-  if (value === savedText && !memNewer[key]) { saveStateEl.textContent = ''; return; }
+  if (value === savedText && !refusedEdit(key)) { saveStateEl.textContent = ''; return; }
   var done = storeDraft(value, key);
-  if (!memNewer[key]) { savedText = value; bodyKnown[draftMeta.active] = true; } /* only once it is really stored here */
+  if (!memNewer[key]) { /* only once it is really stored here */
+    savedText = value;
+    bodyKnown[draftMeta.active] = true;
+    delete historyHeld[draftMeta.active]; /* the bulk change it followed is stored: retryHistory may let go */
+  }
   if (key === draftKey) keepVersionWhileEditing(value);
   retryHistory(); /* versions that waited for space a save may have freed */
   done.then(function (persisted) {
@@ -5571,11 +5575,12 @@ function switchDraft(id) {
   retryLocalWrites();
   if (!ta.readOnly) {
     draftTexts[draftMeta.active] = leaving;
-    if (leaving !== savedText || memNewer[draftKey]) {
+    if (leaving !== savedText || refusedEdit(draftKey)) {
       flushDraftLocally(leaving, draftKey);
       storeDraft(leaving, draftKey);
       if (!memNewer[draftKey]) bodyKnown[draftMeta.active] = true; /* saved by this window */
     }
+    if (!memNewer[draftKey]) delete historyHeld[draftMeta.active]; /* stored: its versions may go to disk only */
   }
   openDraft(id);
   saveDraftMeta();
@@ -5776,6 +5781,7 @@ var historyList = document.getElementById('historyList');
 var historyTitle = document.getElementById('historyTitle');
 var memHistory = {};     /* without readable localStorage: this window's versions */
 var historyUnsaved = {}; /* id -> versions that did not fit yet: kept here, written when space returns */
+var historyHeld = {};    /* id -> true: a bulk change's version, kept in memory until its draft is saved */
 var historyNewest = {};  /* id -> time of its newest version, so the autosave need not read the list */
 var historyShown = [];   /* the versions the dialog lists */
 var historyFor = null;   /* and the draft they belong to */
@@ -5805,7 +5811,7 @@ function writeHistory(id, list) {
   /* Written: memory lets go of it, unless a draft write still waits for
      space, which may yet evict what was just stored. */
   if (fits.length < list.length) historyUnsaved[id] = list;
-  else if (!draftWritesWaiting()) delete historyUnsaved[id];
+  else if (!draftWritesWaiting() && !historyHeld[id]) delete historyUnsaved[id];
 }
 function draftWritesWaiting() {
   return Object.keys(memNewer).some(function (k) { return k.indexOf(DRAFT_KEY) === 0; });
@@ -5822,10 +5828,16 @@ function retryHistory() {
 function keepVersion(why, text, hold) {
   if (!draftReady) return;
   var id = draftMeta.active, list = readHistory(id);
-  var next = historyAdd(list, typeof text === 'string' ? text : ta.value, why, Date.now());
+  var value = typeof text === 'string' ? text : ta.value;
+  var next = historyAdd(list, value, why, Date.now());
   if (next !== list) writeHistory(id, next);
-  /* Held even when the newest version already is this text. */
-  if (hold && next.length) historyUnsaved[id] = mergeHistory(historyUnsaved[id] || [], next);
+  /* Held even when the newest version already is this text, and until this
+     window's next save of the draft has succeeded (historyHeld): the bulk
+     change's own write may need the space. A blank text has nothing to keep. */
+  if (hold && next.length && value.trim()) {
+    historyUnsaved[id] = mergeHistory(historyUnsaved[id] || [], next);
+    historyHeld[id] = true;
+  }
 }
 function keepVersionWhileEditing(text) {
   var id = draftMeta.active;
@@ -5835,6 +5847,7 @@ function keepVersionWhileEditing(text) {
 function dropHistory(id) {
   delete memHistory[id];
   delete historyUnsaved[id];
+  delete historyHeld[id];
   delete historyNewest[id];
   if (canLocalRead) { try { localStorage.removeItem(HISTORY_PREFIX + id); } catch (e) {} }
 }
@@ -5891,11 +5904,18 @@ function knownDraftText(id) {
     if (ta.readOnly) return bodyKnown[id] && typeof local === 'string' ? local : null;
     /* An edit since the last save. */
     if (ta.value !== savedText) return ta.value;
+    /* Another window has saved newer text here since. */
+    var stored = storedValue(key);
+    if (typeof stored === 'string' && stored !== savedText) return stored;
     /* Memory holds what did not fit in localStorage: a newer text read from
        the store counts; an edit refused for space, perhaps undone since,
        does not, the editor does. */
-    if (memNewer[key] && local !== readCache[key]) local = ta.value;
-    if (bodyKnown[id]) return typeof local === 'string' ? local : ta.value === EXAMPLE ? '' : ta.value;
+    if (refusedEdit(key)) local = ta.value;
+    if (bodyKnown[id]) {
+      /* The example stands in for a draft never written. */
+      if (typeof local !== 'string' || (local === EXAMPLE && typeof stored !== 'string')) return ta.value === EXAMPLE ? '' : ta.value;
+      return local;
+    }
     return state !== 'loading' && typeof local === 'string' ? local : null;
   }
   if (typeof local === 'string' && (bodyKnown[id] || state !== 'loading')) return local;
@@ -5976,6 +5996,8 @@ function closeHistory() {
 /* A restore is one more edit: one undo brings the text back, and the text
    it replaces is kept as a version first. */
 var restoreSeq = 0; /* each restore, and each draft switch, gets a new number */
+var editSeq = 0;    /* each change of the editor's text, an undo included */
+onEditor('input', function () { editSeq++; });
 function restoreVersion(v) {
   if (!v || !draftReady || ta.readOnly) return;
   var id = draftMeta.active, key = draftKey;
@@ -5993,23 +6015,24 @@ function restoreVersion(v) {
   }
   /* The restore belongs to the text at the click: an edit, another restore
      or a switch before it applies drops it. */
-  var token = ++restoreSeq, before = ta.value;
+  var token = ++restoreSeq, edits = editSeq;
   function newerElsewhere(value) {
     return typeof value === 'string' && value !== ta.value && value !== savedText;
   }
-  /* What localStorage holds, and what memory holds in front of it (a newer
-     text read from the store that did not fit, which the editor never
-     showed). */
+  /* What localStorage holds, and a newer text read from the store that did
+     not fit there, which the editor never showed (not this window's own edit
+     refused for space). */
   function unseen() {
-    return newerElsewhere(storedValue(key)) || newerElsewhere(fallbackGet(key));
+    return newerElsewhere(storedValue(key)) ||
+      (!!memNewer[key] && !refusedEdit(key) && newerElsewhere(fallbackGet(key)));
   }
   function refuse() {
-    showToast(ta.value !== savedText || memNewer[key]
+    showToast(ta.value !== savedText || refusedEdit(key)
       ? 'Nothing was restored: another window or device saved a newer version of this draft, and this window holds text it could not save. Copy that text somewhere safe before you close or reload this window, which may write it over the newer version.'
       : 'Nothing was restored: another window or device saved a newer version of this draft since this one loaded it. Reload the page to see it, then restore.');
   }
   function apply() {
-    if (!draftReady || ta.readOnly || draftMeta.active !== id || token !== restoreSeq || ta.value !== before) {
+    if (!draftReady || ta.readOnly || draftMeta.active !== id || token !== restoreSeq || editSeq !== edits) {
       showToast('Nothing was restored: the draft changed while it was being checked.');
       return;
     }
@@ -6380,8 +6403,14 @@ function flushDraft() {
      older copy over a newer one saved in another window. */
   if (!draftReady) return;
   retryLocalWrites();
-  if (!ta.readOnly && (ta.value !== savedText || memNewer[draftKey])) flushDraftLocally(ta.value, draftKey);
+  if (!ta.readOnly && (ta.value !== savedText || refusedEdit(draftKey))) flushDraftLocally(ta.value, draftKey);
   retryHistory(); /* versions waiting for space, after the draft */
+}
+/* A write of this window that localStorage refused: an edit still to save.
+   Not a newer text read from the store that did not fit (readCache), which
+   the editor never showed and must not be written over. */
+function refusedEdit(key) {
+  return !!memNewer[key] && memStore[key] !== readCache[key];
 }
 window.addEventListener('beforeunload', flushDraft);
 window.addEventListener('pagehide', flushDraft);
