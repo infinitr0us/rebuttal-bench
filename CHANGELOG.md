@@ -26,13 +26,18 @@
   `\lvert x\rvert`, `\diag` → `\operatorname{diag}`, and others. Each replacement is tested to
   typeset inline, displayed and in a table cell. A macro defined after its first use gets
   advice instead, and an unknown one the `\newcommand` to copy from the paper.
-- A fix is offered only once the preview shows exactly the text in the editor, only for the uses
-  MathJax reported (not a `\label` key, `\verb` text or a comment), and only when the whole
-  comment, checked again with it, keeps every other formula and gains no hazard.
-- A Codex review of this feature found 20 problems (stale fixes, a fix that let Markdown pair
-  emphasis across two formulas, cards on the wrong formula, placeholders in hidden text, red
-  `\verb` text taken for a macro, a `\DeclarePairedDelimiter` from the table preview leaking into
-  the draft's preview, and others); all are fixed and covered by tests.
+- A fix is offered only once the preview shows exactly the text in the editor, and only for the
+  uses MathJax reported (not a `\label` key, `\verb` text or a comment). When clicked, MathJax
+  compiles the whole comment with it: the fix applies only if the macro is gone, nothing new
+  fails, and every other formula, references included, comes out exactly the same.
+- Two Codex reviews of this feature found 35 problems (stale fixes, a fix that let Markdown pair
+  emphasis across two formulas or changed another formula's value through a local `\def`, cards
+  on the wrong formula, placeholders in hidden text, red `\verb` text taken for a macro, a
+  `\DeclarePairedDelimiter` or `\mathtoolsset` from the table preview leaking into the draft's
+  preview, a split that cut a fenced block posting creates, and others). All but two contrived
+  ones are fixed and covered by tests: red text an author writes with
+  `\mmlToken{mtext}[mathcolor=red]{\R}` still looks like an undefined macro (its fix is refused),
+  and a card can point at math in an image's title when the same formula also appears in text.
 
 ### History and files
 - *History* (beside the draft tabs) lists earlier versions of the open draft, each with its
@@ -49,7 +54,7 @@
 ### Project
 - DOMPurify 3.4.17, which openreview-web now uses (reported by `npm run check-upstream`).
 - The drift check also watches the trim on posting.
-- `tests/preflight.test.js`, `tests/history.test.js`, and ten smoke checks.
+- `tests/preflight.test.js`, `tests/history.test.js`, and new smoke checks.
 
 ## 3.3.0 (2026-11-21)
 

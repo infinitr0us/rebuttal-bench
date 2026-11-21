@@ -5,12 +5,20 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadAnalyzer } = require('./lib/page');
 const { renderHtml, renderLikeOpenReview } = require('./lib/pipeline');
-const { texReports } = require('./lib/mathml');
+const { texReports, mathml } = require('./lib/mathml');
 
 const A = loadAnalyzer();
 const issues = (src) => [...A.analyze(src).issues];
 const titled = (src, title) => issues(src).filter((i) => i.title === title);
-const applyFix = (src, iss) => A.applyEditsToText(src, iss.fix.edits);
+// As the page's compileFormulas: ordered MathML from a fresh TeX state.
+const compile = (formulas) => mathml(formulas);
+// A TeX fix is checked when clicked, against the whole comment compiled.
+const fixEdits = (iss) => (iss.fix.check ? iss.fix.check(compile) : iss.fix.edits);
+const applyFix = (src, iss) => {
+  const edits = fixEdits(iss);
+  assert.ok(edits, 'the fix is refused when clicked');
+  return A.applyEditsToText(src, edits);
+};
 
 // ---- 16. the comment as posted ----
 
@@ -207,7 +215,7 @@ test('unknown macros get the \\newcommand advice', () => {
   assert.match(si.detail, /siunitx/);
 });
 
-test('a TeX error gets a card at its formula, unless the analyzer already explains it', () => {
+test('a TeX error gets a card at its formula, which points to a math card on the same formula', () => {
   const src = 'Then $x^2^3$ holds.';
   const [card] = problems(src);
   assert.equal(card.title, 'MathJax cannot typeset this formula');
@@ -215,18 +223,18 @@ test('a TeX error gets a card at its formula, unless the analyzer already explai
   assert.equal(src.slice(card.start, card.end), '$x^2^3$');
   const res = A.analyze(src);
   const other = { sev: 'warn', title: 'Something about this formula', start: 6, end: 9, math: true };
-  assert.deepEqual([...A.texProblemIssues(src, res.spans, texReports(src), [other])], []);
-  // A card that is not about Markdown damaging TeX explains nothing.
-  assert.equal([...A.texProblemIssues(src, res.spans, texReports(src), [{ ...other, math: false }])].length, 1);
-  // Nor does the posting-trim card on the same line.
-  const nbsp = ' # Bound $x^2^3$';
-  const nbspRes = A.analyze(nbsp);
-  assert.ok(nbspRes.issues.some((i) => i.title === TRIM));
-  assert.equal([...A.texProblemIssues(nbsp, nbspRes.spans, texReports(nbsp), nbspRes.issues)].length, 1);
-  // A placeholder inside the formula does not explain a TeX error.
-  const ph = 'Then $XX.X^2^3$ holds.';
-  const phRes = A.analyze(ph);
-  assert.equal([...A.texProblemIssues(ph, phRes.spans, texReports(ph), phRes.issues)].length, 1);
+  const [withOther] = [...A.texProblemIssues(src, res.spans, texReports(src), [other])];
+  assert.match(withOther.detail, /Another card on this formula may be the cause/);
+  // A card that is not about Markdown damaging TeX is not mentioned.
+  const [plainCard] = [...A.texProblemIssues(src, res.spans, texReports(src), [{ ...other, math: false }])];
+  assert.doesNotMatch(plainCard.detail, /Another card/);
+  // Nor is the posting-trim card on the same line, or a placeholder in the formula.
+  for (const text of [' # Bound $x^2^3$', 'Then $XX.X^2^3$ holds.']) {
+    const r = A.analyze(text);
+    const cards = [...A.texProblemIssues(text, r.spans, texReports(text), r.issues)];
+    assert.equal(cards.length, 1, text);
+    assert.doesNotMatch(cards[0].detail, /Another card/, text);
+  }
 });
 
 test('reports from an older version of the text follow the formulas to their new place, without a fix', () => {
@@ -263,12 +271,12 @@ test('H1: the analyzer reads the comment as posted, so Fix all leaves code that 
   assert.deepEqual(issues(src).map((i) => i.title), [TRIM]);
 });
 
-test('H2: a macro fix that would change another formula is not offered', () => {
+test('H2: a macro fix that would change another formula is refused when clicked', () => {
   for (const src of ['$\\R_i$ and $x_{j}$.', '$\\xspace$ then $$y$$.']) {
     const [card] = problems(src);
-    assert.ok(card, src);
-    assert.equal(card.fix, null, src);
-    assert.match(card.detail, /the fix would change something else/);
+    assert.ok(card && card.fix, src);
+    assert.equal(card.fix.check(compile), null, src);
+    assert.equal(card.fix.check(null), null, src + ' (already by its Markdown)');
   }
 });
 
@@ -372,4 +380,90 @@ test('L5: the invisible-character card never cuts a character in two', () => {
   const [iss] = titled(src, 'Invisible characters from a copy');
   const marked = src.slice(iss.start, iss.end);
   assert.ok(!/^[\udc00-\udfff]|[\ud800-\udbff]$/.test(marked), JSON.stringify(marked));
+});
+
+// ---- findings of the Codex recheck of 2026-11-21 (reviews/2026-11-21/codex-recheck-preflight) ----
+
+const macroCard = (src, name, opts) => {
+  const res = A.analyze(src, opts);
+  return [...A.texProblemIssues(src, res.spans, texReports(src), res.issues, { analyze: opts })]
+    .find((c) => c.title === '\\' + name + ' is not defined in MathJax');
+};
+
+test('R1: reports align with the formulas MathJax typeset, past math it never sees', () => {
+  const src = '$\\def\\chooseme#1{0}$\n\n![Curve $z$](/images/plot.png)\n\n' +
+    '$\\chooseme{\\bm{x}}\\def\\chooseme#1{#1}$ then $\\chooseme{\\bm{x}}\\def\\chooseme#1{#1}$\n\n' +
+    '![demo][r]\n\n[r]: https://example.org/p.png "$y$"';
+  const card = macroCard(src, 'bm');
+  const edits = fixEdits(card);
+  assert.ok(edits);
+  assert.deepEqual([...edits].map((e) => e.start), [src.lastIndexOf('\\bm')]);
+  assert.deepEqual(errorsOf(A.applyEditsToText(src, edits)), []);
+  const moved = '![plot](/images/$z$.png) then $x^2^3$ then $a+![x](plot.png)$';
+  assert.equal(problems(moved).find((c) => c.title === 'MathJax cannot typeset this formula').start, moved.indexOf('$x^2^3$'));
+  assert.equal(problems('![plot](/images/$z$.png) then $\\bm{x}+&alpha;$').length, 1);
+});
+
+test('R2, R3: a fix that changes a reference or another formula\'s value is refused', () => {
+  for (const src of [
+    '$\\def\\f{\\R}\\def\\see#1{\\ref{#1}}$ then $$\\label{eq:\\R}\\tag{1}\\f$$ see $\\see{eq:\\R}$.',
+    '$\\def\\f{\\R}$ then $$\\label{eq:\\R}\\tag{1}\\f$$ see $\\ref{eq:\\R}$.',
+    '$\\def\\q{1}\\def\\boldsymbol#1{\\def\\q{2}#1}$ then $\\bm{x}$ then $\\q$',
+    '$\\def\\boldsymbol#1{\\Bad}$ then $\\bm{x}$.',
+  ]) {
+    const card = problems(src).find((c) => / is not defined in MathJax$/.test(c.title));
+    assert.ok(card, src);
+    assert.ok(!card.fix || card.fix.check(compile) === null, src);
+  }
+  // A card whose word is a \label key points at the formula, not the key.
+  const label = '$$\\label{eq:\\R}\\tag{1}\\R$$ As in $\\ref{eq:\\R}$.';
+  assert.equal(macroCard(label, 'R').start, 0);
+});
+
+test('R4, R5: arguments stay arguments, and a displayed operator keeps its limits below', () => {
+  assert.equal(applyFix('$\\frac{1}\\R$', macroCard('$\\frac{1}\\R$', 'R')), '$\\frac{1}{\\mathbb{R}}$');
+  for (const src of ['$\\nicefrac{1}$', '$\\frac\\bm{x}{y}$', '$\\bm+$']) {
+    const card = problems(src)[0];
+    assert.ok(!card.fix || card.fix.check(compile) === null, src);
+  }
+  const verb = '$\\abs{\\verb!}!+x}$';
+  const fixed = applyFix(verb, macroCard(verb, 'abs'));
+  assert.equal(fixed, '$\\lvert \\verb!}!+x\\rvert$');
+  assert.deepEqual(errorsOf(fixed), []);
+  const op = '$$\\quad \\argmax_{x} f(x)$$';
+  assert.equal(applyFix(op, macroCard(op, 'argmax')), '$$\\quad \\mathop{\\mathrm{arg\\ max}}_{x} f(x)$$');
+});
+
+test('R6: a TeX error shows even when another math card covers its formula', () => {
+  const cards = problems('$\\{x\\}+y^2^3$');
+  assert.ok(cards.some((c) => c.title === 'MathJax cannot typeset this formula' && /Another card/.test(c.detail)));
+});
+
+test('R9: a definition in \\verb or in an unused macro body is not one', () => {
+  for (const src of ['$\\verb !\\def\\R{x}!$ then $\\R$', '$\\def\\unused{\\def\\R{1}}$ then $\\R$']) {
+    const card = macroCard(src, 'R');
+    assert.doesNotMatch(card.detail, /defined in this comment/, src);
+    assert.ok(fixEdits(card), src);
+  }
+});
+
+test('R10: the venue does not cost a safe fix', () => {
+  const src = '$\\bm{x}$ [code](https://github.com/alice/project)';
+  for (const venue of ['neurips', 'icml']) {
+    const opts = { venue };
+    assert.ok(macroCard(src, 'bm', opts).fix.check(compile), venue);
+  }
+});
+
+test('R12: an external image shows its syntax, placeholders included', () => {
+  assert.deepEqual(placeholders('![TODO](https://example.org/TBD.png)'), ['TODO', 'TBD']);
+});
+
+test('R14: a no-break space before a quote does not cost a fix', () => {
+  const src = '\u00a0> <div>$$\n> \\bm{x}\n> $$</div>';
+  assert.deepEqual(errorsOf(applyFix(src, macroCard(src, 'bm'))), []);
+});
+
+test('R15: check 16 sees whitespace that only MathJax keeps', () => {
+  assert.equal(titled('  - $\\verb!a\n    b!$', TRIM).length, 1);
 });

@@ -80,22 +80,24 @@ exact pasted range and draft. Use `setSourceText` so one undo restores the text.
   definitions, image syntax, dropped cells or HTML comments), each pattern limited to where it
   is unmistakable (no `??` in code, no `XXX` in math); check 18 invisible characters and
   ligatures, one card each, with a manual fix for all of them.
-- `texProblemIssues(src, spans, reports, issues, {stale})` turns what MathJax reported after the
-  last typeset (`texProblems()` in the DOM section: `{tex, undef, errors}` per formula, in
-  document order) into cards. Formulas cut apart by inline Markdown are skipped (MathJax never
-  sees them whole). Reports of exactly the editor's text pair with the formulas by position when
-  the counts agree; otherwise the k-th report with a TeX goes to the k-th formula with that TeX.
-  Only reports of exactly this text (`stale` false: the page tracks `texReportsFor`) get fixes,
-  and an undefined macro's fix from `TEX_SUBSTITUTES` is offered only when (1) every word it
-  rewrites is a use MathJax reported (not a `\label` key, `\verb` text, a comment or a macro's
-  expansion), (2) no argument or token boundary breaks (`arg`, braces around several tokens,
-  a space after `\rvert`), and (3) the whole comment, analyzed again, keeps every other formula
-  and gains no hazard (`holds`: a `}` before `_` can make Markdown pair emphasis across
-  formulas). Replacements are Markdown-neutral and typeset in tests inline, displayed and in a
-  table cell. A macro the comment defines after using it gets advice, never a rewrite. A TeX
-  error card is left out only when a `math` card overlaps its formula. The page redraws the
-  cards when a typeset's reports change at all or catch up with the editor; `fixAllText` never
-  sees them.
+- `texProblemIssues(src, spans, reports, issues, {stale, analyze})` turns what MathJax reported
+  after the last typeset (`texProblems()` in the DOM section: `{tex, undef, errors}` per formula,
+  in document order) into cards. Formulas cut apart by inline Markdown are skipped (MathJax never
+  sees them whole). Reports and formulas are aligned in order by TeX (`sameTeX`: up to whitespace
+  and named character references), passing over formulas MathJax never saw (math in an image's
+  attributes) and reports the analyzer has no formula for. Every TeX error gets a card; one that
+  shares its formula with a `math` card says so. Views are built on the posted text.
+- A macro card's fix (from `TEX_SUBSTITUTES`, Markdown-neutral) exists only for reports of
+  exactly the editor's text (`stale` false: the page tracks `texReportsFor`), a certain pairing,
+  and when every word it rewrites is a use MathJax reported (not a `\label` key, `\verb` text, a
+  comment or a macro's expansion). It is **decided when clicked**: `fix.check(compile)` tries the
+  plain replacement, then one in braces, and returns the first whose comment keeps its Markdown
+  structure and hazards (`holds`, analyzed with the page's `analyze` options) and, compiled by
+  `compileFormulas` (the page's isolated `compactMathML`: ordered MathML from a fresh TeX state),
+  reports neither the macro nor a new error or undefined macro anywhere, with every other
+  formula's MathML (`\ref` included) unchanged. `applyIssueFix` applies what it returns, or
+  refuses. A macro the comment defines at the top level of a formula from its first use on gets
+  advice, never a rewrite. `fixAllText` never sees these cards.
 - `collectMarkedRanges` also records link reference definitions (`definitions`), which Marked
   consumes without a token, through a block extension that only observes.
 
