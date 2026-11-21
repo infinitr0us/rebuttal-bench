@@ -68,15 +68,19 @@ function renderHtml(src) {
   return DOMPurify.sanitize(marked(src));
 }
 
+function mathDocument(html) {
+  return mathjax.document('<!DOCTYPE html><html><body><div>' + html + '</div></body></html>', {
+    InputJax: new TeX({ inlineMath: [['$', '$'], ['\\(', '\\)']], packages: PACKAGES }),
+  });
+}
+
 /**
  * Render `src` the way openreview.net does and report what MathJax typesets.
  * @returns {{html: string, items: {tex: string, display: boolean, err: string|null}[]}}
  */
 function renderLikeOpenReview(src) {
   const html = renderHtml(src);
-  const doc = mathjax.document('<!DOCTYPE html><html><body><div>' + html + '</div></body></html>', {
-    InputJax: new TeX({ inlineMath: [['$', '$'], ['\\(', '\\)']], packages: PACKAGES }),
-  });
+  const doc = mathDocument(html);
   doc.findMath();
   const items = [];
   for (const item of doc.math) {
@@ -105,4 +109,4 @@ function typeset(src) {
   return renderLikeOpenReview(src).items.map((i) => (i.display ? 'D:' : 'I:') + i.tex + (i.err ? ' [ERR ' + i.err + ']' : ''));
 }
 
-module.exports = { renderHtml, renderLikeOpenReview, typeset };
+module.exports = { renderHtml, renderLikeOpenReview, typeset, mathDocument };
