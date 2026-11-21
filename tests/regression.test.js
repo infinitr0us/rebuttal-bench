@@ -14,7 +14,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadAnalyzer } = require('./lib/page');
-const { typeset } = require('./lib/pipeline');
+const { renderLikeOpenReview, typeset } = require('./lib/pipeline');
 
 const A = loadAnalyzer();
 
@@ -50,7 +50,6 @@ const CASES = {
   'intraword emphasis': { src: 'Our pre*training* stage.', issues: [], fixed: null },
   'character reference closing a formula': { src: 'So $5&#36; here.', issues: [], fixed: null },
   'dollar in a link destination': { src: 'See [the log](https://example.com/run?id=$5) and $y$ here.', issues: [], fixed: null },
-  'TeX inside HTML blocks, shown as text': { src: '<div>$x\\,y$</div>\n\n<!-- TODO $\\{x\\}$ -->', issues: [], fixed: null },
   'references to a tagged equation': { src: '$$x=1\\tag{1}\\label{eq:bound}$$\n\nSee \\eqref{eq:bound} and $\\ref{eq:bound}$.', issues: [], fixed: null },
   'numbers with a unit inside math': {
     src: 'Latency is $50 ms$, memory $16 GB$, over $100 epochs$ and $3 seeds$, a $2 times$ speedup, and $2 xy$.',
@@ -60,8 +59,35 @@ const CASES = {
   'number with a unit and a space before the closing $': { src: 'It needs $16 GB $ of memory.', issues: [], fixed: null },
   'norm with a subscript in a table cell': { src: '| a | b |\n| --- | --- |\n| $\\|\\theta\\|_{2}$ | 0.1 |', issues: [], fixed: null },
   'code span with a shielded pipe in a table cell': { src: '| A |\n| - |\n| `$\\{x\\}\\|y$` |', issues: [], fixed: null },
+  'HTML and prose TeX in code': {
+    src: '`<br> [^1] Table~1`\n\n```tex\n<!-- TODO --> #### ![fig](x) \\cite{paper} \\textbf{x} <br>\n```',
+    issues: [], fixed: null,
+  },
+  'literal syntax inside real math': {
+    src: '$\\textbf{x} + a<b$ and $x<sup>2</sup>$ and $\\text{et~al.}$',
+    issues: [], fixed: null,
+  },
+  'image hosted by OpenReview': { src: '![Fig. 1](/images/fig.png)', issues: [], fixed: null },
+  'links, URLs and home paths with tildes': {
+    src: '[result](https://example.org/~user "[^1] \\textbf{x}") and <https://example.org/~user> or https://example.org/a~b and `~/data`.',
+    issues: [], fixed: null,
+  },
+  'URL in a label and a scheme left as text': {
+    src: '[https://site.org/query?key=a~b](page) and ssh://site.org/data~old', issues: [], fixed: null,
+  },
+  'ordinary strikethrough and escaped tilde': { src: '~~old~~ and a\\~b and ~/path and ~removed~.', issues: [], fixed: null },
+  'footnote-like text in a reference destination and title': {
+    src: '[log]: /logs/[^part]\n  "Only [^internal] Table~1"\n\n[log]', issues: [], fixed: null,
+  },
+  'multiline reference definition in a quote': { src: '> [log]:\n>   /logs/[^part]\n\n[log]', issues: [], fixed: null },
+  'explicit links, escaped footnote, inline code': { src: '[^label](note) and \\[^label] and `[^1]: note`.', issues: [], fixed: null },
+  'visible headings and heading-like prose': { src: '### Results\n\n######no space', issues: [], fixed: null },
 
   // ---- broken input: Fix all must produce the intended TeX ----
+  'TeX inside literal HTML blocks is left alone': {
+    src: '<div>$x\\,y$</div>\n\n<!-- TODO $\\{x\\}$ -->',
+    issues: ['Raw HTML is shown as text', 'HTML comment is shown to the reviewers'], fixed: null,
+  },
   'currency in one paragraph, math in the next': { src: 'It costs $5 per run.\n\nWe define $x$ as the input.', issues: ['Unpaired $'], fixed: ['I:x'] },
   'currency before display math': { src: 'costs $5 and $$x$$ done', issues: ['Currency dollars pair into a formula', 'Unpaired $'], fixed: ['D:x'] },
   'currency range': { src: 'Budget between $5-$10 per run.', issues: ['Currency dollars pair into a formula'], fixed: [] },
@@ -231,3 +257,122 @@ for (const [name, c] of Object.entries(CASES)) {
     if (c.text !== undefined) assert.equal(out, c.text, 'source after Fix all');
   });
 }
+
+// Click the same edits as the card, then check the result against the
+// independent renderer. Every one of these drafts must survive Fix all intact.
+const HTML = 'Raw HTML is shown as text';
+const COMMENT = 'HTML comment is shown to the reviewers';
+const TIE = 'LaTeX tie is shown as a tilde';
+const manualCases = [
+  ...[['b', '**', 'strong'], ['strong', '**', 'strong'], ['i', '*', 'em'], ['em', '*', 'em'], ['code', '`', 'code']].map(([tag, delimiter, element]) => [
+    HTML, '<' + tag + '>ours</' + tag + '>', delimiter + 'ours' + delimiter,
+    new RegExp('<' + element + '>ours</' + element + '>'),
+  ]),
+  [HTML, 'H<sub>2</sub>O', 'H$_{2}$O', ['I:_{2}']],
+  [HTML, 'x<sup>-2</sup>', 'x$^{-2}$', ['I:^{-2}']],
+  [COMMENT, 'Done. <!-- TODO: ask co-author -->', 'Done.', /<p>Done\.<\/p>/],
+  [COMMENT, 'a <!--private--> b', 'a b', /<p>a b<\/p>/],
+  [COMMENT, '<!--private--> x', 'x', /<p>x<\/p>/],
+  [COMMENT, 'one<!--private--> two', 'one two', /<p>one two<\/p>/],
+  ['\\textbf is shown outside math', '\\textbf{our {main} result}', '**our {main} result**', /<strong>our \{main\} result<\/strong>/],
+  ['\\textbf is shown outside math', '\\textbf{our\nresult}', '**our\nresult**', /<strong>our\nresult<\/strong>/],
+  ['\\textit is shown outside math', '\\textit{important}', '*important*', /<em>important<\/em>/],
+  ['\\emph is shown outside math', '\\emph{this}', '*this*', /<em>this<\/em>/],
+  ['\\texttt is shown outside math', '\\texttt{fmt}', '`fmt`', /<code>fmt<\/code>/],
+  ['\\url is shown outside math', '\\url{https://example.org/~user}', 'https://example.org/~user', /<a href="https:\/\/example.org\/~user"/],
+  ['\\href is shown outside math', '\\href{https://example.org/~user}{our {code}}', '[our {code}](https://example.org/~user)',
+    /<a href="https:\/\/example.org\/~user"[^>]*>our \{code\}<\/a>/],
+  ['\\href is shown outside math', '\\href{foo~bar}{log}', '[log](foo~bar)', /<a href="foo~bar"[^>]*>log<\/a>/],
+  ['LaTeX quotation marks are shown as text', "It is ``better''.", 'It is "better".', /<p>It is "better"\.<\/p>/],
+  [TIE, 'Table~1', 'Table 1', /<p>Table 1<\/p>/],
+  [TIE, 'et~al.', 'et al.', /<p>et al\.<\/p>/],
+];
+
+for (const [title, src, fixed, output] of manualCases) {
+  test('manual fix for ' + src, () => {
+    const issues = [...A.analyze(src).issues];
+    assert.deepEqual(issues.map((i) => i.title), [title]);
+    const [issue] = issues;
+    assert.equal(issue.sev, title === COMMENT ? 'err' : 'warn');
+    assert.equal(issue.fix.manual, true);
+    assert.equal(A.fixAllText(src).applied, 0);
+    assert.ok(A.editsStillValid(src, issue.fix.edits));
+    assert.equal(A.applyEditsToText(src, issue.fix.edits), fixed);
+    if (Array.isArray(output)) assert.deepEqual(typeset(fixed), output);
+    else assert.match(renderLikeOpenReview(fixed).html, output);
+    assert.equal(A.analyze(fixed).issues.length, 0);
+  });
+}
+
+const warnings = [
+  [HTML, '| A | B |\n| - | - |\n| x<br>y | 2 |', /x&lt;br&gt;y/, /split the row/i],
+  [HTML, 'x<br />y', /x&lt;br \/&gt;y/, /two spaces/],
+  [HTML, '<details>\n<summary>More</summary>\n</details>', /&lt;summary&gt;More/, null, 3],
+  [HTML, 'A <b title="a>b">result</b>', /&lt;b title="a&gt;b"&gt;/],
+  [HTML, '<code>a`b</code>', /&lt;code&gt;a`b/],
+  [HTML, '<code>$x$</code>', /&lt;code&gt;\$x\$/],
+  [HTML, 'x<sup>n + 1</sup>', /&lt;sup&gt;n \+ 1/],
+  ['External image is shown as its HTML source', '![fig](https://i.imgur.com/abc.png)', /&lt;img src="https:\/\/i\.imgur\.com\/abc.png"/],
+  ['External image is shown as its HTML source', '![fig][asset]\n\n[asset]: figs/a.png', /&lt;img src="figs\/a.png"/],
+  ['Footnotes are not supported', 'claim[^1]\n\n[^1]: note', /<a href="note"[^>]*>\^1<\/a>/, null, 2],
+  ['Footnotes are not supported', '[^1]: note\n\n[^1]', /<a href="note"[^>]*>\^1<\/a>/, null, 2],
+  ['Footnotes are not supported', 'claim[^missing]', /claim\[\^missing\]/],
+  ...[4, 5, 6].map((n) => ['This heading looks like body text', '> ' + '#'.repeat(n) + ' Small', new RegExp('<h' + n + '>Small</h' + n + '>')]),
+  ...['cite', 'citep', 'citet', 'citeauthor', 'citeyear'].map((c) => ['\\' + c + ' is shown outside math', '\\' + c + '{smith2023}', /\\cite/, /bibliography/]),
+  ['\\underline is shown outside math', '\\underline{ours}', /\\underline\{ours\}/, /underline syntax/],
+  ['\\textbf is shown outside math', '\\textbf{our {result}', /\\textbf/, /balanced/],
+  ['\\href is shown outside math', '\\href{a}{our {site}', /\\href/, /balanced/],
+  ['\\href is shown outside math', '[\\href{a}{site}](other)', /<a href="other"[^>]*>\\href/],
+];
+
+for (const [title, src, rendered, detail, count = 1] of warnings) {
+  test('diagnostic for ' + src, () => {
+    assert.match(renderLikeOpenReview(src).html, rendered);
+    const issues = [...A.analyze(src).issues];
+    assert.deepEqual(issues.map((i) => i.title), Array(count).fill(title));
+    for (const issue of issues) {
+      assert.equal(issue.sev, title === 'This heading looks like body text' ? 'note' : 'warn');
+      assert.equal(issue.fix, null);
+      if (detail) assert.match(issue.detail, detail);
+    }
+  });
+}
+
+test('a manual fix edits the visible tag when a link definition contains the same text', () => {
+  const def = '[asset]: /img "<b>ours</b>"\n\n';
+  const src = def + '<b>ours</b>';
+  const [issue] = A.analyze(src).issues;
+  assert.equal(issue.start, def.length);
+  assert.equal(A.applyEditsToText(src, issue.fix.edits), def + '**ours**');
+  assert.match(renderLikeOpenReview(def + '**ours**').html, /<strong>ours<\/strong>/);
+});
+
+test('single LaTeX ties that actually produce GFM strikethrough', () => {
+  const src = 'Table~1 and Fig.~2';
+  assert.match(renderLikeOpenReview(src).html, /Table<del>1 and Fig\.<\/del>2/);
+  const issues = [...A.analyze(src).issues];
+  assert.deepEqual(issues.map((i) => [i.sev, i.title]), Array(2).fill(['err', 'LaTeX tie became strikethrough']));
+  assert.equal(A.fixAllText(src).text, src);
+  const first = A.applyEditsToText(src, issues[0].fix.edits);
+  assert.equal(first, 'Table 1 and Fig.~2');
+  const [left] = A.analyze(first).issues;
+  assert.equal(left.title, TIE);
+  const fixed = A.applyEditsToText(first, left.fix.edits);
+  assert.equal(fixed, 'Table 1 and Fig. 2');
+  assert.match(renderLikeOpenReview(fixed).html, /<p>Table 1 and Fig\. 2<\/p>/);
+});
+
+test('a tie before a MathJax reference belongs to the prose', () => {
+  const src = 'Fig.~\\ref{fig:main}';
+  const issues = [...A.analyze(src).issues];
+  assert.deepEqual(issues.map((i) => i.title), [TIE, '\\ref has no target: OpenReview shows ???']);
+  assert.equal(A.applyEditsToText(src, issues[0].fix.edits), 'Fig. \\ref{fig:main}');
+});
+
+test('Fix all applies mechanical fixes in a draft that also has manual ones', () => {
+  const src = 'Set $a\\,b$. <!-- private --> <b>ours</b>';
+  const { text, applied } = A.fixAllText(src);
+  assert.equal(applied, 1);
+  assert.equal(text, 'Set $a\\\\,b$. <!-- private --> <b>ours</b>');
+  assert.deepEqual([...A.analyze(text).issues].map((i) => i.title), [COMMENT, HTML]);
+});

@@ -872,12 +872,26 @@ function collectMarkedRanges(src) {
   var lexer = api && typeof api.lexer === 'function' ? api.lexer : null;
   if (!lexer) return null;
 
-  var root;
-  try { root = lexer.call(api, src); } catch (e) { return null; }
+  /* Marked consumes link definitions without emitting a token. Remember where
+     it consumed them: otherwise a later paragraph can be located inside an
+     identical-looking destination or title. The observer returns no token,
+     so Marked itself still decides how to parse and resolve every reference. */
+  function observeDef(source, tokens) {
+    if (!/^ {0,3}\[/.test(source)) return;
+    var last = tokens[tokens.length - 1];
+    if (last && (last.type === 'paragraph' || last.type === 'text')) return;
+    var def = this.lexer.tokenizer.def(source);
+    if (!def) return;
+    var before = tokens.defsBefore || (tokens.defsBefore = {});
+    (before[tokens.length] || (before[tokens.length] = [])).push(def);
+  }
+  var root, options;
+  if (src.indexOf(']:') >= 0) options = { gfm: true, extensions: { block: [observeDef] } };
+  try { root = lexer.call(api, src, options); } catch (e) { return null; }
   /* Characters whose escapes Marked removed before lexing the current tokens:
      GFM unescapes "\|" in a table cell, and a link label loses the backslash
      of "\[" and "\]". Such a token's raw text shows the bare character. */
-  var ranges = [], leaves = [], dropped = [], unlocated = [], hidden = [], unescaped = '';
+  var ranges = [], leaves = [], dropped = [], unlocated = [], hidden = [], definitions = [], unescaped = '';
 
   function locate(raw, cursor, regionStart, regionEnd) {
     if (!raw) return null;
@@ -999,6 +1013,14 @@ function collectMarkedRanges(src) {
 
   function visit(tokens, regionStart, regionEnd, depth, inline) {
     if (!Array.isArray(tokens)) return;
+    if (tokens.defsBefore) {
+      var ordered = [];
+      for (var n = 0; n <= tokens.length; n++) {
+        if (tokens.defsBefore[n]) tokens.defsBefore[n].forEach(function (def) { ordered.push(def); });
+        if (n < tokens.length) ordered.push(tokens[n]);
+      }
+      tokens = ordered;
+    }
     var cursor = regionStart, lastHtml = null;
     tokens.forEach(function (tok) {
       if (!tok || typeof tok !== 'object') return;
@@ -1006,8 +1028,9 @@ function collectMarkedRanges(src) {
       var pos = locate(typeof tok.raw === 'string' ? tok.raw : '', cursor, regionStart, regionEnd);
       var childStart = regionStart, childEnd = regionEnd;
       if (pos) {
-        ranges.push({ type: type, start: pos.start, end: pos.end, token: tok, depth: depth, inline: inline });
         cursor = Math.max(cursor, pos.end);
+        if (type === 'def') { definitions.push(pos); return; }
+        ranges.push({ type: type, start: pos.start, end: pos.end, token: tok, depth: depth, inline: inline });
         childStart = pos.start;
         childEnd = pos.end;
         if (type === 'link') hideLinkSyntax(pos);
@@ -1040,7 +1063,7 @@ function collectMarkedRanges(src) {
   }
 
   visit(root, 0, src.length, 0, false);
-  return { ranges: ranges, leaves: leaves, dropped: dropped, unlocated: unlocated, hidden: hidden };
+  return { ranges: ranges, leaves: leaves, dropped: dropped, unlocated: unlocated, hidden: hidden, definitions: definitions };
 }
 
 /* Fallback masking for when the CDN parser is unavailable. The live page uses
@@ -1515,6 +1538,11 @@ function analyze(src) {
     var changes = edits.some(function (e) { return e.text !== e.was; });
     return changes ? { label: label, edits: edits } : null;
   }
+  function manual(label, start, end, replacement) {
+    var f = fix(label, [edit(start, end, replacement)]);
+    if (f) f.manual = true;
+    return f;
+  }
 
   function push(sev, title, detail, start, end, autofix) {
     start = Math.max(0, Math.min(src.length, start));
@@ -1936,6 +1964,227 @@ function analyze(src) {
     });
   });
 
+  /* These checks describe OpenReview's Markdown output, so they require the
+     parser. Keep their exclusions separate from the text MathJax searches. */
+  function checkLiteralText() {
+    var protectedText = makeMask(src.length, codeRanges.concat(model.dropped, model.definitions,
+      spans.filter(function (sp) { return !sp.recovered; })));
+    var regionEnd = new Uint32Array(src.length);
+    regions.forEach(function (rg) {
+      for (var i = rg.start; i < rg.end; i++) regionEnd[i] = rg.end;
+    });
+    var tags = [], comments = [], images = [], headings = [], urls = [], links = [];
+    var shortcuts = Object.create(null), struck = Object.create(null);
+    function protect(a, b) {
+      for (var i = a; i < b; i++) protectedText[i] = 1;
+    }
+    /* Even a manual fix should produce the promised Markdown element. In
+       particular, whitespace or neighboring delimiters can prevent emphasis. */
+    function inlineMarkup(type, value, start, end) {
+      if (!value) return null;
+      var fence = type === 'strong' ? '**' : '*';
+      if (type === 'codespan') {
+        fence = '`';
+        (value.match(/`+/g) || []).forEach(function (run) {
+          if (run.length >= fence.length) fence = run + '`';
+        });
+        if (/^`|`$/.test(value) || (/^ .* $/.test(value) && /\S/.test(value))) value = ' ' + value + ' ';
+      }
+      var replacement = fence + value + fence;
+      var tokens = window.marked.Lexer.lexInline(src.charAt(start - 1) + replacement + src.charAt(end));
+      return tokens.some(function (t) { return t.type === type && t.raw === replacement; }) ? replacement : null;
+    }
+    function hrefMarkup(at, destination, label) {
+      if (links.some(function (r) { return r.start <= at && at < r.end; })) return null;
+      var prefix = '[' + label.replace(/[[\]]/g, '\\$&') + '](';
+      var candidates = [prefix + destination + ')', prefix + '<' + destination + '>)'];
+      for (var i = 0; i < candidates.length; i++) {
+        var token = window.marked.Lexer.lexInline(candidates[i])[0];
+        if (token && token.type === 'link' && token.raw === candidates[i] && token.href === destination) return candidates[i];
+      }
+      return null;
+    }
+
+    markedRanges.forEach(function (r) {
+      if (protectedText[r.start]) return;
+      if (r.type === 'link') {
+        links.push(r);
+        if (src[r.start] !== '[') urls.push(r); /* A bare URL or an angle autolink. */
+        else if (/^\[\^[^\s[\]]+\]$/.test(r.token.raw)) shortcuts[r.start] = true;
+      } else if (r.type === 'del' && r.token.raw.slice(0, 2) !== '~~') {
+        /* Keep an intentional standalone ~word~, including before punctuation. */
+        var standalone = (!r.start || /[\s(]/.test(src[r.start - 1])) &&
+          (r.end === src.length || /[\s.,!?;:)]/.test(src[r.end]));
+        struck[r.start] = struck[r.end - 1] = standalone ? 'standalone' : 'tie';
+      } else if (r.type === 'html' && !codeMask[r.start]) {
+        /* An inline token is one tag. A block such as <details> can contain
+           several tags and comments; quoted attributes can contain '>'. */
+        var tagRe = /<!--(?:-?>|[\s\S]*?(?:-->|$))|<\/?([A-Za-z][\w:-]*)(?=[\s/>])(?:[^<>"']|"[^"]*"|'[^']*')*>|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<![A-Za-z]+\s[^>]*>/g;
+        var raw = src.slice(r.start, r.end), m;
+        while ((m = tagRe.exec(raw))) {
+          var start = r.start + m.index, end = r.start + tagRe.lastIndex;
+          if (!protectedText[start]) tags.push({ start: start, end: end, raw: m[0],
+            name: (m[1] || '').toLowerCase(), inline: r.inline });
+          protect(start, end);
+        }
+      } else if (r.type === 'image' && !codeMask[r.start]) {
+        if (r.token.href.indexOf('/images/') !== 0) images.push(r);
+        protect(r.start, r.end);
+      } else if (r.type === 'heading' && r.token.depth >= 4) {
+        headings.push(r);
+      }
+    });
+    /* A URL used as the label of another link does not get its own link token.
+       Marked also leaves some schemes as plain text; their tildes are data. */
+    var urlRe = /\b(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>{}\[\]"'`]+/ig, url;
+    while ((url = urlRe.exec(src))) urls.push({ start: url.index, end: urlRe.lastIndex });
+    var urlMask = makeMask(src.length, urls);
+
+    /* 9. Group matching adjacent tags in one region. A Markdown replacement
+          inside a literal HTML block would itself be printed as source. */
+    function convertElement(open, close) {
+      if (!/^<[a-z]+>$/i.test(open.raw)) return null;
+      for (var i = open.end; i < close.start; i++) if (protectedText[i]) return null;
+      var value = src.slice(open.end, close.start);
+      if (/^(sub|sup)$/.test(open.name) && /^[A-Za-z0-9+-]{1,8}$/.test(value)) {
+        return '$' + (open.name === 'sub' ? '_' : '^') + '{' + value + '}$';
+      }
+      if (!open.inline || !close.inline) return null;
+      if (/^(b|strong|i|em)$/.test(open.name)) {
+        return inlineMarkup(/^(b|strong)$/.test(open.name) ? 'strong' : 'em', value, open.start, close.end);
+      }
+      if (open.name === 'code' && value.indexOf('`') < 0) return inlineMarkup('codespan', value, open.start, close.end);
+      return null;
+    }
+    for (var ti = 0; ti < tags.length; ti++) {
+      var t = tags[ti], next = tags[ti + 1];
+      if (t.raw.slice(0, 4) === '<!--') { comments.push(t); continue; }
+      var paired = t.name && t.raw.charAt(1) !== '/' && !/\/>$/.test(t.raw) && next &&
+        next.raw.charAt(1) === '/' && next.name === t.name && next.end <= regionEnd[t.start];
+      var end = paired ? next.end : t.end, replacement = paired ? convertElement(t, next) : null;
+      if (paired) ti++;
+      var detail = 'OpenReview displays the HTML tags as text. Use Markdown for formatting.';
+      if (t.name === 'br') detail = inTable(t.start)
+        ? 'Markdown has no line break inside a table cell. Split the row or separate the entries with <code>;</code>.'
+        : 'OpenReview prints this tag in the text. To insert a Markdown line break, end a line with two spaces and start the next line.';
+      push('warn', 'Raw HTML is shown as text', detail, t.start, end,
+        replacement === null ? null : manual('convert ' + t.name + ' to ' + (/^(sub|sup)$/.test(t.name) ? 'math' : 'Markdown'), t.start, end, replacement));
+    }
+    /* 10. Preserve a space between surrounding words and keep line breaks. */
+    comments.forEach(function (t) {
+      var a = t.start, b = t.end;
+      if (src[a - 1] === ' ' && (b === src.length || /[ \n]/.test(src[b]))) a--;
+      else if (src[b] === ' ' && (!a || src[a - 1] === '\n')) b++;
+      push('err', 'HTML comment is shown to the reviewers',
+        'Reviewers can read everything between <code>&lt;!--</code> and <code>--&gt;</code>, including private drafting notes.',
+        t.start, t.end, manual('delete comment', a, b, ''));
+    });
+    /* 11. Only OpenReview's own /images/ paths produce an image element. */
+    images.forEach(function (r) {
+      push('warn', 'External image is shown as its HTML source',
+        'Reviewers see the generated <code>&lt;img&gt;</code> tag. Only an OpenReview <code>/images/</code> path displays an image.',
+        r.start, r.end);
+    });
+
+    /* 12. A resolved footnote reference is a shortcut link, whose brackets
+           are normally hidden. Its definition can disappear from the page. */
+    if (src.indexOf('[^') >= 0) {
+      var footTitle = 'Footnotes are not supported';
+      var footDetail = 'Write the note inline. OpenReview can interpret a footnote label and definition as an ordinary link.';
+      model.definitions.forEach(function (def) {
+        var label = /^ *(\[\^[^\s[\]]+\]:)/.exec(src.slice(def.start, def.end));
+        if (label) push('warn', footTitle, footDetail, def.start + label[0].length - label[1].length, def.start + label[0].length);
+      });
+      var refRe = /\[\^[^\s[\]]+\]/g, fm;
+      while ((fm = refRe.exec(src))) {
+        var fs = fm.index;
+        if (protectedText[fs] || urlMask[fs] || countBackslashesBefore(src, fs) % 2 ||
+            (codeMask[fs] && !shortcuts[fs])) continue;
+        var colon = src[refRe.lastIndex] === ':' && atLineStart(fs);
+        push('warn', footTitle, footDetail, fs, refRe.lastIndex + (colon ? 1 : 0));
+      }
+    }
+
+    /* 13. The mirrored h4–h6 rules set 12px and font-weight 400. */
+    headings.forEach(function (r) {
+      var marker = /^ *(#{4,6})/.exec(r.token.raw);
+      if (marker) push('note', 'This heading looks like body text',
+        'OpenReview uses the body text’s size and regular weight for level 4–6 headings. Use <code>###</code> or bold text for more emphasis.',
+        r.start + marker[0].length - marker[1].length, r.start + marker[0].length);
+    });
+
+    /* 14. Pasted LaTeX prose. Work within each remaining text run so that
+           braces and quote marks cannot pair through code, math or a link
+           destination. Autolinked URLs may still be arguments of \href/\url. */
+    function checkRun(start, end, literalBlock) {
+      var raw = src.slice(start, end), m;
+      var commands = /\\(textbf|textit|emph|texttt|url|href|underline|cite(?:author|year|p|t)?)(?![A-Za-z])/g;
+      var closeBrace;
+      function argument(after) {
+        while (after < raw.length && /\s/.test(raw[after])) after++;
+        if (raw[after] !== '{') return null;
+        if (!closeBrace) {
+          closeBrace = Object.create(null);
+          var stack = [];
+          for (var i = 0; i < raw.length; i++) {
+            if (raw[i] === '\\') i++;
+            else if (raw[i] === '{') stack.push(i);
+            else if (raw[i] === '}' && stack.length) closeBrace[stack.pop()] = i;
+          }
+        }
+        var close = closeBrace[after];
+        return close === undefined ? null : { value: raw.slice(after + 1, close), start: after + 1, end: close + 1 };
+      }
+      while ((m = commands.exec(raw))) {
+        var at = start + m.index, cmd = m[1];
+        if (urlMask[at] || countBackslashesBefore(src, at) % 2) continue;
+        var arg = argument(commands.lastIndex), second = cmd === 'href' && arg ? argument(arg.end) : null;
+        var lastArg = second || arg, last = start + (lastArg ? lastArg.end : commands.lastIndex), out = null;
+        if (arg && (cmd === 'href' || cmd === 'url')) {
+          for (var u = arg.start; u < arg.end - 1; u++) urlMask[start + u] = 1;
+        }
+        var detail = 'OpenReview displays this LaTeX command in the prose. Markdown can express the formatting.';
+        if (/^cite/.test(cmd)) detail = 'OpenReview has no bibliography for a comment. Write the reference out so reviewers can identify the work.';
+        else if (cmd === 'underline') detail = 'Markdown has no underline syntax. Use bold or italics if the text needs emphasis.';
+        else if (!arg || (cmd === 'href' && !second)) detail = 'This command needs balanced braced arguments in the same text run. Check the braces before converting it to Markdown.';
+        else if (!literalBlock) {
+          if (cmd === 'url') out = arg.value;
+          else if (cmd === 'href') out = hrefMarkup(at, arg.value, second.value);
+          else out = inlineMarkup(cmd === 'textbf' ? 'strong' : cmd === 'texttt' ? 'codespan' : 'em', arg.value, at, last);
+        }
+        push('warn', '\\' + cmd + ' is shown outside math', detail, at, last,
+          out === null ? null : manual(cmd === 'url' ? 'keep the URL' : 'convert to Markdown', at, last, out));
+      }
+      var quotes = /``([^`\n]+?)''/g;
+      while ((m = quotes.exec(raw))) {
+        var q = start + m.index;
+        if (urlMask[q] || src[q - 1] === '`' || countBackslashesBefore(src, q) % 2) continue;
+        push('warn', 'LaTeX quotation marks are shown as text', 'Use double quotation marks around the quoted text.',
+          q, start + quotes.lastIndex, manual('use double quotes', q, start + quotes.lastIndex, '"' + m[1] + '"'));
+      }
+      for (var p = raw.indexOf('~'); p >= 0; p = raw.indexOf('~', p + 1)) {
+        var pos = start + p, left = src[pos - 1], right = src[pos + 1];
+        if (!left || !right || /[\s~/]/.test(left) || /[\s~/]/.test(right) ||
+            struck[pos] === 'standalone' || urlMask[pos] || countBackslashesBefore(src, pos) % 2) continue;
+        push(struck[pos] ? 'err' : 'warn', struck[pos] ? 'LaTeX tie became strikethrough' : 'LaTeX tie is shown as a tilde',
+          struck[pos] ? 'Marked paired two single tildes and crossed out the intervening text. Use a space for a LaTeX tie.'
+            : 'A LaTeX tie in prose appears as a tilde. Use a space between the words.',
+          pos, pos + 1, manual('replace tilde with a space', pos, pos + 1, ' '));
+      }
+    }
+    regions.forEach(function (rg) {
+      if (rg.dropped) return;
+      var i = rg.start;
+      while (i < rg.end) {
+        while (i < rg.end && protectedText[i]) i++;
+        var start = i;
+        while (i < rg.end && !protectedText[i]) i++;
+        if (start < i) checkRun(start, i, rg.leaf.html);
+      }
+    });
+  }
+  if (model) checkLiteralText();
+
   issues.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
   return {
     issues: issues,
@@ -1978,7 +2227,7 @@ function fixAllText(text) {
     var res = analyze(text);
     var taken = [], roundCount = 0;
     res.issues.forEach(function (iss) {
-      if (!iss.fix) return;
+      if (!iss.fix || iss.fix.manual) return;
       if (!editsStillValid(text, iss.fix.edits)) return;
       if (editsOverlap(iss.fix.edits, taken)) return;
       taken = taken.concat(iss.fix.edits);
@@ -3015,18 +3264,19 @@ function updateAll() {
         '<div class="issue-top">' +
         '<span class="where">line ' + lc.line + ', col ' + lc.col + '</span>' +
         (iss.fix ? '<button type="button" class="fixbtn" data-fix="' + idx + '" title="' +
-          escAttr('Rewrite the source: ' + iss.fix.label) + '">Fix: ' + escHtml(iss.fix.label) + '</button>' : '') +
+          escAttr('Rewrite the source: ' + iss.fix.label + (iss.fix.manual ? '. Not part of Fix all.' : '')) +
+          '">Fix: ' + escHtml(iss.fix.label) + '</button>' : '') +
         '</div>' +
         '<div class="title">' + escHtml(iss.title) + '</div>' +
         '<div class="snippet">' + escHtml(pre) + '<mark>' + escHtml(hit) + '</mark>' + escHtml(post) + '</div>' +
         '<div class="detail">' + iss.detail + '</div>' +
         '</div>';
     });
-    if (n > 60) html += '<div class="lint-empty">…and ' + (n - 60) + ' more (Fix all still covers every one of them).</div>';
+    if (n > 60) html += '<div class="lint-empty">…and ' + (n - 60) + ' more. Fix all includes mechanical fixes on every card.</div>';
     lintList.innerHTML = html;
   }
 
-  var fixable = currentIssues.reduce(function (acc, iss) { return acc + (iss.fix ? 1 : 0); }, 0);
+  var fixable = currentIssues.reduce(function (acc, iss) { return acc + (iss.fix && !iss.fix.manual ? 1 : 0); }, 0);
   fixAllBtn.hidden = fixable === 0;
   fixAllBtn.textContent = 'Fix all (' + fixable + ')';
   scheduleCompaction();
