@@ -7,7 +7,12 @@
   against the limit; double-click to rename, × to delete. Each draft autosaves under its own key
   with the same protection against a slow asynchronous store; existing drafts carry over as the
   first tab. Switching drafts gives the editor a fresh undo history, so Ctrl+Z cannot carry text
-  from one draft into another.
+  from one draft into another. Two windows of the page, a slow asynchronous store or a reload at
+  any moment cannot lose or mix up a draft (a Codex review found six ways they could in the first
+  version): random draft ids, the list merged rather than overwritten, writes queued in order,
+  only changed drafts written back, nothing typed before the drafts are restored, and any draft
+  body missing from the list given its tab back. The tabs work from the keyboard (arrows, Enter,
+  F2 to rename).
 
 ## 3.2.0 (2026-11-21)
 
