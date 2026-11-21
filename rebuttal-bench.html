@@ -3478,7 +3478,11 @@ function storeDraft(value, key) {
   key = key || draftKey;
   var localOk = fallbackSet(key, value);
   if (!canArtifactStore) return Promise.resolve(localOk);
-  return remoteWrite(key, value).then(function (r) {
+  var sent = remoteWrite(key, value);
+  /* Pending from the moment it is queued, not only once it failed: a reload
+     before the store answers must still prefer this newer local copy. */
+  if (value !== remoteDrafts[key]) markPending(key);
+  return sent.then(function (r) {
     if (!r.ok) { markPending(key); return localOk; }
     confirmRemote(key, r.value);
     return true;
@@ -3507,6 +3511,15 @@ function retryDeletes() {
   } catch (e) {}
   keys.forEach(function (key) {
     remoteWrite(key, null).then(function (r) { if (r.ok) fallbackDel(deletingKey(key)); });
+  });
+}
+
+/* Local writes refused for lack of space are tried again whenever space may
+   have come back (a switch, a deletion, leaving the page): until then the
+   newer text lives in memory only. */
+function retryLocalWrites() {
+  Object.keys(memNewer).forEach(function (key) {
+    if (Object.prototype.hasOwnProperty.call(memStore, key)) fallbackSet(key, memStore[key]);
   });
 }
 
@@ -3553,8 +3566,12 @@ function saveDraftSoon() {
 function saveDraftNow() {
   if (!draftReady || ta.readOnly) return;
   var key = draftKey, value = ta.value;
+  /* No change from what this window last saved (an edit undone, Clear on a
+     blank draft): writing would put this window's possibly older copy over a
+     newer one saved elsewhere. */
+  if (value === savedText && !memNewer[key]) { saveStateEl.textContent = ''; return; }
   var done = storeDraft(value, key);
-  if (fallbackGet(key) === value) savedText = value;
+  if (!memNewer[key]) savedText = value; /* only once it is really stored here */
   done.then(function (persisted) {
     if (key === draftKey && value === ta.value) saveStateEl.textContent = persisted ? 'Draft saved' : 'Draft in memory only';
   });
@@ -3928,6 +3945,10 @@ function openDraft(id) {
   delete draftTexts[id];
   savedText = text;
   freshEditor(text);
+  /* The new editor is a copy of the old one: it must not inherit a lock that
+     belonged to the draft being left. */
+  ta.readOnly = false;
+  ta.placeholder = TA_PLACEHOLDER;
   ta.scrollTop = 0;
   saveStateEl.textContent = '';
   if (state !== 'ready') {
@@ -3961,9 +3982,10 @@ function switchDraft(id) {
      meanwhile in another window or on another device. */
   clearTimeout(draftTimer);
   var leaving = ta.value;
+  retryLocalWrites();
   if (!ta.readOnly) {
     draftTexts[draftMeta.active] = leaving;
-    if (leaving !== savedText) {
+    if (leaving !== savedText || memNewer[draftKey]) {
       flushDraftLocally(leaving, draftKey);
       storeDraft(leaving, draftKey);
     }
@@ -4011,7 +4033,11 @@ function deleteDraft(id) {
   if (typeof latest === 'string') adoptDraftMeta(parseDraftMeta(latest));
   var d = draftById(id);
   if (!d || draftMeta.list.length < 2) { renderDraftTabs(); return; }
-  if (draftText(id).trim() && !window.confirm('Delete the draft “' + d.name + '”? Its text cannot be brought back.')) return;
+  /* Ask whenever there is text, in this editor or stored by another window
+     since this one last looked. */
+  var stored = fallbackGet(keyOfDraft(id));
+  if ((draftText(id).trim() || (typeof stored === 'string' && stored.trim())) &&
+      !window.confirm('Delete the draft “' + d.name + '”? Its text cannot be brought back.')) return;
   var i = draftMeta.list.indexOf(d);
   draftMeta.list.splice(i, 1);
   draftMeta.gone[id] = Math.max(Date.now(), d.at + 1);
@@ -4021,6 +4047,7 @@ function deleteDraft(id) {
     openDraft(draftMeta.list[Math.max(0, i - 1)].id);
   }
   deleteDraftStorage(keyOfDraft(id));
+  retryLocalWrites(); /* space just freed */
   saveDraftMeta();
   renderDraftTabs();
 }
@@ -4179,7 +4206,7 @@ fixAllBtn.title = 'Rewrite every hazard that has a mechanical fix. One ' + UNDO_
 /* Replace the whole value through execCommand so the browser's own undo stack
    keeps working: one Ctrl+Z reverts a fix, or an entire fix-all pass. */
 function setSourceText(next, selStart, selEnd) {
-  if (!draftReady || ta.value === next) return;
+  if (!draftReady || ta.readOnly || ta.value === next) return;
   var ok = false;
   try {
     ta.focus();
@@ -4330,7 +4357,9 @@ onEditor('input', function () {
 function flushDraft() {
   /* Only an edit not yet saved: an untouched window must not write its
      older copy over a newer one saved in another window. */
-  if (!draftReady || ta.readOnly || ta.value === savedText) return;
+  if (!draftReady) return;
+  retryLocalWrites();
+  if (ta.readOnly || (ta.value === savedText && !memNewer[draftKey])) return;
   flushDraftLocally(ta.value, draftKey);
 }
 window.addEventListener('beforeunload', flushDraft);
@@ -4419,7 +4448,7 @@ function fallbackCopy(txt, ok) {
 /* Both go through setSourceText so the browser's undo stack can bring the
    previous draft back even after the autosave has been overwritten. */
 document.getElementById('exampleBtn').addEventListener('click', function () {
-  if (!draftReady) return;
+  if (!draftReady || ta.readOnly) return;
   if (ta.value && ta.value !== EXAMPLE && !window.confirm('Replace the current draft with the example? Your local autosave will also be replaced (' + UNDO_HINT + ' in the editor brings it back).')) return;
   setSourceText(EXAMPLE, 0);
   ta.scrollTop = 0;
@@ -4429,14 +4458,18 @@ document.getElementById('exampleBtn').addEventListener('click', function () {
 });
 
 document.getElementById('clearBtn').addEventListener('click', function () {
-  if (!draftReady) return;
+  if (!draftReady || ta.readOnly) return;
   if (ta.value && !window.confirm('Clear the editor and its local autosave? (' + UNDO_HINT + ' in the editor brings it back.)')) return;
   setSourceText('', 0);
   var key = draftKey;
-  savedText = '';
-  storeDraft('').then(function (persisted) {
-    if (key === draftKey && !ta.value) saveStateEl.textContent = persisted ? 'Blank draft saved' : 'Blank draft in memory only';
-  });
+  /* Clearing an editor that is already blank changes nothing here, and must
+     not blank a draft another window has saved meanwhile. */
+  if (savedText !== '' || memNewer[key]) {
+    storeDraft('').then(function (persisted) {
+      if (key === draftKey && !ta.value) saveStateEl.textContent = persisted ? 'Blank draft saved' : 'Blank draft in memory only';
+    });
+    if (!memNewer[key]) savedText = '';
+  }
   updateAll();
   renderPreview();
   ta.focus();
@@ -4496,8 +4529,9 @@ storeGet(PREFS_KEY).then(function (v) {
     var mine = parseDraftMeta(localMeta), stored = draftMeta;
     draftMeta = mergeDraftMeta(stored, mine, 0);
     /* Reopen the draft chosen last: this browser's choice if its copy of the
-       list was saved after the stored one (and that draft still exists). */
-    if (mine.saved > stored.saved && draftMeta.list.some(function (d) { return d.id === mine.active; })) {
+       list was saved no earlier than the stored one (two windows can save
+       within one millisecond) and that draft still exists. */
+    if (mine.saved > 0 && mine.saved >= stored.saved && draftMeta.list.some(function (d) { return d.id === mine.active; })) {
       draftMeta.active = mine.active;
       draftMeta.saved = mine.saved;
     }
@@ -4531,7 +4565,7 @@ function finishBoot(draft, note) {
   if (typeof draft.value === 'string') {
     ta.value = savedText = draft.value;
     saveStateEl.textContent = note || (draft.value ? 'Draft restored' : 'Blank draft restored');
-    if (draft.pending) saveDraftNow(); /* bring the asynchronous store up to date */
+    if (draft.pending) storeDraft(draft.value, draftKey); /* bring the asynchronous store up to date */
   } else {
     /* Nothing stored, or the store could not be read: the example, which
        counts as saved, so it is never written over a draft unless edited. */
