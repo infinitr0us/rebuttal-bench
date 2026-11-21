@@ -2824,8 +2824,15 @@ var SIMPLE_ARG = /^(?:[dt]?frac|binom|sqrt|hat|bar|vec|dot|ddot|tilde|overline|u
 function mathCandidates(text, ctx) {
   if (ctx.mathEdits) return ctx.mathEdits;
   var edits = { mathSpace: [], mathArgs: [], mathAliases: [], mathRows: [], mathDisplay: [] };
+  /* Inline markup may surround a whole formula. If one of its boundaries is
+     inside the span, MathJax searches separate text nodes there. */
+  var cuts = [];
+  ctx.model.ranges.forEach(function (r) {
+    if (/^(?:em|strong|del|link|image)$/.test(r.type)) cuts[r.start] = cuts[r.end - 1] = true;
+  });
   ctx.analysis().spans.forEach(function (sp) {
-    if (sp.recovered || sp.literal || sp.kind === 'ref' || maskHits(ctx.inlineMask, sp.start, sp.end)) return;
+    if (sp.recovered || sp.literal || sp.kind === 'ref' || maskHits(ctx.inlineMask, sp.start, sp.end) ||
+        maskHits(cuts, sp.start, sp.end)) return;
     var v = mathJaxView(text, sp.innerStart, sp.innerEnd, false), s = v.text;
     if (s !== sp.tex) return;
     function add(id, a, b, replacement) {

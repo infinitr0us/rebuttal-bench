@@ -68,6 +68,12 @@ test('the MathML gate itself refuses different script structure and arrow attrib
   assert.equal(r.tricks.find(t => t.id === 'mathAliases').kept, 1);
 });
 
+test('inline markup around a formula is eligible, but a split span proposes no math edits', () => {
+  const r = compact('*$ a + b $* and $ x *y* z $');
+  assert.equal(r.text, '*$a+b$* and $ x *y* z $');
+  assert.equal(r.tricks.find(t => t.id === 'mathSpace').kept, 0);
+});
+
 test('missing, throwing or incomplete converters report unchecked edits as skipped', () => {
   for (const converter of [undefined, () => null, () => { throw Error(); }, () => [], () => [false]]) {
     const r = compact('## Title ##\n\n$ x $', { mathml: converter });
