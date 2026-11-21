@@ -619,7 +619,7 @@ window.MathJax = {
   .modal-note.warn { color: var(--title-warn); }
   .modal-opts { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 18px 10px; font-size: 12.5px; color: var(--dim); }
   .modal-opts input { accent-color: var(--accent); }
-  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 10px 18px 14px; }
+  .modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; padding: 10px 18px 14px; }
   .split-parts { flex: 1; min-height: 0; overflow-y: auto; padding: 0 18px; }
   .split-part { margin: 0 0 10px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .split-part-head {
@@ -634,6 +634,7 @@ window.MathJax = {
   }
   .split-part-head .over { color: var(--err); }
   .split-part-head button { margin-left: auto; }
+  .split-part-head button + button { margin-left: 0; }
   .split-part pre {
     margin: 0;
     padding: 8px 10px;
@@ -976,6 +977,25 @@ window.MathJax = {
     <div id="splitParts" class="split-parts"></div>
     <div class="modal-actions">
       <button type="button" id="splitDraftsBtn" class="primary" title="One new draft per part; the draft you split stays as it is">Open the parts as drafts</button>
+      <button type="button" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="historyDialog" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="historyTitle">
+    <div class="modal-head">
+      <h3 id="historyTitle">History</h3>
+      <button type="button" class="modal-x" data-close aria-label="Close">×</button>
+    </div>
+    <p class="modal-note">Earlier versions are kept before <em>Fix all</em>, <em>Apply to source</em>, <em>Clear</em>, <em>Load example</em> and a restore, and every 10 minutes while you edit: up to 20 per draft, in this browser only.</p>
+    <div id="historyList" class="split-parts"></div>
+    <p class="modal-note">Drafts are kept in this browser only, and the online page and a downloaded copy of it each keep their own. Export them to move them or keep a backup. Import adds drafts and never replaces one.</p>
+    <div class="modal-actions">
+      <button type="button" id="exportAllBtn" title="Every draft in one .json file, which Import reads back">Export all drafts</button>
+      <button type="button" id="exportOneBtn" title="The open draft as a Markdown file">Download this draft (.md)</button>
+      <button type="button" id="importBtn" title="The drafts of an exported .json file, or a .md or .txt file as one draft">Import…</button>
+      <input type="file" id="importFile" accept=".json,.md,.markdown,.txt" hidden>
       <button type="button" data-close>Close</button>
     </div>
   </div>
@@ -4117,6 +4137,106 @@ function newDraftName(list) {
   return 'Draft ' + n;
 }
 
+/* ---- earlier versions of a draft, and drafts as files (pure) ---- */
+
+/* A draft's history: its earlier texts, newest first, each {at, why, text}.
+   It is kept in this browser only and capped, and the page drops it before
+   it lets a draft go unsaved for lack of space. */
+var HISTORY_MAX = 20, HISTORY_CHARS = 100000, HISTORY_EVERY = 10 * 60 * 1000;
+var HISTORY_PREFIX = 'rebuttal-bench-history-'; /* + the draft's id: one browser storage key per draft */
+
+function parseHistory(raw) {
+  var v = raw;
+  if (typeof raw === 'string') { try { v = JSON.parse(raw); } catch (e) { v = null; } }
+  if (Object.prototype.toString.call(v) !== '[object Array]') return [];
+  var out = [];
+  v.forEach(function (h) {
+    if (h && typeof h.text === 'string' && typeof h.at === 'number' && isFinite(h.at)) {
+      out.push({ at: h.at, why: typeof h.why === 'string' ? h.why.slice(0, 40) : '', text: h.text });
+    }
+  });
+  out.sort(function (a, b) { return b.at - a.at; });
+  return capHistory(out);
+}
+
+function capHistory(list) {
+  var keep = [], chars = 0;
+  for (var i = 0; i < list.length && keep.length < HISTORY_MAX; i++) {
+    chars += list[i].text.length;
+    if (keep.length && chars > HISTORY_CHARS) break;
+    keep.push(list[i]);
+  }
+  return keep;
+}
+
+/* `list` with `text` as its newest version, or `list` itself when there is
+   nothing to keep: a blank text, or the same text as the newest version. */
+function historyAdd(list, text, why, now) {
+  if (!text.trim() || (list.length && list[0].text === text)) return list;
+  return capHistory([{ at: now, why: why, text: text }].concat(list));
+}
+
+/* While editing, a version is kept every HISTORY_EVERY; `newest` is the
+   time of the newest version (0: none). */
+function historyDue(newest, now) {
+  return !newest || now - newest >= HISTORY_EVERY;
+}
+
+function cleanDraftName(name) {
+  return typeof name === 'string' ? name.replace(/\s+/g, ' ').trim().slice(0, 40) : '';
+}
+
+var DRAFTS_FILE = 'rebuttal-bench-drafts';
+
+/* Every draft ({name, text}, in tab order) as the file Export writes. */
+function draftsFile(drafts, now) {
+  return JSON.stringify({
+    format: DRAFTS_FILE, version: 1, exported: new Date(now).toISOString(),
+    drafts: drafts.map(function (d) { return { name: d.name, text: d.text }; })
+  }, null, 2) + '\n';
+}
+
+/* The drafts in a file chosen for import: all drafts of a file Export wrote,
+   or the whole text of any other text file as one draft named after it.
+   `error` says why nothing can be imported. */
+function readDraftsFile(content, fileName) {
+  content = String(content);
+  if (/\u0000/.test(content)) return { drafts: [], error: 'This is not a text file.' };
+  var v = null;
+  if (/^\s*\{/.test(content)) { try { v = JSON.parse(content); } catch (e) { v = null; } }
+  if (v && typeof v === 'object') {
+    if (v.format !== DRAFTS_FILE || Object.prototype.toString.call(v.drafts) !== '[object Array]') {
+      return { drafts: [], error: 'This JSON file was not exported by Rebuttal Bench.' };
+    }
+    var drafts = [];
+    v.drafts.forEach(function (d) {
+      if (d && typeof d.text === 'string' && drafts.length < 50) {
+        drafts.push({ name: cleanDraftName(d.name) || 'Imported', text: d.text.replace(/\r\n?/g, '\n') });
+      }
+    });
+    return { drafts: drafts, error: drafts.length ? null : 'This file has no drafts.' };
+  }
+  var base = String(fileName || '').replace(/^.*[\\\/]/, '').replace(/\.(?:md|markdown|txt|text)$/i, '');
+  return { drafts: [{ name: cleanDraftName(base) || 'Imported', text: content.replace(/\r\n?/g, '\n') }], error: null };
+}
+
+/* What an import adds to `existing` drafts ({name, text}): each incoming
+   draft whose text no draft has yet, under a name no draft has yet. Nothing
+   is ever replaced; `same` counts the drafts already there. */
+function importPlan(existing, incoming) {
+  var texts = Object.create(null), names = Object.create(null), add = [], same = 0;
+  existing.forEach(function (d) { texts['t' + d.text] = true; names[d.name.toLowerCase()] = true; });
+  incoming.forEach(function (d) {
+    if (texts['t' + d.text]) { same++; return; }
+    texts['t' + d.text] = true;
+    var name = d.name, n = 2;
+    while (names[name.toLowerCase()]) name = d.name.slice(0, 34) + ' (' + n++ + ')';
+    names[name.toLowerCase()] = true;
+    add.push({ name: name, text: d.text });
+  });
+  return { add: add, same: same };
+}
+
 /* ---- splitting a long comment into several (pure) ----
    Where a venue allows several comments (NeurIPS since 2026, ICLR), a draft
    over the limit can be posted in parts. Parts are cut only between blocks;
@@ -4441,7 +4561,12 @@ function fallbackGet(key) {
 }
 function fallbackSet(key, val) {
   var ok = false;
-  if (canLocalRead) { try { localStorage.setItem(key, val); ok = true; } catch (e) {} }
+  if (canLocalRead) {
+    try { localStorage.setItem(key, val); ok = true; } catch (e) {
+      /* Out of space: a draft comes before its earlier versions. */
+      if (dropAllHistory()) { try { localStorage.setItem(key, val); ok = true; } catch (e2) {} }
+    }
+  }
   memStore[key] = val;
   if (ok || !canLocalRead) delete memNewer[key];
   else memNewer[key] = true;
@@ -4728,6 +4853,7 @@ function saveDraftNow() {
   if (value === savedText && !memNewer[key]) { saveStateEl.textContent = ''; return; }
   var done = storeDraft(value, key);
   if (!memNewer[key]) savedText = value; /* only once it is really stored here */
+  if (key === draftKey) keepVersionWhileEditing(value);
   done.then(function (persisted) {
     if (key === draftKey && value === ta.value) saveStateEl.textContent = persisted ? 'Draft saved' : 'Draft in memory only';
   });
@@ -5168,6 +5294,7 @@ function renderDraftTabs() {
   draftTabs.innerHTML = html;
   draftTools.innerHTML = '<button type="button" class="dtool" data-act="rename" title="Rename the open draft (F2)">Rename</button>' +
     (draftMeta.list.length > 1 ? '<button type="button" class="dtool dclose" data-act="delete" title="Delete the open draft">Delete</button>' : '') +
+    '<button type="button" class="dtool" data-act="history" title="Earlier versions of the open draft; export or import drafts as files">History</button>' +
     '<button type="button" class="dtool dadd" data-act="add" title="A new draft: one per reviewer, a general response, a follow-up">+ Draft</button>';
   draftPanel.setAttribute('aria-labelledby', 'dtab-' + draftMeta.active);
   var again = focusId ? draftTabs.querySelector('.dtab[data-id="' + focusId + '"]')
@@ -5291,6 +5418,7 @@ function deleteDraft(id) {
     openDraft(draftMeta.list[Math.max(0, i - 1)].id);
   }
   deleteDraftStorage(keyOfDraft(id));
+  dropHistory(id);
   retryLocalWrites(); /* space just freed */
   saveDraftMeta();
   renderDraftTabs();
@@ -5328,6 +5456,7 @@ draftTools.addEventListener('click', function (e) {
   if (act === 'add') addDraft();
   else if (act === 'rename') renameDraft(draftMeta.active);
   else if (act === 'delete') deleteDraft(draftMeta.active);
+  else if (act === 'history') openHistory();
 });
 
 /* Another window of this browser changed the list: show its drafts here too.
@@ -5414,6 +5543,207 @@ splitDraftsBtn.addEventListener('click', function () {
   closeSplit();
   switchDraft(first);
   showToast(n + ' new drafts, one per part; the draft you split is unchanged.');
+});
+
+/* ---- history: earlier versions of each draft, in this browser only ----
+   A safety net beside undo, which a reload empties. Versions live under
+   their own keys, apart from the drafts, are never sent to the asynchronous
+   store, and give way to a draft that needs the space (fallbackSet). */
+var historyDialog = document.getElementById('historyDialog');
+var historyList = document.getElementById('historyList');
+var historyTitle = document.getElementById('historyTitle');
+var importFile = document.getElementById('importFile');
+var memHistory = {};   /* without readable localStorage: this window's versions */
+var historyNewest = {}; /* id -> time of its newest version, so the autosave need not read the list */
+var historyShown = [];  /* the versions the dialog lists */
+
+function readHistory(id) {
+  var list = memHistory[id] || [];
+  if (canLocalRead) { try { list = parseHistory(localStorage.getItem(HISTORY_PREFIX + id)); } catch (e) {} }
+  historyNewest[id] = list.length ? list[0].at : 0;
+  return list;
+}
+function writeHistory(id, list) {
+  historyNewest[id] = list.length ? list[0].at : 0;
+  if (!canLocalRead) { memHistory[id] = list; return; }
+  /* A full storage keeps fewer versions; when not even one fits, the stored
+     ones stay as they were. */
+  for (;;) {
+    try { localStorage.setItem(HISTORY_PREFIX + id, JSON.stringify(list)); return; } catch (e) {}
+    if (list.length <= 1) return;
+    list = list.slice(0, Math.ceil(list.length / 2));
+  }
+}
+/* Keep `text` (the editor's by default) as the open draft's newest version. */
+function keepVersion(why, text) {
+  if (!draftReady) return;
+  var id = draftMeta.active, list = readHistory(id);
+  var next = historyAdd(list, typeof text === 'string' ? text : ta.value, why, Date.now());
+  if (next !== list) writeHistory(id, next);
+}
+function keepVersionWhileEditing(text) {
+  var id = draftMeta.active;
+  if (historyNewest[id] === undefined) readHistory(id);
+  if (historyDue(historyNewest[id], Date.now())) keepVersion('while editing', text);
+}
+function dropHistory(id) {
+  delete memHistory[id];
+  delete historyNewest[id];
+  if (canLocalRead) { try { localStorage.removeItem(HISTORY_PREFIX + id); } catch (e) {} }
+}
+/* Drafts come first: when one cannot be saved for lack of space, all
+   earlier versions give way. True when there were any. */
+function dropAllHistory() {
+  if (!canLocalRead) return false;
+  var keys = [];
+  try {
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf(HISTORY_PREFIX) === 0) keys.push(k);
+    }
+  } catch (e) { return false; }
+  keys.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {} });
+  historyNewest = {};
+  return keys.length > 0;
+}
+
+function versionTime(at) {
+  var d = new Date(at);
+  try {
+    return d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return d.toString().slice(4, 21);
+  }
+}
+
+function renderHistory() {
+  var d = draftById(draftMeta.active);
+  historyTitle.textContent = 'History of “' + (d ? d.name : 'this draft') + '”';
+  historyShown = readHistory(draftMeta.active);
+  var now = ta.value.trim().length;
+  if (!historyShown.length) {
+    historyList.innerHTML = '<p class="modal-note">No earlier versions of this draft yet.</p>';
+    return;
+  }
+  var html = '';
+  historyShown.forEach(function (v, i) {
+    var n = v.text.trim().length, delta = n - now;
+    html += '<div class="split-part"><div class="split-part-head"><span>' + escHtml(versionTime(v.at)) + '</span>' +
+      '<span>' + escHtml(v.why) + '</span><span>' + fmt(n) + ' characters' +
+      (delta ? ' (' + (delta > 0 ? '+' : '−') + fmt(Math.abs(delta)) + ' vs. now)' : '') + '</span>' +
+      (v.text === ta.value ? '<span>same as now</span>' : '<button type="button" data-restore="' + i + '">Restore</button>') +
+      '<button type="button" data-copy-version="' + i + '">Copy</button></div>' +
+      '<pre>' + escHtml(v.text) + '</pre></div>';
+  });
+  historyList.innerHTML = html;
+}
+function openHistory() {
+  if (!draftReady) return;
+  historyDialog.hidden = false;
+  renderHistory();
+  historyDialog.querySelector('.modal-x').focus();
+}
+function closeHistory() {
+  historyDialog.hidden = true;
+  ta.focus();
+}
+
+/* A restore is one more edit: one undo brings the text back, and the text
+   it replaces is kept as a version first. */
+function restoreVersion(v) {
+  if (!v || !draftReady || ta.readOnly || v.text === ta.value) return;
+  keepVersion('before a restore');
+  closeHistory();
+  setSourceText(v.text, 0);
+  ta.scrollTop = 0;
+  afterSourceChange();
+  showToast('Restored the version of ' + versionTime(v.at) + '. ' + UNDO_HINT + ' undoes it.');
+}
+
+function downloadFile(name, content, type) {
+  try {
+    var url = URL.createObjectURL(new Blob([content], { type: type }));
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+function fileSafe(name) {
+  return name.replace(/[\\\/:*?"<>|\u0000-\u001f]+/g, '-').replace(/^[\s.]+|[\s.]+$/g, '') || 'draft';
+}
+
+function exportAllDrafts() {
+  if (!draftReady) return;
+  var loading = 0;
+  var drafts = draftMeta.list.map(function (d) {
+    if (bodyState[d.id] && bodyState[d.id] !== 'ready') loading++;
+    return { name: d.name, text: draftText(d.id) };
+  });
+  var day = new Date().toISOString().slice(0, 10);
+  if (!downloadFile('rebuttal-drafts-' + day + '.json', draftsFile(drafts, Date.now()), 'application/json')) {
+    showToast('The browser did not allow the download');
+    return;
+  }
+  showToast('Exported ' + drafts.length + ' draft' + (drafts.length === 1 ? '' : 's') +
+    (loading ? '; ' + loading + ' still loading, so this browser’s copy of ' + (loading === 1 ? 'it' : 'them') + ' is in the file' : '') + '.');
+}
+
+function importDrafts(content, fileName) {
+  if (!draftReady) return;
+  var got = readDraftsFile(content, fileName);
+  if (got.error) { showToast(got.error); return; }
+  var existing = draftMeta.list.map(function (d) { return { name: d.name, text: draftText(d.id) }; });
+  var plan = importPlan(existing, got.drafts), n = plan.add.length, first = null;
+  if (!n) {
+    showToast(plan.same === 1 ? 'That draft is already here.' : 'All ' + plan.same + ' drafts are already here.');
+    return;
+  }
+  plan.add.forEach(function (d) {
+    var id = createDraft(d.name, d.text);
+    if (!first) first = id;
+  });
+  closeHistory();
+  switchDraft(first); /* also saves the list */
+  showToast('Imported ' + n + ' draft' + (n === 1 ? '' : 's') + (plan.same ? '; ' + plan.same + ' already here' : '') + '.');
+}
+
+historyDialog.addEventListener('click', function (e) {
+  if (e.target === historyDialog || e.target.closest('[data-close]')) { closeHistory(); return; }
+  var restore = e.target.closest('[data-restore]'), copy = e.target.closest('[data-copy-version]');
+  if (restore) restoreVersion(historyShown[parseInt(restore.getAttribute('data-restore'), 10)]);
+  else if (copy) {
+    var v = historyShown[parseInt(copy.getAttribute('data-copy-version'), 10)];
+    if (v) copyText(v.text, 'Copied the version of ' + versionTime(v.at));
+  }
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && !historyDialog.hidden) closeHistory();
+});
+document.getElementById('exportAllBtn').addEventListener('click', exportAllDrafts);
+document.getElementById('exportOneBtn').addEventListener('click', function () {
+  if (!draftReady) return;
+  var d = draftById(draftMeta.active);
+  if (!downloadFile(fileSafe(d ? d.name : 'draft') + '.md', ta.value, 'text/markdown')) showToast('The browser did not allow the download');
+});
+document.getElementById('importBtn').addEventListener('click', function () {
+  importFile.value = '';
+  importFile.click();
+});
+importFile.addEventListener('change', function () {
+  var f = importFile.files && importFile.files[0];
+  if (!f) return;
+  if (f.size > 5e6) { showToast('That file is too large to be drafts.'); return; }
+  var reader = new FileReader();
+  reader.onload = function () { importDrafts(String(reader.result), f.name); };
+  reader.onerror = function () { showToast('Could not read that file.'); };
+  reader.readAsText(f);
 });
 
 /* ---- compaction: applied on copy, the editor keeps the readable text ---- */
@@ -5508,6 +5838,7 @@ compactBox.addEventListener('toggle', function () {
 applyCompactBtn.addEventListener('click', function () {
   var r = compactResult(true);
   if (!r || r.text === ta.value) { showToast('Nothing to compact'); return; }
+  keepVersion('before Apply to source');
   setSourceText(r.text, Math.min(ta.selectionStart, r.text.length));
   afterSourceChange();
   showToast('Compacted: ' + fmt(r.saved) + ' characters fewer, same rendering. ' + UNDO_HINT + ' undoes it.');
@@ -5602,6 +5933,7 @@ function applyAllFixes() {
 
   if (text === startText) { showToast('Nothing left that can be fixed mechanically'); return; }
 
+  keepVersion('before Fix all', startText);
   var caret = ta.selectionStart;
   setSourceText(text, Math.min(caret, text.length));
   afterSourceChange();
@@ -5773,6 +6105,7 @@ function fallbackCopy(txt, ok) {
 document.getElementById('exampleBtn').addEventListener('click', function () {
   if (!draftReady || ta.readOnly) return;
   if (ta.value && ta.value !== EXAMPLE && !window.confirm('Replace the current draft with the example? Your local autosave will also be replaced (' + UNDO_HINT + ' in the editor brings it back).')) return;
+  keepVersion('before Load example');
   setSourceText(EXAMPLE, 0);
   ta.scrollTop = 0;
   updateAll();
@@ -5783,6 +6116,7 @@ document.getElementById('exampleBtn').addEventListener('click', function () {
 document.getElementById('clearBtn').addEventListener('click', function () {
   if (!draftReady || ta.readOnly) return;
   if (ta.value && !window.confirm('Clear the editor and its local autosave? (' + UNDO_HINT + ' in the editor brings it back.)')) return;
+  keepVersion('before Clear');
   setSourceText('', 0);
   var key = draftKey;
   /* Clearing an editor that is already blank changes nothing here, and must

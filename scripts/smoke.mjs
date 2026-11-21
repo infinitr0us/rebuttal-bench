@@ -473,6 +473,62 @@ try {
       gone.every((id) => localStorage.getItem('rebuttal-bench-draft-' + id) === null && draftMeta.gone[id]) ||
       { meta: draftMeta, value: ta.value };`);
 
+  await check('History keeps the text from before Fix all, and Restore brings it back with one undo', `
+    document.querySelector('#draftTools .dadd').click(); await wait(50);
+    setSourceText('Set $a\\\\,b$ here.', 0); updateAll();
+    fixAllBtn.click(); await wait(100);
+    const fixed = ta.value;
+    document.querySelector('#draftTools [data-act="history"]').click(); await wait(50);
+    const shown = historyShown.map((v) => v.why + ':' + v.text);
+    const btn = historyList.querySelector('[data-restore="0"]');
+    if (!btn) return { shown, html: historyList.innerHTML.slice(0, 300) };
+    btn.click(); await wait(100);
+    const restored = ta.value, closed = historyDialog.hidden, kept = readHistory(draftMeta.active).map((v) => v.why);
+    ta.focus(); document.execCommand('undo'); await wait(300);
+    return shown[0] === 'before Fix all:Set $a\\\\,b$ here.' && restored === 'Set $a\\\\,b$ here.' && closed &&
+      kept[0] === 'before a restore' && ta.value === fixed || { shown, restored, closed, kept, undone: ta.value, fixed };`);
+
+  await check('Export writes every draft; Import adds new ones as tabs and replaces none', `
+    let saved = null;
+    const realDownload = downloadFile;
+    downloadFile = function (name, content) { saved = { name, content }; return true; };
+    exportAllDrafts();
+    downloadFile = realDownload;
+    if (!saved || !/^rebuttal-drafts-\\d{4}-\\d\\d-\\d\\d\\.json$/.test(saved.name)) return saved;
+    const file = JSON.parse(saved.content), before = draftMeta.list.length;
+    importDrafts(saved.content, saved.name);
+    const sameMsg = toast.textContent, sameCount = draftMeta.list.length;
+    importDrafts(JSON.stringify({ format: 'rebuttal-bench-drafts', drafts: [{ name: file.drafts[0].name, text: 'An imported answer.' }] }), 'x.json');
+    await wait(50);
+    const added = draftMeta.list.length === before + 1 && ta.value === 'An imported answer.' &&
+      draftById(draftMeta.active).name === file.drafts[0].name + ' (2)';
+    importDrafts('Plain **text**.', 'Reviewer 9xY2.md'); await wait(50);
+    const md = draftById(draftMeta.active).name === 'Reviewer 9xY2' && ta.value === 'Plain **text**.';
+    return file.drafts.length === before && sameCount === before && /already here/.test(sameMsg) && added && md ||
+      { names: file.drafts.map((d) => d.name), before, sameMsg, list: draftMeta.list.map((d) => d.name), value: ta.value };`);
+
+  await check('a deleted draft takes its history along; a draft that needs the space comes before earlier versions', `
+    window.confirm = () => true;
+    const ids = draftMeta.list.map((d) => d.id).filter((id) => id !== 'd1');
+    const hadHistory = ids.filter((id) => localStorage.getItem(HISTORY_PREFIX + id) !== null).length;
+    ids.forEach(deleteDraft); switchDraft('d1'); await wait(50);
+    const orphans = ids.filter((id) => localStorage.getItem(HISTORY_PREFIX + id) !== null);
+    keepVersion('smoke', 'A version that gives way.');
+    const had = localStorage.getItem(HISTORY_PREFIX + 'd1') !== null;
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      if (k.indexOf(HISTORY_PREFIX) !== 0 && Object.keys(localStorage).some((x) => x.indexOf(HISTORY_PREFIX) === 0)) {
+        throw new DOMException('full', 'QuotaExceededError');
+      }
+      return setItem.call(this, k, v);
+    };
+    let ok;
+    try { ok = fallbackSet('rebuttal-bench-smoke-space', 'needed'); } finally { Storage.prototype.setItem = setItem; }
+    const left = Object.keys(localStorage).filter((k) => k.indexOf(HISTORY_PREFIX) === 0).length;
+    localStorage.removeItem('rebuttal-bench-smoke-space');
+    return hadHistory >= 1 && !orphans.length && had && ok === true && left === 0 && ta.value === 'First draft $x$.' ||
+      { ids, hadHistory, orphans, had, ok, left, value: ta.value };`);
+
   await check('a fresh editor after a draft switch still offers to convert a pasted table', `
     const origId = draftMeta.active;
     document.querySelector('#draftTools .dadd').click(); await wait(50);

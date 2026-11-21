@@ -191,6 +191,18 @@ cases, Chrome probes); keep their rules:
   asynchronous store, a list write that stalls while another device adds a draft can drop that
   entry until the other device's next save or start restores it (the text itself is kept; without
   store revisions this lost update cannot be excluded).
+- **History** (earlier versions) is a safety net that must never cost a draft. Each draft's versions
+  live under `HISTORY_PREFIX + id` in localStorage only (never the asynchronous store), newest
+  first, capped by `capHistory` (pure: `parseHistory`, `historyAdd`, `historyDue`,
+  `tests/history.test.js`). `keepVersion` runs before every bulk change of the editor (Fix all,
+  Apply to source, Clear, Load example, a restore) and `saveDraftNow` keeps one every
+  `HISTORY_EVERY`. A history write that does not fit keeps fewer versions; a draft or list write
+  that does not fit drops all history and retries once (`fallbackSet` → `dropAllHistory`).
+  Deleting a draft deletes its history. Two windows adding versions of one draft at the same
+  moment can lose one of the two versions.
+- **Files**: Export writes `draftsFile` (every draft, in tab order); Import reads it, or any text
+  file as one draft (`readDraftsFile`), and `importPlan` adds only texts no draft has, under
+  names no draft has, through `createDraft`. An import never replaces or merges into a draft.
 
 ## Splitting
 
@@ -223,7 +235,9 @@ limit, a moved file or marker, an unreadable snapshot; it never overwrites one w
 `npm run smoke`: it drives the installed Chrome/Edge headlessly (DevTools protocol, no
 dependencies) and checks Fix all + single-step undo, undoable *Clear* and *Load example*, the
 status bar's TeX-error and undefined-macro counts and their hazard cards (a macro fixed from its
-card, with undo), the preview of the trimmed comment, a fresh TeX state per preview (no duplicate
+card, with undo), the preview of the trimmed comment, History (a version before Fix all, Restore
+with undo, deleted with its draft, dropped when a draft needs the space), Export and Import, a
+fresh TeX state per preview (no duplicate
 `\label` errors, deleted `\newcommand`s and `\definecolor`s forgotten), drafts (a fresh one, switching, undo isolation, rename and delete,
 across a reload and with a slow store), manual fixes outside Fix
 all, Fix all's added-character count, the selection count, venue presets, Copy compact and Apply to

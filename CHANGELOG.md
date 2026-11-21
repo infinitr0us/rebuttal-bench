@@ -26,10 +26,22 @@
   typeset inline, displayed and in a table cell. A macro defined after its first use gets
   advice instead, and an unknown one the `\newcommand` to copy from the paper.
 
+### History and files
+- *History* (beside the draft tabs) lists earlier versions of the open draft, each with its
+  time, why it was kept and its length. One is kept before *Fix all*, *Apply to source*, *Clear*,
+  *Load example* and a restore, and one every 10 minutes while you edit: up to 20 per draft, in
+  this browser only. *Restore* is undoable; *Copy* copies a version.
+- Versions never cost a draft: when a draft cannot be saved for lack of space, they give way,
+  and deleting a draft deletes its versions.
+- *Export all drafts* writes them to one `.json` file; *Download this draft* writes the open one
+  as `.md`. *Import* reads such a file, or any `.md`/`.txt` file as one draft, and only adds
+  drafts: a text already here is skipped, and a name already taken gets a number. The online
+  page and a downloaded copy keep separate drafts, so this is also how drafts move between them.
+
 ### Project
 - DOMPurify 3.4.17, which openreview-web now uses (reported by `npm run check-upstream`).
 - The drift check also watches the trim on posting.
-- `tests/preflight.test.js` and two smoke checks.
+- `tests/preflight.test.js`, `tests/history.test.js`, and five smoke checks.
 
 ## 3.3.0 (2026-11-21)
 
