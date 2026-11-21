@@ -46,7 +46,7 @@ function texReports(src) {
     item.compile(doc);
     item.root.walkTree((n) => {
       if (n.isKind('merror')) r.errors.push(String(n.attributes.get('data-mjx-error') || 'TeX error'));
-      else if (n.isKind('mtext') && n.attributes.get('mathcolor') === 'red' && n.getText().startsWith('\\')) r.undef.push(n.getText());
+      else if (n.isKind('mtext') && n.attributes.getExplicit('mathcolor') === 'red' && n.getText().startsWith('\\')) r.undef.push(n.getText());
     });
     out.push(r);
   }

@@ -162,6 +162,42 @@ try {
     return !pre && p && p.textContent === 'python eval.py --seed 1' && card ||
       { pre: !!pre, p: p && p.textContent, titles: currentIssues.map((i) => i.title) };`);
 
+  await check('a TeX fix waits for the typeset of the text it would change', `
+    const isBm = (i) => i.title === '\\\\bm is not defined in MathJax';
+    setSourceText('Bold $\\\\bm{x}$.', 0); updateAll(); renderPreview(); await wait(2500);
+    const ready = currentIssues.some((i) => isBm(i) && i.fix);
+    setSourceText('Bold $\\\\bm{x}$ and more.', 0); updateAll(); /* the preview has not caught up yet */
+    const waiting = currentIssues.find(isBm), held = !!waiting && !waiting.fix &&
+      !document.querySelector('#lintList .fixbtn[data-fix="' + currentIssues.indexOf(waiting) + '"]');
+    renderPreview(); await wait(2500);
+    const back = currentIssues.some((i) => isBm(i) && i.fix);
+    return ready && held && back || { ready, held, back };`);
+
+  await check('a TeX error card follows the formula MathJax reported, after an edit', `
+    /* No help from the editor's own refresh: only the typeset may redraw. */
+    setSourceText('$a\\\\label{s}$ then $x\\\\label{s}$', 0); clearTimeout(timer); updateAll(); renderPreview(); await wait(2500);
+    setSourceText('$x\\\\label{s}$ then $x\\\\label{s}$', 0); clearTimeout(timer); updateAll(); renderPreview(); await wait(2500);
+    const card = currentIssues.find((i) => i.title === 'MathJax cannot typeset this formula');
+    return !!card && card.start === ta.value.lastIndexOf('$x') || { card, titles: currentIssues.map((i) => i.title) };`);
+
+  await check('a delimiter declared in one preview is gone in the next', `
+    setSourceText('$\\\\DeclarePairedDelimiter{\\\\lens}{\\\\lVert}{\\\\rVert}\\\\lens{x}$', 0); updateAll(); renderPreview(); await wait(2500);
+    const defined = mjStatus.textContent === 'MathJax ready';
+    setSourceText('$\\\\lens{x}$', 0); updateAll(); renderPreview(); await wait(2500);
+    return defined && /1 undefined macro/.test(mjStatus.textContent) || { defined, status: mjStatus.textContent };`);
+
+  await check('red \\\\verb text is not reported as an undefined macro', `
+    setSourceText('$\\\\color{red}\\\\verb!\\\\bm!$', 0); updateAll(); renderPreview(); await wait(2500);
+    return mjStatus.textContent === 'MathJax ready' && !currentIssues.length || { status: mjStatus.textContent, titles: currentIssues.map((i) => i.title) };`);
+
+  await check('Fix all does not promise "no hazards left" before MathJax has checked the result', `
+    setSourceText('$\\\\{x\\\\} + \\\\bm{x}$', 0); updateAll(); renderPreview(); await wait(2500);
+    fixAllBtn.click(); await wait(50);
+    const msg = toast.textContent;
+    await wait(2500);
+    const card = currentIssues.some((i) => i.title === '\\\\bm is not defined in MathJax');
+    return !/no hazards left/.test(msg) && card || { msg, titles: currentIssues.map((i) => i.title) };`);
+
   await check('clicking a hazard on a long wrapped line scrolls it into view', `
     setSourceText('word '.repeat(2500) + 'then $\\\\{x$ end', 0); updateAll(); await wait(200);
     ta.scrollTop = 0;
