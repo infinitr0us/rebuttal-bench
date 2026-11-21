@@ -199,6 +199,16 @@ try {
     btn.click(); await wait(100);
     return ta.value === 'Set \`\\\\{x\\\\}\` here.' || ta.value;`);
 
+  await check('Fix all counts only mechanical fixes and the manual card still works', `
+    setSourceText('Set $a\\\\,b$. <b>ours</b>', 0); updateAll();
+    if (fixAllBtn.hidden || fixAllBtn.textContent !== 'Fix all (1)') return fixAllBtn.textContent;
+    fixAllBtn.click();
+    if (!fixAllBtn.hidden || ta.value !== 'Set $a\\\\\\\\,b$. <b>ours</b>') return { hidden: fixAllBtn.hidden, text: ta.value };
+    const btn = document.querySelector('#lintList .fixbtn');
+    if (!btn || !btn.title.includes('Not part of Fix all')) return btn ? btn.title : 'missing button';
+    btn.click();
+    return ta.value === 'Set $a\\\\\\\\,b$. **ours**' && currentIssues.length === 0 || ta.value;`);
+
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).
