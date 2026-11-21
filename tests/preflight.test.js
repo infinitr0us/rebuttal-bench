@@ -214,6 +214,11 @@ test('a TeX error gets a card at its formula, unless the analyzer already explai
   const res = A.analyze(src);
   const other = { sev: 'warn', title: 'Something about this formula', start: 6, end: 9 };
   assert.deepEqual([...A.texProblemIssues(src, res.spans, texReports(src), [other])], []);
+  // Nor does the posting-trim card on the same line.
+  const nbsp = ' # Bound $x^2^3$';
+  const nbspRes = A.analyze(nbsp);
+  assert.ok(nbspRes.issues.some((i) => i.title === TRIM));
+  assert.equal([...A.texProblemIssues(nbsp, nbspRes.spans, texReports(nbsp), nbspRes.issues)].length, 1);
   // A placeholder inside the formula does not explain a TeX error.
   const ph = 'Then $XX.X^2^3$ holds.';
   const phRes = A.analyze(ph);
