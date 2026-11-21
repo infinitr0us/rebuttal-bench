@@ -19,7 +19,8 @@
 
 ### MathJax problems as cards
 - Once MathJax has typeset the preview, a formula it cannot typeset gets a card with MathJax's
-  message (`Double exponent: use braces to clarify`), unless another card already explains it.
+  message (`Double exponent: use braces to clarify`); when a Markdown card on the same formula
+  may be the cause, it says so.
 - A macro MathJax does not know gets one card for all the formulas that use it. Where MathJax
   has a replacement, the card's fix applies it everywhere: `\bm` → `\boldsymbol`, `\mathbbm` →
   `\mathbb`, `\argmax` → `\mathop{\mathrm{arg\ max}}`, `\R` → `\mathbb{R}`, `\abs{x}` →
