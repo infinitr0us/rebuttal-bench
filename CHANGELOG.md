@@ -17,6 +17,12 @@
   typeset on its own), link reference definitions are repeated where used, and the venue presets
   say where only one response is allowed (AAAI, ACL ARR, one per round at ICML).
 
+### Table import
+- Import LaTeX tables, spreadsheet selections and quoted CSV into the source editor as
+  OpenReview Markdown. Preview the result and line-numbered warnings, choose padded or compact
+  columns, and insert with one undo. Pasting LaTeX or tab-separated rows in the editor offers
+  the same conversion for the pasted range.
+
 ## 3.2.0 (2026-11-21)
 
 From a brainstorm on 2026-11-21 (Claude, Codex and Fable) about per-comment character limits and

@@ -30,6 +30,19 @@ User-facing documentation is in `README.md`; history of changes in `CHANGELOG.md
      with only `window.marked` available.
    - `/* ================= dom wiring ================= */` — rendering, persistence, UI events.
 
+## Table import
+
+`importTable(text, options)` lives in the pure section after `fixAllText`. It recognizes
+LaTeX, TSV and quoted CSV. It returns `null` for unrecognized input, or Markdown, the detected
+format and warnings with one-based input line numbers. Flatten spans and multiple header rows
+with a warning. Preserve the cell contents through both GFM pipe splitting and inline parsing.
+Run Fix all before measuring column padding. `tests/table-import.test.js` checks the exact
+source in both layouts, sanitized cell contents and the TeX that reaches MathJax.
+
+The dialog shares the source preview's renderer and MathJax queue. Capture the original
+selection for insertion. A direct paste stays native and its conversion offer refers to the
+exact pasted range and draft. Use `setSourceText` so one undo restores the text.
+
 ## The analyzer's model
 
 - `collectMarkedRanges` locates Marked tokens in the source (with a prefix-tolerant fallback for

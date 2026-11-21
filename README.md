@@ -19,6 +19,12 @@ leave the browser: they autosave on this device only.
   your judgment (turning `<b>` or `\textbf{}` into Markdown, deleting an HTML comment, dropping
   a link): their cards say "Not part of Fix all", and only a click on the card applies them.
   Fix all's message says how many characters the pass added.
+- **Import table.** Place the cursor where the results belong, or select text to replace.
+  Click *Import table* next to *Load example* and paste a LaTeX table, cells copied from a
+  spreadsheet, or CSV. Check the OpenReview preview and any line-numbered warnings. Spanning
+  cells and multiple header rows are flattened. *Pad columns* aligns the Markdown in the
+  editor. *Insert at cursor* inserts the table in one undoable edit. Pasting a recognizable
+  LaTeX or tab-separated table directly into the editor also offers to convert that paste.
 - **Compaction.** *Copy compact* copies a shorter form of your source that OpenReview renders
   exactly the same: table padding and long delimiter rows (`| --- |` becomes `|-|`), links
   that repeat their URL, closing `#`s, extra blank lines and spaces, character references.
@@ -128,6 +134,7 @@ index.html                 redirects the GitHub Pages site root to the app
 tests/
   regression.test.js       hazard + Fix-all cases, broken and correct input
   compact.test.js          compaction: what each trick saves, what it must leave alone
+  table-import.test.js     imported tables, rendered cells, warnings and MathJax input
   links.test.js            links under each venue's rules
   fixtures/                realistic drafts used by the tests
   example.test.js          the built-in example must end clean and fully typeset
