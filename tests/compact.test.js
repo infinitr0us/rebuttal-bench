@@ -42,6 +42,8 @@ const CASES = [
   ['list marker spacing', '-   one\n-   two', '- one\n- two'],
   ['indented paragraph lines', 'First line\n    of a pasted paragraph.', 'First line\nof a pasted paragraph.', 'ws'],
   ['trailing spaces and a hard break', 'One. \nTwo  \nthree.', 'One.\nTwo\\\nthree.', 'ws'],
+  ['whitespace in attributes and code spans stays',
+    'See ![a\n   b](/images/x.png "t\n   u") and `x\n   y` and [l](https://x.org "p\n   q").', null],
   ['whitespace inside formulas stays', 'Let $\\text{a \n   b}$ hold \nand $x \n  + y$ too.',
     'Let $\\text{a \n   b}$ hold\nand $x \n  + y$ too.', 'ws'],
   ['blank lines', 'A\n\n\n\nB\n  \nC', 'A\n\nB\n\nC'],

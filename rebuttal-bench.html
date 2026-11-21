@@ -2049,7 +2049,12 @@ function compactContext(text) {
    compared on this collapsed form; everything else must match exactly. */
 function collapseWhitespace(html) {
   return html.split(/(<pre[\s>][\s\S]*?<\/pre>)/).map(function (part, i) {
-    return i % 2 ? part : part.replace(/[ \t\n\r\f]+/g, ' ');
+    if (i % 2) return part;
+    /* Only text between tags: an attribute (alt, title, href) keeps its
+       whitespace, and a ">" inside a quoted value does not end the tag. */
+    return part.split(/(<(?:[^>"']|"[^"]*"|'[^']*')*>)/).map(function (bit, k) {
+      return k % 2 ? bit : bit.replace(/[ \t\n\r\f]+/g, ' ');
+    }).join('');
   }).join('');
 }
 
@@ -2157,7 +2162,7 @@ function findTrailingSpace(text, ctx) {
   var paras = ctx.model.ranges.filter(function (r) { return r.type === 'paragraph' || r.type === 'text'; });
   while ((m = re.exec(text))) {
     var a = m.index, b = a + m[0].length, repl = '';
-    if (maskHits(ctx.blockMask, a, b) || maskHits(ctx.mathMask(), a, b)) continue;
+    if (maskHits(ctx.inlineMask, a, b) || maskHits(ctx.mathMask(), a, b)) continue;
     var lineStart = text.lastIndexOf('\n', a - 1) + 1;
     if (lineStart < a && /^ {2,}$/.test(m[0]) &&
         paras.some(function (r) { return r.start <= a && r.end > b + 1; })) {
@@ -2262,7 +2267,8 @@ function findIndentation(text, ctx) {
       var m = /^[ \t]+/.exec(text.slice(ln.start, ln.end));
       /* The newline before the line counts too: it is inside a formula that
          continues on this line. */
-      if (m && !maskHits(ctx.blockMask, ln.start, ln.end) && !maskHits(ctx.mathMask(), ln.start - 1, ln.start + m[0].length)) {
+      var a = ln.start - 1, b = ln.start + (m ? m[0].length : 0);
+      if (m && !maskHits(ctx.blockMask, ln.start, ln.end) && !maskHits(ctx.inlineMask, a, b) && !maskHits(ctx.mathMask(), a, b)) {
         edits.push(compactEdit(text, ln.start, ln.start + m[0].length, ''));
       }
     });
