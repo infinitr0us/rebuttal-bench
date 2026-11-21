@@ -1,5 +1,36 @@
 # Changelog
 
+## 3.4.0 (2026-11-21)
+
+### Before posting
+- Placeholders left in the text get a warning: `TODO`, `TBD`, `FIXME`, `XXX`, numbers to fill
+  in (`XX.X`, `x.xx`, `XX%`), cross-references (`Table X`, `Fig. ??`, `Section XX`),
+  `Reviewer X`, `[cite]`, `[citation needed]`, `[add …]`, `??` and lorem ipsum. Each pattern
+  counts only where it is unmistakable: `??` in code, `XXX` in math and `[Update]` notes are
+  left alone.
+- Invisible characters and ligatures from a PDF copy (soft hyphens, zero-width spaces,
+  direction marks, `ﬁ`) get one card each, whose fix removes or spells out all of them. They
+  count toward the limit and keep a search from finding the word.
+- The start of the comment as posted: OpenReview trims a comment when it posts it
+  (`constructEdit` in openreview-web's `client/view-v2.js`), so an indented first line is
+  ordinary text there, not a code block. The preview now shows the trimmed comment, and a card
+  says when the trim changes the first block.
+
+### MathJax problems as cards
+- Once MathJax has typeset the preview, a formula it cannot typeset gets a card with MathJax's
+  message (`Double exponent: use braces to clarify`), unless another card already explains it.
+- A macro MathJax does not know gets one card for all the formulas that use it. Where MathJax
+  has a replacement, the card's fix applies it everywhere: `\bm` → `\boldsymbol`, `\mathbbm` →
+  `\mathbb`, `\argmax` → `\mathop{\mathrm{arg\ max}}`, `\R` → `\mathbb{R}`, `\abs{x}` →
+  `\lvert x\rvert`, `\diag` → `\operatorname{diag}`, and others. Each replacement is tested to
+  typeset inline, displayed and in a table cell. A macro defined after its first use gets
+  advice instead, and an unknown one the `\newcommand` to copy from the paper.
+
+### Project
+- DOMPurify 3.4.17, which openreview-web now uses (reported by `npm run check-upstream`).
+- The drift check also watches the trim on posting.
+- `tests/preflight.test.js` and two smoke checks.
+
 ## 3.3.0 (2026-11-21)
 
 ### Drafts

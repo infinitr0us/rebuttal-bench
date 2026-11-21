@@ -141,6 +141,27 @@ try {
     const s = mjStatus.textContent;
     return /1 TeX error/.test(s) && /1 undefined macro/.test(s) || s;`);
 
+  await check('TeX problems become hazard cards, and an undefined macro is fixed from its card', `
+    setSourceText('Bold $\\\\bm{x}$ and $\\\\bm y$, then $x^2^3$.', 0); updateAll(); renderPreview(); await wait(2500);
+    const titles = currentIssues.map((i) => i.title);
+    const card = currentIssues.find((i) => i.title === '\\\\bm is not defined in MathJax');
+    if (!card || !titles.includes('MathJax cannot typeset this formula')) return titles;
+    const btn = document.querySelector('#lintList .fixbtn[data-fix="' + currentIssues.indexOf(card) + '"]');
+    if (!btn || !btn.title.includes('Not part of Fix all') || !fixAllBtn.hidden) return btn ? btn.title : 'no fix button';
+    btn.click(); await wait(2500);
+    const fixed = ta.value, left = currentIssues.map((i) => i.title);
+    ta.focus(); document.execCommand('undo'); await wait(300);
+    return fixed === 'Bold $\\\\boldsymbol{x}$ and $\\\\boldsymbol y$, then $x^2^3$.' &&
+      left.join() === 'MathJax cannot typeset this formula' &&
+      ta.value === 'Bold $\\\\bm{x}$ and $\\\\bm y$, then $x^2^3$.' || { fixed, left, undone: ta.value };`);
+
+  await check('the preview shows the comment as posted, without its leading whitespace', `
+    setSourceText('    python eval.py --seed 1', 0); updateAll(); renderPreview(); await wait(1500);
+    const pre = document.querySelector('#preview pre'), p = document.querySelector('#preview p');
+    const card = currentIssues.some((i) => i.title === 'Posting removes the leading whitespace');
+    return !pre && p && p.textContent === 'python eval.py --seed 1' && card ||
+      { pre: !!pre, p: p && p.textContent, titles: currentIssues.map((i) => i.title) };`);
+
   await check('clicking a hazard on a long wrapped line scrolls it into view', `
     setSourceText('word '.repeat(2500) + 'then $\\\\{x$ end', 0); updateAll(); await wait(200);
     ta.scrollTop = 0;

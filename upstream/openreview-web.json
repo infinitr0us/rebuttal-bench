@@ -34,6 +34,10 @@
       "file": "components/EditorComponents/TextAreaWidget.js",
       "text": "const charsRemaining = maxLength - contentLength\ncontentLength={convertToString(value)?.trim()?.length ?? 0}"
     },
+    "Posting trims text fields": {
+      "file": "client/view-v2.js",
+      "text": "fieldDescription.value.param.input === 'textarea'\neditContentFieldValue.value.param.input === 'textarea' ||\nnewVal = newVal?.trim()\nvalueObj.param?.input === 'textarea' ||\nnewVal = newVal?.trim()"
+    },
     "Markdown note styles": {
       "file": "styles/utils/_mixins.scss",
       "text": "@mixin markdown-content-styles() {\n  white-space: normal;\n  overflow-wrap: break-word;\n\n  h1,\n  h2,\n  h3,\n  h4,\n  h5,\n  h6 {\n    color: constants.$darkBlue;\n    margin-top: 0;\n    margin-bottom: 0.5rem;\n  }\n  h1 {\n    font-size: 1.375rem;\n    font-weight: bold;\n  }\n  h2 {\n    font-size: 1.25rem;\n  }\n  h3 {\n    font-size: 1rem;\n  }\n  h4,\n  h5,\n  h6 {\n    font-size: 0.75rem;\n    font-weight: normal;\n  }\n  p {\n    margin-bottom: 0.5rem;\n  }\n  strong {\n    color: constants.$darkBlue;\n    padding-right: 0;\n  }\n  ol,\n  ul {\n    padding-left: 1.5rem;\n    margin-bottom: 0.5rem;\n    li {\n      padding: 0;\n      p {\n        margin-bottom: 0.125rem;\n      }\n    }\n    ol,\n    ul {\n      margin-bottom: 0.125rem;\n    }\n  }\n  hr {\n    margin: 0.5rem 0;\n  }\n  code {\n    color: constants.$orRed;\n  }\n  pre {\n    padding: 0.25rem 0.5rem;\n    margin-bottom: 0.5rem;\n    code {\n      font-size: 0.75rem;\n      color: #333;\n    }\n  }\n  img.icon {\n    width: 1rem;\n    height: 1rem;\n  }\n  blockquote {\n    font-size: 0.75rem;\n    padding: 0.25rem 0.5rem;\n    margin-bottom: 0.5rem;\n    border-left-color: #ccc;\n    p {\n      margin-bottom: 0;\n    }\n  }\n  table {\n    max-width: 100%;\n    margin-bottom: 0.5rem;\n    thead > tr > th {\n      vertical-align: bottom;\n      border-top: 0;\n      border-bottom: 2px solid #ddd;\n    }\n    tr > td,\n    tr > th {\n      padding: 0.25rem;\n      vertical-align: top;\n      border-top: 1px solid #ddd;\n    }\n  }\n}"

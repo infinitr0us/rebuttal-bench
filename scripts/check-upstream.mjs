@@ -68,6 +68,8 @@ export const EXCERPTS = [
   },
   { id: 'Note rendering call', file: 'components/NoteContent.js', pick: (t) => lines(t, /marked\(|DOMPurify\.sanitize|markdown-rendered/) },
   { id: 'Character counter', file: 'components/EditorComponents/TextAreaWidget.js', pick: (t) => lines(t, /contentLength=|charsRemaining =/) },
+  // A textarea's value is trimmed before posting: the preview and check 16 show the trimmed text.
+  { id: 'Posting trims text fields', file: 'client/view-v2.js', pick: (t) => lines(t, /input === 'textarea'|newVal = newVal\?\.trim\(\)/) },
   { id: 'Markdown note styles', file: 'styles/utils/_mixins.scss', pick: (t) => block(t, '@mixin markdown-content-styles') },
   { id: 'Note content styles', file: 'styles/components/note-content.scss', pick: (t) => t },
   { id: 'Display-math styles', file: 'styles/components.scss', pick: (t) => block(t, '// Mathjax') },

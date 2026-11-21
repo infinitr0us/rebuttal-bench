@@ -68,7 +68,21 @@ exact pasted range and draft. Use `setSourceText` so one undo restores the text.
   (the text they expect), so stale fixes are refused. Checks 9–14 report what OpenReview shows
   as typed (raw HTML, HTML comments, external images, footnotes, h4–h6, LaTeX outside math);
   check 15 reports links under `opts.venue`'s rule (an id from `VENUES`; only the page passes
-  it, so Fix all and compaction never see venue hazards).
+  it, so Fix all and compaction never see venue hazards). Check 16 reports a first block that
+  OpenReview's trim on posting (`constructEdit` in `client/view-v2.js`, watched by
+  `npm run check-upstream`) reads differently (`firstBlockChanges`); check 7 then leaves that
+  block alone, and the preview renders `ta.value.trim()`. Check 17 reports placeholders, each
+  pattern limited to where it is unmistakable (no `??` in code, no `XXX` in math); check 18
+  invisible characters and ligatures, one card each, with a manual fix for all of them.
+- `texProblemIssues(src, spans, reports, issues)` turns what MathJax reported after the last
+  typeset (`texProblems()` in the DOM section: `{tex, undef, errors}` per formula, in document
+  order) into cards. The k-th report with a TeX goes to the k-th real span with that TeX, so the
+  cards follow the current source. An undefined macro gets one card for all its formulas, with
+  a manual fix from `TEX_SUBSTITUTES`: every replacement is Markdown-neutral (no `\` before ASCII
+  punctuation, no `*`, `_`, `[` or `|`) and `tests/preflight.test.js` typesets each one inline,
+  displayed and in a table cell. A macro the comment defines after using it gets advice, never a
+  rewrite. The page shows these cards next to the analyzer's (`renderIssues`), redrawn when a
+  typeset changes them; `fixAllText` never sees them.
 - `collectMarkedRanges` also records link reference definitions (`definitions`), which Marked
   consumes without a token, through a block extension that only observes.
 
@@ -208,7 +222,8 @@ limit, a moved file or marker, an unreadable snapshot; it never overwrites one w
 `npm test` runs in Node and cannot see the DOM section. After touching it, run
 `npm run smoke`: it drives the installed Chrome/Edge headlessly (DevTools protocol, no
 dependencies) and checks Fix all + single-step undo, undoable *Clear* and *Load example*, the
-status bar's TeX-error and undefined-macro counts, a fresh TeX state per preview (no duplicate
+status bar's TeX-error and undefined-macro counts and their hazard cards (a macro fixed from its
+card, with undo), the preview of the trimmed comment, a fresh TeX state per preview (no duplicate
 `\label` errors, deleted `\newcommand`s and `\definecolor`s forgotten), drafts (a fresh one, switching, undo isolation, rename and delete,
 across a reload and with a slow store), manual fixes outside Fix
 all, Fix all's added-character count, the selection count, venue presets, Copy compact and Apply to
