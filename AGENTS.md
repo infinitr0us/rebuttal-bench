@@ -78,13 +78,18 @@ caller passes `render` (the page: `renderOpenReviewMarkdown`; the tests: `render
 `tests/lib/pipeline.js`). The rules:
 
 - **A trick only proposes; the check decides.** An edit is kept only if the comment still
-  renders to the same sanitized HTML as the text the trick started from and `analyze` reports no
-  hazard the original did not. Failing batches are bisected. Do not weaken this to make a trick
-  "work": a candidate the check rejects is reported as left alone (`kept`), which is fine.
-- `ws: true` tricks (whitespace only) compare `collapseWhitespace(html)` and require the
-  analyzer's formulas (`mathSignature`) to stay identical; they must stay out of math, code,
-  inline HTML and link syntax. This relies on the note text being `white-space: normal`
-  (`_mixins.scss`, watched by `npm run check-upstream`).
+  renders to the same sanitized HTML as the text the trick started from, both as typed and
+  trimmed (OpenReview trims on posting), and `analyze` reports no more hazards of any kind
+  (severity and title) than the original. Failing batches are bisected. Do not weaken this to
+  make a trick "work": a candidate the check rejects is reported as left alone (`kept`), which
+  is fine; `skipped` counts candidates never tried because the limits ran out.
+- `ws: true` tricks (whitespace only) compare `collapseWhitespace(html)` (text outside `<pre>`;
+  tags and attribute values untouched) and require `mathJaxInputs(html)`, every formula MathJax
+  will find in the rendered HTML, to stay identical. They also stay out of math, code, inline
+  HTML and link syntax. This relies on the note text being `white-space: normal` (`_mixins.scss`,
+  watched by `npm run check-upstream`).
+- The page passes time limits (`{checks, ms}`): a short slice while typing, more on a click.
+  Results are safe whenever the limit hits; keep it that way.
 - `look: true` tricks change the rendering on purpose and stay off by default. Their edits are
   checked with placeholders (`sameButSwapped`): old and new text must each render exactly as a
   neutral placeholder at that spot. `e.shown` is what the page shows for the old text when that

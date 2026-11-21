@@ -259,10 +259,23 @@ try {
     limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input')); await wait(700);
     return rescued && !charChip.classList.contains('rescued') || { rescued, cls: charChip.className };`);
 
+  await check('a failed copy says so instead of claiming success', `
+    setSourceText('## y ##', 0); updateAll(); await wait(700);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true,
+      value: { writeText: () => Promise.reject(new Error('denied')) } });
+    document.execCommand = function (cmd) {
+      return cmd === 'copy' ? false : Document.prototype.execCommand.apply(document, arguments);
+    };
+    copyCompactBtn.click(); await wait(200);
+    const msg = toast.textContent;
+    delete document.execCommand;
+    return /^Copy failed/.test(msg) || msg;`);
+
   await check('a compaction switch turned off applies at once', `
-    compactList.querySelector('input[data-trick="tables"]').click(); await wait(500);
+    setSourceText('| Method | Acc |\\n| --- | --- |\\n| A | 1 |', 0); updateAll(); await wait(700);
+    compactList.querySelector('input[data-trick="tables"]').click();
     return prefs.compact.tables === false && compactStat.hidden || { tables: prefs.compact.tables, stat: compactStat.textContent };`);
-  await load();
+  await load(); /* at once: the switch must already be stored */
   await check('a compaction switch stays off after a reload', `
     const box = compactList.querySelector('input[data-trick="tables"]');
     const off = prefs.compact.tables === false && !box.checked;
@@ -301,6 +314,19 @@ try {
   await load();
   await check('leaving before the stored draft arrives does not replace it', `
     return ta.value === 'Theirs $b$.' || ta.value.slice(0, 80);`);
+
+  await inPage(`localStorage.setItem('stub:delay', '3000'); return true;`);
+  await send('Page.navigate', { url: PAGE }, sessionId);
+  await sleep(600);
+  await check('a switch flipped before the stored preferences arrive stays flipped', `
+    for (let i = 0; i < 60 && typeof compactList === 'undefined'; i++) await wait(50);
+    if (prefsRestored) return 'the stored preferences came back too soon to test this';
+    compactList.querySelector('input[data-trick="tables"]').click();
+    for (let i = 0; i < 80 && !prefsRestored; i++) await wait(50);
+    return prefsRestored && prefs.compact.tables === false &&
+      !compactList.querySelector('input[data-trick="tables"]').checked || { restored: prefsRestored, tables: prefs.compact.tables };`);
+  await inPage(`localStorage.setItem('stub:delay', '50');
+    compactList.querySelector('input[data-trick="tables"]').click(); await wait(300); return true;`);
 
   results.push([errors.length === 0, 'no uncaught page errors', errors.join(' | ')]);
 } catch (e) {

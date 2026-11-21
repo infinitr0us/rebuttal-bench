@@ -2391,7 +2391,7 @@ function compactContext(text) {
 
 /* Text as DOMPurify serializes it in the sanitized HTML. */
 function htmlText(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/ /g, '&nbsp;');
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').split(String.fromCharCode(160)).join('&nbsp;');
 }
 
 /* Marked keeps a paragraph's soft-wrap indentation and single trailing spaces
@@ -2399,14 +2399,58 @@ function htmlText(s) {
    white-space: normal; only <pre> keeps whitespace). The whitespace tricks are
    compared on this collapsed form; everything else must match exactly. */
 function collapseWhitespace(html) {
-  return html.split(/(<pre[\s>][\s\S]*?<\/pre>)/).map(function (part, i) {
-    if (i % 2) return part;
-    /* Only text between tags: an attribute (alt, title, href) keeps its
-       whitespace, and a ">" inside a quoted value does not end the tag. */
-    return part.split(/(<(?:[^>"']|"[^"]*"|'[^']*')*>)/).map(function (bit, k) {
-      return k % 2 ? bit : bit.replace(/[ \t\n\r\f]+/g, ' ');
-    }).join('');
+  var pre = 0;
+  return htmlTokens(html).map(function (bit, k) {
+    if (k % 2) {
+      if (htmlTagName(bit) === 'pre') pre = Math.max(0, pre + (bit.charAt(1) === '/' ? -1 : 1));
+      return bit;
+    }
+    return pre ? bit : bit.replace(/[ \t\n\r\f]+/g, ' ');
   }).join('');
+}
+
+/* Sanitized HTML as text and tags: odd entries are tags or comments, and a
+   ">" or "<pre>" inside a quoted attribute value stays inside its tag. */
+function htmlTokens(html) {
+  return html.split(/(<!--[\s\S]*?-->|<(?:[^>"']|"[^"]*"|'[^']*')*>)/);
+}
+
+function htmlTagName(tag) {
+  var m = /^<\/?([A-Za-z][\w:-]*)/.exec(tag);
+  return m ? m[1].toLowerCase() : '';
+}
+
+function htmlDecodeText(s) {
+  return s.replace(/&(?:#(\d+)|#[xX]([0-9a-fA-F]+)|(amp|lt|gt|quot|nbsp));/g, function (m, dec, hex, name) {
+    if (name) return { amp: '&', lt: '<', gt: '>', quot: '"', nbsp: String.fromCharCode(160) }[name];
+    return charFromCodePoint(dec ? parseInt(dec, 10) : parseInt(hex, 16));
+  });
+}
+
+/* Every formula MathJax will find in sanitized HTML, as it receives it. Like
+   MathJax's HTMLDomStrings, text runs on across <br> (a newline), <wbr> and
+   comments, any other tag ends the string, and code, pre and a few others are
+   skipped. This does not rely on the analyzer's source model, so it also holds
+   where that model is approximate (character references inside \begin, say). */
+var MJ_SKIP_TAGS = { script: 1, noscript: 1, style: 1, textarea: 1, pre: 1, code: 1, annotation: 1, 'annotation-xml': 1 };
+function mathJaxInputs(html) {
+  var strings = [], cur = '', skip = 0;
+  htmlTokens(html).forEach(function (bit, k) {
+    if (!(k % 2)) { if (!skip) cur += htmlDecodeText(bit); return; }
+    if (bit.slice(0, 4) === '<!--') return;
+    var name = htmlTagName(bit);
+    if (name === 'wbr') return;
+    if (name === 'br') { if (!skip) cur += '\n'; return; }
+    if (MJ_SKIP_TAGS[name]) skip = Math.max(0, skip + (bit.charAt(1) === '/' ? -1 : 1));
+    strings.push(cur);
+    cur = '';
+  });
+  strings.push(cur);
+  var out = [];
+  strings.forEach(function (s) {
+    if (s) mjFind(s).found.forEach(function (f) { out.push(f.kind + ':' + s.slice(f.open, f.close + f.closeLen)); });
+  });
+  return JSON.stringify(out);
 }
 
 function mathSignature(res) {
@@ -2569,6 +2613,9 @@ function findLinks(text, ctx) {
     if ((m = /^<(https?:\/\/[^<>\s]+)>$/i.exec(raw))) next = m[1];
     else if ((m = /^\[([^\[\]\\]+)\]\((https?:\/\/[^()\s<>\\]+)\)$/i.exec(raw)) && m[1] === m[2]) next = m[2];
     else if ((m = /^(\[[^\]]*\]\()<([^<>\s()\\]+)>(\))$/.exec(raw))) next = m[1] + m[2] + m[3];
+    /* GFM leaves trailing punctuation out of a bare URL: such a candidate
+       would only be refused by the check, at the cost of renders. */
+    if (next !== null && next.charAt(0) !== '[' && /[.,:;!?'"*_~)]$/.test(next)) next = null;
     if (next !== null) edits.push(compactEdit(text, r.start, r.end, next));
   });
   return edits;
@@ -2666,12 +2713,17 @@ function charFromCodePoint(cp) {
    invisible (soft hyphen, zero-width and bidi marks, odd spaces), which would
    be a trap in the source. A no-break space stays allowed: it is the common
    case and renders exactly as its reference. */
+var COMPACT_HIDDEN_RANGES = [
+  [0xad, 0xad], [0x300, 0x36f], [0x61c, 0x61c], [0x115f, 0x1160], [0x1680, 0x1680], [0x17b4, 0x17b5],
+  [0x180b, 0x180f], [0x2000, 0x200f], [0x2028, 0x202f], [0x205f, 0x206f], [0x3000, 0x3000], [0x3164, 0x3164],
+  [0xd800, 0xdfff], [0xfe00, 0xfe0f], [0xfeff, 0xfeff], [0xffa0, 0xffa0], [0xfff0, 0xffff],
+  [0x1bca0, 0x1bca3], [0x1d173, 0x1d17a], [0xe0000, 0xe0fff]
+];
 function compactableCodePoint(cp) {
   if (cp < 0x80) return /[A-Za-z0-9]/.test(String.fromCharCode(cp));
-  if (cp < 0xa0 || cp === 0xad || (cp >= 0x300 && cp < 0x370)) return false;
-  if ((cp >= 0x2000 && cp <= 0x200f) || (cp >= 0x2028 && cp <= 0x202f) || (cp >= 0x205f && cp <= 0x206f)) return false;
-  if ((cp >= 0xd800 && cp <= 0xdfff) || cp === 0xfeff || cp >= 0xfff0 && cp <= 0xffff || cp > 0x10ffff) return false;
-  return true;
+  if (cp < 0xa0 || cp > 0x10ffff) return false;
+  /* Unicode's default-ignorable code points, combining marks and odd spaces. */
+  return !COMPACT_HIDDEN_RANGES.some(function (r) { return cp >= r[0] && cp <= r[1]; });
 }
 
 function findEntities(text, ctx) {
@@ -2772,40 +2824,64 @@ function issueCounts(issues) {
 
 /* Rewrite `text` with the tricks switched on in `enabled` ({id: bool}).
    `render(text)` must return the sanitized HTML OpenReview would show.
-   Returns {text, saved, tricks: [{id, on, count, kept, saved}], complete}, or
-   null when the text cannot be rendered. A trick that is off is still run on
-   the result, so the caller can show what it would add. `complete` is false
-   when the check budget ran out; the text is then still safe, only less short. */
-function compactText(text, enabled, render, maxChecks) {
-  var checks = 0, budget = maxChecks || 400;
+   `limits`: a number of checks, or {checks, ms}; the defaults are 400 checks
+   and no time limit (the page passes a time limit so typing never stalls).
+   Returns {text, saved, tricks: [{id, on, count, kept, skipped, saved}],
+   complete}, or null when the text cannot be rendered. `kept` counts edits
+   left out because they would change the rendering; `skipped` those never
+   tried because the limits ran out (then `complete` is false: the text is
+   still safe, only less short). A trick that is off is still run on the
+   result, so the caller can show what it would add. */
+function compactText(text, enabled, render, limits) {
+  var maxChecks = typeof limits === 'number' ? limits : (limits && typeof limits.checks === 'number' ? limits.checks : 400);
+  var deadline = limits && typeof limits.ms === 'number' ? Date.now() + limits.ms : Infinity;
+  var checks = 0, starved = false;
   var PH_OPEN = String.fromCharCode(0xe000), PH_CLOSE = String.fromCharCode(0xe001);
+
+  function out() {
+    if (checks >= maxChecks || Date.now() > deadline) starved = true;
+    return starved;
+  }
+
+  /* OpenReview trims the comment when it is posted, and a trimmed text can
+     parse differently (leading indentation that made a code block, a no-break
+     space before "#"). So every comparison covers the text as typed and as
+     posted. */
+  function views(t) {
+    return [render(t), render(t.trim())];
+  }
 
   /* What the text as it stands renders to. Each trick is checked against the
      text it starts from, so the guarantee carries over from trick to trick. */
   function reference(t) {
-    var html = render(t), res = analyze(t);
-    return { text: t, html: html, ws: collapseWhitespace(html), res: res, math: mathSignature(res) };
+    var html = views(t), res = analyze(t);
+    return {
+      text: t, html: html, res: res,
+      ws: html.map(collapseWhitespace), mj: html.map(mathJaxInputs)
+    };
   }
   var ref;
   try { ref = reference(text); } catch (e) { return null; }
   var baseIssues = issueCounts(ref.res.issues);
 
+  /* No more hazards of any kind (severity and title) than the original had. */
   function noNewIssues(res) {
     var now = issueCounts(res.issues);
     return Object.keys(now).every(function (k) { return now[k] <= (baseIssues[k] || 0); });
   }
 
   /* `ws`: compare with collapsible whitespace collapsed, and require every
-     formula (MathJax's input) to stay byte for byte the same. */
+     formula MathJax will find in the rendered HTML to stay byte for byte the
+     same: whitespace inside \text{} or \verb is visible. */
   function sameRendering(candidate, ws) {
-    if (checks >= budget) return false;
     checks++;
     try {
-      var html = render(candidate);
-      if (ws ? collapseWhitespace(html) !== ref.ws : html !== ref.html) return false;
-      var res = analyze(candidate);
-      if (ws && mathSignature(res) !== ref.math) return false;
-      return noNewIssues(res);
+      var html = views(candidate);
+      for (var i = 0; i < html.length; i++) {
+        if (ws ? collapseWhitespace(html[i]) !== ref.ws[i] || mathJaxInputs(html[i]) !== ref.mj[i]
+               : html[i] !== ref.html[i]) return false;
+      }
+      return noNewIssues(analyze(candidate));
     } catch (e) { return false; }
   }
 
@@ -2816,19 +2892,21 @@ function compactText(text, enabled, render, maxChecks) {
      new HTML is the old one with that text swapped and nothing else moved, and
      the analyzer must see every other formula unchanged. */
   function sameButSwapped(edits) {
-    if (checks >= budget) return false;
     checks++;
     try {
       var marks = edits.map(function (e, i) {
         return { start: e.start, end: e.end, text: PH_OPEN + i + PH_CLOSE, was: e.was };
       });
-      var held = render(applyEditsToText(ref.text, marks)), back = held, fwd = held;
-      edits.forEach(function (e, i) {
-        back = back.split(marks[i].text).join(htmlText(e.shown || e.was));
-        fwd = fwd.split(marks[i].text).join(htmlText(e.text));
-      });
-      var candidate = applyEditsToText(ref.text, edits);
-      if (back !== ref.html || fwd !== render(candidate)) return false;
+      var held = views(applyEditsToText(ref.text, marks));
+      var candidate = applyEditsToText(ref.text, edits), now = views(candidate);
+      for (var v = 0; v < held.length; v++) {
+        var back = held[v], fwd = held[v];
+        edits.forEach(function (e, i) {
+          back = back.split(marks[i].text).join(htmlText(e.shown || e.was));
+          fwd = fwd.split(marks[i].text).join(htmlText(e.text));
+        });
+        if (back !== ref.html[v] || fwd !== now[v]) return false;
+      }
       var gone = {};
       edits.forEach(function (e) { gone[e.start] = true; });
       var res = analyze(candidate);
@@ -2839,19 +2917,20 @@ function compactText(text, enabled, render, maxChecks) {
 
   /* Try a whole batch at once (the usual case: every edit is fine); when the
      batch fails, split it until the edits that change the rendering are found. */
-  function keep(ok, kept, cands) {
+  function keep(ok, kept, cands, tally) {
     if (!cands.length) return kept;
+    if (out()) { tally.skipped += cands.length; return kept; }
     var all = kept.concat(cands);
     if (ok(all)) return all;
-    if (cands.length === 1) return kept;
+    if (cands.length === 1) { tally.kept++; return kept; }
     var mid = cands.length >> 1;
-    return keep(ok, keep(ok, kept, cands.slice(0, mid)), cands.slice(mid));
+    return keep(ok, keep(ok, kept, cands.slice(0, mid), tally), cands.slice(mid), tally);
   }
 
   function run(trick) {
-    var cur = ref.text, ctx = compactContext(cur);
+    var cur = ref.text, tally = { kept: 0, skipped: 0 }, ctx = compactContext(cur);
     if (!ctx || (trick.look && (cur.indexOf(PH_OPEN) !== -1 || cur.indexOf(PH_CLOSE) !== -1))) {
-      return { text: cur, count: 0, kept: 0 };
+      return { text: cur, count: 0, tally: tally };
     }
     var cands = [], taken = [];
     trick.find(cur, ctx).forEach(function (e) {
@@ -2861,21 +2940,24 @@ function compactText(text, enabled, render, maxChecks) {
     });
     var edits = keep(trick.look
       ? sameButSwapped
-      : function (es) { return sameRendering(applyEditsToText(cur, es), !!trick.ws); }, [], cands);
-    return { text: applyEditsToText(cur, edits), count: edits.length, kept: cands.length - edits.length };
+      : function (es) { return sameRendering(applyEditsToText(cur, es), !!trick.ws); }, [], cands, tally);
+    return { text: applyEditsToText(cur, edits), count: edits.length, tally: tally };
   }
 
   var stats = {};
-  COMPACT_TRICKS.forEach(function (t) { stats[t.id] = { id: t.id, on: !!enabled[t.id], count: 0, kept: 0, saved: 0 }; });
+  COMPACT_TRICKS.forEach(function (t) {
+    stats[t.id] = { id: t.id, on: !!enabled[t.id], count: 0, kept: 0, skipped: 0, saved: 0 };
+  });
   /* A second pass catches what one trick uncovers for an earlier one (a
      decoded entity in a table cell, a quote marker inside a table row). */
-  for (var pass = 0; pass < 2; pass++) {
+  for (var pass = 0; pass < 2 && !starved; pass++) {
     var before = ref.text;
     COMPACT_TRICKS.forEach(function (t) {
       if (!enabled[t.id]) return;
       var r = run(t), s = stats[t.id];
       s.count += r.count;
-      s.kept = r.kept;
+      s.kept = r.tally.kept;
+      s.skipped = r.tally.skipped;
       s.saved += ref.text.trim().length - r.text.trim().length;
       if (r.text !== ref.text) {
         try { ref = reference(r.text); } catch (e) { /* render() worked a moment ago */ }
@@ -2888,14 +2970,15 @@ function compactText(text, enabled, render, maxChecks) {
     if (enabled[t.id]) return;
     var r = run(t), s = stats[t.id];
     s.count = r.count;
-    s.kept = r.kept;
+    s.kept = r.tally.kept;
+    s.skipped = r.tally.skipped;
     s.saved = result.trim().length - r.text.trim().length;
   });
   return {
     text: result,
     saved: text.trim().length - result.trim().length,
     tricks: COMPACT_TRICKS.map(function (t) { return stats[t.id]; }),
-    complete: checks < budget
+    complete: !starved
   };
 }
 
@@ -3104,9 +3187,27 @@ function applyPrefs() {
 }
 
 var prefsTimer = null;
+/* Preferences are written at once, so a reload right after a click keeps it.
+   Until the stored preferences have been read back (an asynchronous store can
+   take a while), remember what the user changed, so the late answer does not
+   undo it: `prefsTouched` holds "key" or "compact.<trick>". */
+var prefsRestored = false, prefsTouched = {}, prefsShadow = JSON.stringify(prefs);
 function savePrefs() {
+  if (!prefsRestored) {
+    var was = JSON.parse(prefsShadow);
+    Object.keys(prefs).forEach(function (k) {
+      if (k === 'compact') {
+        Object.keys(prefs.compact).forEach(function (id) {
+          if (prefs.compact[id] !== was.compact[id]) prefsTouched['compact.' + id] = true;
+        });
+      } else if (JSON.stringify(prefs[k]) !== JSON.stringify(was[k])) {
+        prefsTouched[k] = true;
+      }
+    });
+    prefsShadow = JSON.stringify(prefs);
+  }
   clearTimeout(prefsTimer);
-  prefsTimer = setTimeout(function () { storeSet(PREFS_KEY, JSON.stringify(prefs)); }, 300);
+  storeSet(PREFS_KEY, JSON.stringify(prefs));
 }
 
 /* ---- draft autosave ---- */
@@ -3407,14 +3508,19 @@ var compactTimer = null;
 /* Compaction renders the draft a few dozen times, so it runs once the editor
    has been idle for a moment rather than on every keystroke, and the copy
    buttons reuse its result as long as the text and the switches are the same. */
-function compactResult() {
-  var text = ta.value, key = JSON.stringify(prefs.compact);
-  if (compactCache && compactCache.source === text && compactCache.key === key) return compactCache.result;
+/* `full`: a click on Copy compact or Apply to source, where the user waits
+   anyway; the idle run gets a short time slice so typing never stalls. */
+function compactResult(full) {
+  var text = ta.value, key = JSON.stringify(prefs.compact), c = compactCache;
+  if (c && c.source === text && c.key === key && (!full || c.full || !c.result || c.result.complete)) return c.result;
   var result = null;
   if (MARKED_READY && purifier) {
-    try { result = compactText(text, prefs.compact, renderOpenReviewMarkdown); } catch (e) { result = null; }
+    try {
+      result = compactText(text, prefs.compact, renderOpenReviewMarkdown,
+        full ? { checks: 2000, ms: 1500 } : { checks: 400, ms: 150 });
+    } catch (e) { result = null; }
   }
-  compactCache = { source: text, key: key, result: result };
+  compactCache = { source: text, key: key, result: result, full: !!full };
   return result;
 }
 
@@ -3439,7 +3545,7 @@ function updateCompaction() {
   applyCompactBtn.disabled = !r || r.text === ta.value;
   compactSum.textContent = !r ? 'unavailable' : saved > 0 ? '−' + fmt(saved) + ' characters' : 'nothing to save';
   compactSum.classList.toggle('zero', saved <= 0);
-  compactFoot.textContent = r && !r.complete ? 'Stopped early on this long draft: the result is safe, but could be shorter.' : '';
+  compactFoot.textContent = r && !r.complete ? 'Stopped early on this long draft: the result is safe, but could be shorter. Copy compact and Apply to source try harder.' : '';
 
   Array.prototype.forEach.call(compactList.querySelectorAll('.trick'), function (row, i) {
     var t = COMPACT_TRICKS[i], s = r ? r.tricks[i] : null, gain = row.querySelector('.gain');
@@ -3465,7 +3571,7 @@ compactBox.addEventListener('toggle', function () {
 });
 
 applyCompactBtn.addEventListener('click', function () {
-  var r = compactResult();
+  var r = compactResult(true);
   if (!r || r.text === ta.value) { showToast('Nothing to compact'); return; }
   setSourceText(r.text, Math.min(ta.selectionStart, r.text.length));
   afterSourceChange();
@@ -3473,7 +3579,7 @@ applyCompactBtn.addEventListener('click', function () {
 });
 
 copyCompactBtn.addEventListener('click', function () {
-  var r = compactResult();
+  var r = compactResult(true);
   if (!r) { showToast('Compaction needs Marked and DOMPurify, which did not load'); return; }
   copyText(r.text, r.saved > 0
     ? 'Copied the compact form: ' + fmt(r.saved) + ' characters fewer, same rendering'
@@ -3631,7 +3737,7 @@ function schedule() {
   timer = setTimeout(function () { updateAll(); renderPreview(); }, 220);
 }
 
-ta.addEventListener('input', function () { userEdited = true; saveDraftSoon(); schedule(); });
+ta.addEventListener('input', function () { userEdited = true; clearTimeout(compactTimer); saveDraftSoon(); schedule(); });
 /* beforeunload is not delivered reliably (mobile, bfcache); pagehide is. */
 function flushDraft() {
   if (!draftReady && !userEdited) return; /* nothing restored or typed yet: keep the saved draft */
@@ -3712,8 +3818,13 @@ function fallbackCopy(txt, ok) {
   }
   box.focus();
   box.select();
-  try { document.execCommand('copy'); ok(); } catch (e) { showToast('Copy failed — select and copy manually'); }
+  var copied = false;
+  try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
   if (box !== ta) { document.body.removeChild(box); ta.focus(); }
+  /* execCommand reports failure by returning false, not by throwing. */
+  if (copied) ok();
+  else showToast(box === ta ? 'Copy failed — select and copy manually'
+    : 'Copy failed. Use Apply to source, copy from the editor, then undo to get your text back.');
 }
 
 /* Both go through setSourceText so the browser's undo stack can bring the
@@ -3750,28 +3861,34 @@ function showToast(msg) {
 /* ---- boot ---- */
 applyPrefs();
 storeGet(PREFS_KEY).then(function (v) {
+  /* A stored value applies unless the user has changed that setting since
+     the page opened. */
+  function restore(key, value) { if (!prefsTouched[key]) prefs[key] = value; }
   if (v) {
     try {
       var p = JSON.parse(v);
-      if (p.theme === 'dark' || p.theme === 'light') prefs.theme = p.theme;
-      if (p.fsEditor >= FS_RANGES.fsEditor[0] && p.fsEditor <= FS_RANGES.fsEditor[1]) prefs.fsEditor = p.fsEditor;
+      if (p.theme === 'dark' || p.theme === 'light') restore('theme', p.theme);
+      if (p.fsEditor >= FS_RANGES.fsEditor[0] && p.fsEditor <= FS_RANGES.fsEditor[1]) restore('fsEditor', p.fsEditor);
       /* Older drafts stored a preview font size in px; 12px was OpenReview's
          own size, so carry the perceived scale over to the zoom control. */
       var zoom = typeof p.zoomPreview === 'number' ? p.zoomPreview
         : (typeof p.fsPreview === 'number' ? Math.round(p.fsPreview / 12 * 10) * 10 : null);
-      if (zoom !== null && zoom >= FS_RANGES.zoomPreview[0] && zoom <= FS_RANGES.zoomPreview[1]) prefs.zoomPreview = zoom;
-      if (typeof p.limit === 'number' && p.limit >= 0) prefs.limit = p.limit;
-      if (typeof p.sync === 'boolean') prefs.sync = p.sync;
-      if (typeof p.venue === 'string' && (p.venue === '' || venueById(p.venue))) prefs.venue = p.venue;
+      if (zoom !== null && zoom >= FS_RANGES.zoomPreview[0] && zoom <= FS_RANGES.zoomPreview[1]) restore('zoomPreview', zoom);
+      if (typeof p.limit === 'number' && p.limit >= 0) restore('limit', p.limit);
+      if (typeof p.sync === 'boolean') restore('sync', p.sync);
+      if (typeof p.venue === 'string' && (p.venue === '' || venueById(p.venue))) restore('venue', p.venue);
       /* Only known tricks: one removed in a later version is simply forgotten. */
       if (p.compact && typeof p.compact === 'object') {
         Object.keys(prefs.compact).forEach(function (id) {
-          if (typeof p.compact[id] === 'boolean') prefs.compact[id] = p.compact[id];
+          if (typeof p.compact[id] === 'boolean' && !prefsTouched['compact.' + id]) prefs.compact[id] = p.compact[id];
         });
       }
-      if (typeof p.compactOpen === 'boolean') prefs.compactOpen = p.compactOpen;
+      if (typeof p.compactOpen === 'boolean') restore('compactOpen', p.compactOpen);
     } catch (e) {}
   }
+  prefsRestored = true;
+  /* What was written while waiting lacked the stored values; write the merge. */
+  if (Object.keys(prefsTouched).length) savePrefs();
   applyPrefs();
   return loadDraft();
 }).then(function (draft) {

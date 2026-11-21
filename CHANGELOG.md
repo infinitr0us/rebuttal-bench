@@ -15,9 +15,14 @@ what else a rebuttal author needs.
   lines, trailing spaces (a two-space break becomes a backslash break), extra blank lines,
   character references (`&plusmn;` becomes `±`). Off by default: outer table pipes, and
   one-symbol formulas as characters (`$\pm$` becomes `±`, which changes the font of the symbol).
-- Every edit is checked against the rendered comment and dropped if anything would differ; see
-  README, "How compaction stays safe". A draft with two space-aligned results tables shrinks by
-  about 20%.
+- Every edit is checked against the rendered comment, as typed and as posted (trimmed), and
+  dropped if anything would differ; see README, "How compaction stays safe". A draft with two
+  space-aligned results tables shrinks by about 20%. A Codex review of the first version found
+  ten problems (submission trimming, whitespace inside formulas the analyzer did not see, a
+  multi-second stall on long drafts, a copy failure reported as success, switches lost on a fast
+  reload, invisible characters from references, attribute whitespace, budget accounting); all are
+  fixed and covered by tests, and the review's 2,000-document fuzz corpus now shows no
+  difference.
 
 ### Checks
 - OpenReview shows these as typed, and they are now reported: raw HTML (`<br>` in a table cell,

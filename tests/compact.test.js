@@ -104,10 +104,53 @@ test('compact: formulas that are not one known symbol stay formulas', () => {
 });
 
 test('compact: edits that would change the rendering are counted as kept', () => {
+  // A bare URL ending in "." is not even proposed (GFM would leave the dot out).
   const r = compact('See <https://example.org/a.> and [https://example.org](https://example.org)x.');
   const links = [...r.tricks].find((t) => t.id === 'links');
   assert.equal(links.count, 0);
-  assert.equal(links.kept, 2);
+  assert.equal(links.kept, 1);
+  assert.equal(links.skipped, 0);
+});
+
+// From the review of 929edd0..dcc33ea (reviews/2026-11-21/codex-review/review.md).
+const REVIEW_CASES = [
+  // 1. OpenReview trims the comment when posting; the trimmed text must render the same too.
+  ['a decoded no-break space would let trim() make a heading', '&nbsp;# x', null],
+  ['a decoded no-break space would leave nothing to post', '&nbsp;', null],
+  ['trim() turns leading indentation into a fence', '    ~~~\n\n> x\n\n~~~', null],
+  // 2. Whitespace inside a formula the source model does not see is still MathJax input.
+  ['character reference inside \\begin', '\\begin&Tab;{equation}\\verb|a\n   b|\\end&Tab;{equation}', null],
+  ['emphasis splitting the search strings', '*$* $\\verb|a\n b|$', null],
+  ['a trailing space inside such a formula', '*$* $\\verb|a \nb|$', null],
+  // 8. A "<pre>" inside an attribute value is not a <pre> element.
+  ['image title containing <pre>', '![x](/images/a "T<pre></pre>\n   U")', null],
+  ['image alt containing <pre>', '![a<pre></pre>\n  b](/images/x)', null],
+  // 9. No invisible characters from references.
+  ['default-ignorable references stay references', 'a&#x061C;b, c&#xFE0F;d, e&#x3000;f', null],
+  // 4. A whitespace edit no longer blocks the tricks after it.
+  ['paragraph space, then a table', 'a \nb\n\n| a |\n| --- |', 'a\nb\n\n|a|\n|-|'],
+];
+for (const [name, src, want] of REVIEW_CASES) {
+  test(`compact (review): ${name}`, () => {
+    const r = compact(src, ALL);
+    assert.equal(r.text, want === null ? src : want);
+    assert.ok(sameOnScreen(r.text, src));
+    assert.ok(sameOnScreen(r.text.trim(), src.trim()));
+    assert.equal(compact(r.text, ALL).saved, 0);
+  });
+}
+
+test('compact: limits count real work only (review 10)', () => {
+  const none = A.compactText('A &plusmn; B', DEFAULTS, renderHtml, 0);
+  assert.equal(none.text, 'A &plusmn; B');
+  assert.equal(none.complete, false);
+  assert.equal([...none.tricks].find((t) => t.id === 'entities').skipped, 1);
+  const one = A.compactText('A &plusmn; B', DEFAULTS, renderHtml, 1);
+  assert.equal(one.text, 'A ± B');
+  assert.equal(one.complete, true);
+  const late = A.compactText('| a | b |\n| --- | --- |\n| 1 | 2 |', DEFAULTS, renderHtml, { ms: -1 });
+  assert.equal(late.complete, false);
+  assert.equal(late.saved, 0);
 });
 
 test('compact: outer table pipes are off by default and reported as available', () => {

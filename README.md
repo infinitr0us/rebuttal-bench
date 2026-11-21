@@ -78,21 +78,24 @@ ambiguous cases get a warning without a fix, or a fix that only a click on its c
 ## How compaction stays safe
 
 Each trick proposes edits, and an edit is kept only if the whole comment still renders to the
-same sanitized HTML (so MathJax receives the same text) and the analyzer reports no hazard it
-did not report before. A batch that fails is split until the offending edits are found, so a
-trick never has to be right about every corner of Markdown: what would change the rendering is
-simply dropped. Two refinements:
+same sanitized HTML (so MathJax receives the same text), both as typed and as OpenReview posts
+it (trimmed, which can change how the first line parses), and the analyzer reports no more
+hazards of any kind than before. A batch that fails is split until the offending edits are
+found, so a trick never has to be right about every corner of Markdown: what would change the
+rendering is simply dropped. Two refinements:
 
 - The whitespace tricks (paragraph indentation, single trailing spaces) change only whitespace
-  that the note's `white-space: normal` collapses. They are compared on collapsed text (tags and
-  attributes untouched) and must leave every formula byte for byte the same, since `\text{}`
-  keeps its spaces.
+  that the note's `white-space: normal` collapses. They are compared on collapsed text (tags,
+  attributes and `<pre>` untouched), and every formula MathJax will find in the rendered HTML
+  must stay byte for byte the same, since `\text{}` and `\verb` keep their spaces.
 - The opt-in symbol trick does change the rendering. Each formula it replaces, and the
   character replacing it, must both render exactly as a neutral placeholder at that spot, so
   the new HTML is the old one with that text swapped and nothing else moved.
 
 On a draft with two space-aligned results tables the default tricks save about 20% (394 of
 2,011 characters; `tests/fixtures/padded-tables.md`); a draft written tersely saves nothing.
+While you type, compaction gets a short time slice and may stop early (the panel says so; the
+result is still safe); *Copy compact* and *Apply to source* give it more time.
 
 ## Development
 
