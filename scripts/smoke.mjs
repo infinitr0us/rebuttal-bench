@@ -232,6 +232,47 @@ try {
     return ok && prefs.venue === '' && currentIssues.length === 0 ||
       { before, limit: limitInput.value, issues: currentIssues.map((i) => i.title) };`);
 
+  await check('math compaction becomes available when MathJax is ready, even for a cached draft', `
+    const src = '$ x + \\\\frac{1}{2} $';
+    setSourceText(src, 0);
+    window.MJ_READY = false;
+    let cold;
+    try { cold = compactResult(true); } finally { window.MJ_READY = true; }
+    const warm = compactResult(true);
+    return cold.text === src && cold.tricks.some(t => t.id === 'mathSpace' && t.skipped && !t.kept) &&
+      warm.text === '$x+\\\\frac12$' || { cold, warm };`);
+
+  await check('the MathML comparison is isolated from preview definitions, colors and labels', `
+    const src = '$\\\\newcommand{\\\\RBcomp}{x}\\\\definecolor{rbblue}{RGB}{2,4,8}$ and ' +
+      '$$\\\\begin{align} a & = \\\\color{rbblue}\\\\RBcomp \\\\tag{1}\\\\label{eq:rb}\\\\end{align}$$. See \\\\ref{eq:rb}.';
+    setSourceText(src, 0); updateAll(); renderPreview(); await wait(700);
+    const roots = () => Array.from(MathJax.startup.document.math).filter(m => m.display !== null)
+      .map(m => MathJax.startup.toMML(m.root));
+    const before = roots();
+    const run = fs => compactMathML(fs, () => false);
+    const previewInputs = Array.from(MathJax.startup.document.math).filter(m => m.display !== null)
+      .map(m => ({ tex: m.math, display: m.display }));
+    const isolated = run(previewInputs);
+    const one = tex => [{ tex, display: false }];
+    const separate = run(one('\\\\RBcomp'))[0];
+    run(one('\\\\newcommand{\\\\RBother}{y}\\\\definecolor{red}{RGB}{0,0,255}'));
+    const stillDefined = MathJax.tex2mml('\\\\RBcomp+\\\\RBother+\\\\color{red}z');
+    const result = compactResult(true);
+    setSourceText(result.text, 0); updateAll(); renderPreview(); await wait(700);
+    return result.saved > 0 && before.length === 3 && JSON.stringify(before) === JSON.stringify(isolated) &&
+      JSON.stringify(before) === JSON.stringify(roots()) && separate.includes('\\\\RBcomp') &&
+      !stillDefined.includes('\\\\RBcomp') && stillDefined.includes('\\\\RBother') &&
+      !stillDefined.includes('#0000ff') && mjStatus.textContent === 'MathJax ready' ||
+      { result: result.text, status: mjStatus.textContent, before, isolated, separate, stillDefined };`);
+
+  await check('checking a formula cannot populate the shared Unicode font cache', `
+    const src = '$\\\\def\\\\sym{\\\\unicode[monospace]{8472}}$ then $ x + \\\\sym $';
+    setSourceText(src, 0);
+    const r = compactResult(true);
+    const font = MathJax.tex2mml('\\\\unicode{8472}');
+    return r.text === src && r.tricks.find(t => t.id === 'mathSpace').unavailable &&
+      !font.includes('monospace') || { text: r.text, font };`);
+
   // Compaction runs 300 ms after the last change.
   await check('Copy compact copies a shorter text that renders the same and leaves the editor alone', `
     const src = '| Method | Acc |\\n| --- | --- |\\n| A | 1 |';

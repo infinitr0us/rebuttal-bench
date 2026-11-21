@@ -3583,6 +3583,45 @@ function resetTeXState() {
   } catch (e) {}
 }
 
+/* Compile with the page's TeX packages and safe filter, in a private math
+   document. Its input jax owns the definitions, colors and label tables;
+   compilation never clears or typesets the preview. compile() also makes
+   MathJax's second pass for forward references. */
+function compactMathML(formulas, expired) {
+  var startup = MathJax.startup, modules = MathJax._, live = startup.document;
+  var Doc = modules.ui.safe.SafeHandler.SafeMathDocumentMixin(modules.handlers.html.HTMLDocument.HTMLDocument);
+  var doc = new Doc(document, live.adaptor, {
+    InputJax: startup.getInputJax(), OutputJax: startup.getOutputJax(),
+    safeOptions: live.options.safeOptions,
+    compileError: function (_doc, _item, err) { throw err; }
+  });
+  doc.safe.filterAttributes.set('fontfamily', 'filterFamily');
+  doc.safe.filterMethods.filterFamily = live.safe.filterMethods.filterFamily;
+  var jax = doc.inputJax[0];
+  /* These MathJax extensions use process-wide state: \unicode remembers a
+     glyph's font, and \require loads packages for the whole page. Stop if
+     one is actually executed, including through a user-defined macro. */
+  var handlers = jax.parseOptions.handlers;
+  ['unicode', 'require', 'Require'].forEach(function (name) {
+    if (handlers.get('macro').contains(name)) {
+      handlers.retrieve('new-Command').add(name, new modules.input.tex.Symbol.Macro(name, function () {
+        throw new Error('This TeX command uses shared MathJax state');
+      }));
+    }
+  });
+  jax.preFilters.add(function () {
+    if (expired && expired()) throw new Error('Compaction time limit');
+  }, -100);
+  var items = formulas.map(function (f) {
+    var item = new doc.options.MathItem(f.tex, jax, f.display);
+    item.start.node = document.body;
+    doc.math.push(item);
+    return item;
+  });
+  doc.compile();
+  return items.map(function (item) { return startup.toMML(item.root); });
+}
+
 function renderPreview() {
   if (renderBusy) { renderQueued = true; return; }
   renderBusy = true;
@@ -3635,6 +3674,7 @@ function renderPreview() {
 window.onMathJaxReady = function () {
   setMathStatus('MathJax ready', 'good');
   renderPreview();
+  scheduleCompaction();
 };
 
 /* MathJax scales math to the ex-height of the surrounding font, so a typeset
@@ -3739,13 +3779,13 @@ var compactTimer = null;
 /* `full`: a click on Copy compact or Apply to source, where the user waits
    anyway; the idle run gets a short time slice so typing never stalls. */
 function compactResult(full) {
-  var text = ta.value, key = JSON.stringify(prefs.compact), c = compactCache;
+  var text = ta.value, key = JSON.stringify(prefs.compact) + window.MJ_READY, c = compactCache;
   if (c && c.source === text && c.key === key && (!full || c.full || !c.result || c.result.complete)) return c.result;
   var result = null;
   if (MARKED_READY && purifier) {
     try {
       result = compactText(text, prefs.compact, renderOpenReviewMarkdown,
-        full ? { checks: 2000, ms: 1500 } : { checks: 400, ms: 150 });
+        { checks: full ? 2000 : 400, ms: full ? 1500 : 150, mathml: window.MJ_READY ? compactMathML : null });
     } catch (e) { result = null; }
   }
   compactCache = { source: text, key: key, result: result, full: !!full };
@@ -3779,8 +3819,10 @@ function updateCompaction() {
     var t = COMPACT_TRICKS[i], s = r ? r.tricks[i] : null, gain = row.querySelector('.gain');
     row.querySelector('input').checked = !!prefs.compact[t.id];
     gain.textContent = !s || !s.saved ? '' : '−' + fmt(s.saved) + (s.on ? '' : ' if on');
+    if (s && s.unavailable) gain.textContent = s.saved ? gain.textContent + ', some skipped' : 'skipped';
     gain.className = 'gain' + (!s || !s.saved ? ' none' : s.on ? '' : ' off');
-    row.title = t.hint + (s && s.kept ? '. Left alone in ' + s.kept + (s.kept === 1 ? ' place' : ' places') +
+    row.title = t.hint + (s && s.unavailable ? '. Skipped because MathML comparison is unavailable.' : '') +
+      (s && s.kept ? '. Left alone in ' + s.kept + (s.kept === 1 ? ' place' : ' places') +
       ', where the change would alter the rendering.' : '');
   });
 }
