@@ -809,6 +809,46 @@ window.MathJax = {
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+  /* table import */
+  #tableOffer {
+    padding: 7px 14px;
+    background: var(--panel-2);
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+  }
+  #tableOffer button { margin-left: 6px; }
+  #tableDialog {
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    width: min(560px, calc(100% - 32px));
+    max-height: calc(100% - 32px);
+    padding: 20px;
+    overflow: auto;
+  }
+  #tableDialog::backdrop { background: rgba(20, 24, 33, 0.52); }
+  #tableDialog h2 { margin: 0 0 14px; font: 600 21px var(--serif); }
+  #tableDialog h3, #tableDialog label[for="tableInput"] { display: block; margin: 12px 0 6px; font: 600 13px var(--sans); }
+  #tableInput {
+    display: block;
+    width: 100%;
+    min-height: 5em;
+    resize: vertical;
+    padding: 8px;
+    font: 13px/1.45 var(--mono);
+    color: var(--text);
+    background: var(--editor-bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  #tablePreview { max-height: 30vh; min-height: 3em; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 10px; zoom: 1; }
+  #tableWarnings { margin: 8px 0; padding-left: 20px; font-size: 13px; color: var(--title-warn); }
+  .table-actions { margin-top: 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .table-actions label { margin-right: auto; font-size: 13px; }
+  #tablePad { accent-color: var(--accent); }
+  #insertTable:disabled { opacity: 0.55; cursor: default; }
+
   @media (prefers-reduced-motion: reduce) {
     * { transition: none !important; }
   }
@@ -845,6 +885,7 @@ window.MathJax = {
     <label><input type="checkbox" id="sync" checked> Sync scroll</label>
     <button id="themeBtn">Dark mode</button>
     <button id="exampleBtn">Load example</button>
+    <button id="importTableBtn" aria-haspopup="dialog" aria-controls="tableDialog">Import table</button>
     <button id="clearBtn">Clear</button>
     <button id="copyCompactBtn" title="Copy a shorter form of the source that OpenReview renders exactly the same (see Compaction under the hazards); the editor keeps your text">Copy compact</button>
     <button id="copyBtn" class="primary">Copy source</button>
@@ -866,6 +907,11 @@ window.MathJax = {
   <section class="pane" aria-label="Source editor">
     <div class="pane-head"><h2>Source</h2><span class="hint">exactly what you'll paste into OpenReview, or its compact form</span></div>
     <div class="drafts" id="draftBar"><div class="dtabs" id="draftTabs" role="tablist" aria-label="Drafts"></div><div class="dtools" id="draftTools"></div></div>
+    <div id="tableOffer" hidden>
+      Convert the pasted table to Markdown?
+      <button id="convertPaste" type="button" aria-haspopup="dialog" aria-controls="tableDialog">Convert</button>
+      <button id="dismissPaste" type="button">Dismiss</button>
+    </div>
     <div id="draftPanel" class="dpanel" role="tabpanel"><textarea id="src" spellcheck="false" placeholder="Type or paste your rebuttal…"></textarea></div>
     <div class="lint">
       <div class="lint-head"><span>Hazards</span> <span id="lintCount" class="zero">0</span><button type="button" id="fixAllBtn" hidden title="Rewrite every hazard that has a mechanical fix. One Ctrl+Z undoes the whole pass.">Fix all</button></div>
@@ -936,6 +982,20 @@ window.MathJax = {
 </div>
 
 <div class="toast" id="toast" role="status"></div>
+
+<dialog id="tableDialog" aria-labelledby="tableDialogTitle">
+  <h2 id="tableDialogTitle">Import table</h2>
+  <label for="tableInput">Paste LaTeX, spreadsheet cells, or CSV</label>
+  <textarea id="tableInput" rows="5" spellcheck="false" autofocus></textarea>
+  <h3>OpenReview preview</h3>
+  <div id="tablePreview" class="paper"></div>
+  <ul id="tableWarnings" aria-live="polite"></ul>
+  <div class="table-actions">
+    <label><input type="checkbox" id="tablePad" checked> Pad columns</label>
+    <button id="cancelTable" type="button">Cancel</button>
+    <button id="insertTable" type="button" class="primary" disabled>Insert at cursor</button>
+  </div>
+</dialog>
 
 <script>
 'use strict';
@@ -2447,6 +2507,363 @@ function fixAllText(text) {
   return { text: text, applied: applied };
 }
 
+/* ---- table import ---- */
+
+/* A group ends at the matching brace, even when its text contains \{ or \}.
+   Optional arguments use the same reader and can contain braced material. */
+function tableGroup(text, at, open) {
+  while (/\s/.test(text.charAt(at)) && at < text.length) at++;
+  open = open || '{';
+  if (text[at] !== open) return null;
+  var close = open === '{' ? '}' : ']', depth = 1, braces = 0;
+  for (var i = at + 1; i < text.length; i++) {
+    if (text[i] === '\\') { i++; continue; }
+    if (open === '[' && text[i] === '{') braces++;
+    if (open === '[' && text[i] === '}' && braces) braces--;
+    if (braces) continue;
+    if (text[i] === open) depth++;
+    if (text[i] === close && --depth === 0) {
+      return { text: text.slice(at + 1, i), start: at + 1, end: i + 1 };
+    }
+  }
+  return null;
+}
+
+function tableMathEnd(text, i) {
+  var delim = text[i + 1] === '$' ? '$$' : '$';
+  var hit = mjFindEnd(text, i + delim.length, delim, MJ_END[delim]).match;
+  return hit ? hit.index + delim.length : i;
+}
+
+/* Marked first splits the row (consuming one backslash before a pipe), then
+   parses inline Markdown. Preserve the original TeX through both passes. */
+function tableMath(tex) {
+  return tex.replace(/\n/g, ' ').replace(/(\\*)([^\\]|$)/g, function (all, slashes, ch, at) {
+    var n = slashes.length;
+    if (ch === '|') return bs(2 * n + 1) + '|';
+    var shield = /[*~\x60\[]/.test(ch) ||
+      (ch === '_' && !(/[A-Za-z0-9]/.test(tex.charAt(at - 1)) && /[A-Za-z0-9]/.test(tex.charAt(at + n + 1))));
+    if (ch === '<') return bs(2 * n) + '&lt;';
+    if (ch === '&' && /^&(?:#\w+|\w+);/.test(tex.slice(at + n))) return bs(2 * n) + '&amp;';
+    return bs(2 * n - (n % 2 && ch && !isPunct(ch) ? 1 : 0) + (shield ? 1 : 0)) + ch;
+  });
+}
+
+/* Spreadsheet cells and LaTeX text are literal. Reserve Markdown formatting
+   for commands the importer itself translates. Keep intraword underscores
+   and numeric significance stars readable when they cannot open emphasis. */
+function tableLiteral(text) {
+  return text.replace(/\\|[|*_\x60~\[<$&]/g, function (ch, at) {
+    if (ch === '$') return bs(2) + '$';
+    if (ch === '&') return /^&(?:#\w+|\w+);/.test(text.slice(at)) ? '&amp;' : '&';
+    if (ch === '<') return '&lt;';
+    if (ch === '_' && /\w/.test(text.charAt(at - 1)) && /\w/.test(text.charAt(at + 1))) return '_';
+    if (ch === '*' && /\d%?\**$/.test(text.slice(0, at)) && /^\**$/.test(text.slice(at + 1))) return '*';
+    return '\\' + ch;
+  });
+}
+
+function spreadsheetCell(text) {
+  var out = '', start = 0;
+  for (var i = 0; i < text.length; i++) {
+    if (text[i] !== '$' || countBackslashesBefore(text, i) % 2) continue;
+    var end = tableMathEnd(text, i);
+    if (end === i) continue;
+    out += tableLiteral(text.slice(start, i)) + tableMath(text.slice(i, end));
+    start = end;
+    i = end - 1;
+  }
+  return out + tableLiteral(text.slice(start));
+}
+
+function tableCode(text) {
+  /* Inside code, Marked only removes the table escape. An odd number of
+     literal backslashes before a pipe cannot be expressed inside one code
+     span. Put that pipe between spans instead. */
+  return text.split('|').map(function (part) {
+    if (!part) return '';
+    var ticks = (part.match(/\x60+/g) || []).reduce(function (max, run) { return Math.max(max, run.length); }, 0);
+    var fence = new Array(ticks + 2).join('\x60');
+    if (/^\x60|\x60$/.test(part) || (/^ .* $/.test(part) && /\S/.test(part))) part = ' ' + part + ' ';
+    return fence + part + fence;
+  }).join('\\|');
+}
+
+function readSpreadsheet(text, sep) {
+  var rows = [], cells = [], field = '', quoted = false, closed = false, line = 1, first = 1;
+  for (var i = 0; i <= text.length; i++) {
+    var ch = text[i];
+    if (quoted) {
+      if (ch === undefined) return null;
+      if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (ch === '"') { quoted = false; closed = true; }
+      else { field += ch; if (ch === '\n') line++; }
+    } else if (ch === sep || ch === '\n' || ch === undefined) {
+      if (ch === sep || cells.length || field.trim() || closed) {
+        cells.push(field.trim().replace(/[ \t]*\n[ \t]*/g, ' '));
+        if (ch !== sep) { rows.push({ cells: cells, line: first }); cells = []; }
+      }
+      if (ch === '\n') first = ++line;
+      field = ''; closed = false;
+    } else if (ch === '"' && !field && !closed) quoted = true;
+    else if (!closed) field += ch;
+    else if (!/\s/.test(ch)) return null;
+  }
+  if (rows.length < 2 || rows[0].cells.length < 2 ||
+      !rows.slice(1).some(function (row) { return row.cells.length > 1; })) return null;
+  var number = '[+\\-−]?(?:(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d*)?|\\.\\d+)(?:e[+\\-]?\\d+)?';
+  var numeric = new RegExp('^(?:±\\s*)?' + number + '\\s*%?(?:\\s*±\\s*' + number + '\\s*%?)?\\**$', 'i');
+  var align = rows[0].cells.map(function (_, col) {
+    return rows.slice(1).every(function (row) { return numeric.test(row.cells[col] || ''); }) ? '-:' : ':-';
+  });
+  rows.forEach(function (row) { row.cells = row.cells.map(spreadsheetCell); });
+  return { rows: rows, align: align, headers: 1, format: sep === '\t' ? 'tsv' : 'csv', warnings: [] };
+}
+
+function tableAlignment(spec, width) {
+  var align = [];
+  function read(s, depth) {
+    for (var i = 0; i < s.length && align.length < width; i++) {
+      var col = s[i], arg = tableGroup(s, i + 1);
+      if (col === '*' && arg) {
+        var part = tableGroup(s, arg.end);
+        if (!part || depth > 32) break;
+        for (var n = Number(arg.text); n > 0 && align.length < width; n--) {
+          var before = align.length;
+          read(part.text, depth + 1);
+          if (align.length === before) break;
+        }
+        i = part.end - 1;
+      } else {
+        if (/[lcrXpbm]/.test(col)) align.push(col === 'r' ? '-:' : col === 'c' ? ':-:' : ':-');
+        if (arg && /[@!><pbm]/.test(col)) i = arg.end - 1;
+      }
+    }
+  }
+  read(spec, 0);
+  return align;
+}
+
+function readLatexTable(input) {
+  /* TeX discards the newline after a comment. Keep original line numbers
+     separately so a warning still points into the author's pasted source. */
+  var text = '', starts = [];
+  input.split('\n').forEach(function (line, index, lines) {
+    starts.push(text.length);
+    var p = line.indexOf('%');
+    while (p >= 0 && countBackslashesBefore(line, p) % 2) p = line.indexOf('%', p + 1);
+    text += p >= 0 ? line.slice(0, p) : line + (index + 1 < lines.length ? '\n' : '');
+  });
+  var env = /\\begin\s*\{(tabular\*?|tabularx|array)\}/.exec(text);
+  /* An array inside a formula belongs to its cell. A formula that wraps
+     the entire input, on the other hand, can itself be the table to import. */
+  for (var dollar = 0; env && dollar < env.index; dollar++) {
+    if (text[dollar] !== '$' || countBackslashesBefore(text, dollar) % 2) continue;
+    var mathEnd = tableMathEnd(text, dollar);
+    if (mathEnd > env.index) {
+      var outside = text.slice(0, dollar) + text.slice(mathEnd);
+      if (outside.indexOf('&') >= 0 && outside.indexOf('\\\\') >= 0) env = null;
+      break;
+    }
+    if (mathEnd > dollar) dollar = mathEnd - 1;
+  }
+  var pos = 0, spec = '', endEnv = '', inArray = false;
+  if (env) {
+    pos = env.index + env[0].length;
+    endEnv = '\\end{' + env[1] + '}';
+    inArray = env[1] === 'array';
+    var args = env[1] === 'tabular*' || env[1] === 'tabularx' ? 2 : 1;
+    for (var a = 0; a < args; a++) {
+      var option = tableGroup(text, pos, '[');
+      var arg = tableGroup(text, option ? option.end : pos);
+      if (!arg) return null;
+      spec = arg.text; pos = arg.end;
+    }
+  } else if (text.indexOf('&') < 0 || text.indexOf('\\\\') < 0) return null;
+
+  var rows = [], cells = [], warnings = [], headers = 0, start = pos, end = text.length;
+  function line(at) { return lineColOf(starts, at).line; }
+  function warn(message, at) { warnings.push({ message: message, line: line(at) }); }
+  function finishCell(to) {
+    while (start < to && /\s/.test(text[start])) start++;
+    cells.push({ raw: text.slice(start, to).trim(), at: start });
+  }
+  function finishRow(to) {
+    if (cells.length || text.slice(start, to).trim()) {
+      finishCell(to);
+      rows.push({ cells: cells, line: line(cells[0].at) });
+    }
+    cells = [];
+  }
+  for (var i = pos; i < text.length; i++) {
+    var ch = text[i], group, next;
+    if (ch === '{' && (group = tableGroup(text, i))) { i = group.end - 1; continue; }
+    if (ch === '$' && (next = tableMathEnd(text, i)) > i) { i = next - 1; continue; }
+    if (ch === '&') { finishCell(i); start = i + 1; continue; }
+    if (ch !== '\\') continue;
+    if (endEnv && text.slice(i, i + endEnv.length) === endEnv) { end = i; break; }
+    if (text[i + 1] === '\\') {
+      finishRow(i);
+      i += text[i + 2] === '*' ? 2 : 1;
+      group = tableGroup(text, i + 1, '[');
+      if (group) i = group.end - 1;
+      start = i + 1;
+    } else {
+      var rule = /^\\(toprule|midrule|bottomrule|hline|cmidrule|cline)\b(?:\s*\[[^\]]*\])?(?:\s*\([^)]*\))?/.exec(text.slice(i));
+      if (rule && !cells.length && !text.slice(start, i).trim()) {
+        if (!headers && rows.length && /^(midrule|hline)$/.test(rule[1])) headers = rows.length;
+        i += rule[0].length - 1;
+        if (/^(cmidrule|cline)$/.test(rule[1]) && (group = tableGroup(text, i + 1))) i = group.end - 1;
+        start = i + 1;
+      } else i++; /* An escaped ampersand, brace or dollar is part of the cell. */
+    }
+  }
+  finishRow(end);
+  if (!rows.length || (!env && (rows.length < 2 || rows[0].cells.length < 2 ||
+      !rows.slice(1).some(function (row) { return row.cells.length > 1; })))) return null;
+
+  /* Track spans independently of the text so nested formatting never changes
+     the number or positions of cells. A normal multirow already has explicit
+     empty cells below it. Also accept a short row that omits the placeholder. */
+  var occupied = [], width = 0;
+  rows.forEach(function (row, r) {
+    var converted = row.cells.map(function (cell) {
+      var span = { cols: 1, rows: 1 };
+      var value = latexCellText(cell.raw, cell.at, span, warn, inArray, 0);
+      return { text: value.replace(/\s*\n\s*/g, ' ').trim(), span: span };
+    });
+    var count = converted.reduce(function (n, c) { return n + c.span.cols; }, 0);
+    var out = [];
+    converted.forEach(function (c) {
+      while (count < width && c.text && occupied[out.length] > r) { out.push(''); count++; }
+      for (var j = 0; j < c.span.cols; j++) {
+        if (c.span.rows > 1) occupied[out.length] = r + c.span.rows;
+        out.push(j ? '' : c.text);
+      }
+    });
+    row.cells = out;
+    if (r < (headers || 1)) width = Math.max(width, out.length);
+  });
+  if (headers > 1) warnings.push({ message: 'Joined ' + headers + ' header rows into one.', line: rows[0].line });
+  return { rows: rows, headers: headers || 1, align: tableAlignment(spec, width), format: 'latex', warnings: warnings };
+}
+
+function latexCellText(raw, at, span, warn, inArray, depth) {
+  if (depth > 64) return tableLiteral(raw);
+  var out = '', literal = '';
+  function flush() {
+    /* An array entry and the content of a color or span command inside it
+       inherit math mode. Keep adjacent TeX tokens together as one formula. */
+    out += inArray && literal.trim() ? '$' + tableMath(literal.trim()) + '$' : tableLiteral(literal);
+    literal = '';
+  }
+  function nested(arg, math) { return latexCellText(arg.text, at + arg.start, span, warn, math, depth + 1); }
+  for (var i = 0; i < raw.length;) {
+    var ch = raw[i], arg, end;
+    if (ch === '$' && (end = tableMathEnd(raw, i)) > i) {
+      flush(); out += tableMath(raw.slice(i, end)); i = end; continue;
+    }
+    if (ch === '{' && (arg = tableGroup(raw, i))) {
+      var style = /^\s*\\(bf|it)\b\s*/.exec(arg.text);
+      if (inArray && !style) { literal += raw.slice(i, arg.end); i = arg.end; continue; }
+      flush();
+      if (style) { arg.start += style[0].length; arg.text = arg.text.slice(style[0].length); }
+      var mark = !style ? '' : style[1] === 'bf' ? '**' : '*';
+      out += mark + nested(arg).trim() + mark;
+      i = arg.end; continue;
+    }
+    if (ch !== '\\') { literal += !inArray && ch === '~' ? ' ' : ch; i++; continue; }
+    var token = /^\\([a-zA-Z]+|[\s\S])/.exec(raw.slice(i));
+    if (!token) { literal += ch; i++; continue; }
+    var name = token[1], after = i + token[0].length;
+    if (inArray && !/^(?:multirow|multicolumn|textbf|textit|emph|makecell|underline|(?:cell|row|text)?color|cite|ref|footnote)$/.test(name)) {
+      literal += token[0]; i = after; continue;
+    }
+    if (name.length === 1 && !/[A-Za-z]/.test(name)) {
+      if (name === '\\') {
+        literal = literal.replace(/\s+$/, '') + ' ';
+        while (after < raw.length && /\s/.test(raw[after])) after++;
+      } else literal += name;
+      i = after; continue;
+    }
+    var nArgs = /^(multirow|multicolumn)$/.test(name) ? 3 : name === 'textcolor' ? 2 : 1;
+    var opt = tableGroup(raw, after, '['), args = [], p = opt ? opt.end : after;
+    while (args.length < nArgs && (arg = tableGroup(raw, p))) { args.push(arg); p = arg.end; }
+    if (args.length !== nArgs) { literal += token[0]; i = after; continue; }
+    flush();
+    var last = args[nArgs - 1];
+    if (/^(textbf|textit|emph)$/.test(name)) {
+      var fence = name === 'textbf' ? '**' : '*';
+      out += fence + nested(last).trim() + fence;
+    } else if (/^(makecell|underline)$/.test(name)) {
+      if (name === 'underline') warn('Removed underline formatting.', at + i);
+      out += nested(last, inArray && name === 'underline');
+    } else if (/^(multicolumn|multirow)$/.test(name)) {
+      var count = Number(args[0].text);
+      /* A typo in a pasted span must not allocate billions of empty cells. */
+      if (count >= 1 && count <= 16384 && count === Math.floor(count)) {
+        if (name === 'multicolumn') span.cols = count; else span.rows = count;
+      }
+      warn('Flattened \\' + name + ' into ordinary cells.', at + i);
+      out += nested(last, inArray);
+    } else if (/^(?:cell|row|text)?color$/.test(name)) {
+      warn('Removed color formatting (\\' + name + ').', at + i);
+      if (name === 'textcolor') out += nested(last, inArray);
+    } else {
+      /* In particular, a bare \ref would typeset as (???). A code span keeps
+         the complete paper command legible for the author to replace. */
+      out += tableCode(raw.slice(i, p));
+      warn('Kept \\' + name + ' as literal text.', at + i);
+    }
+    i = p;
+  }
+  flush();
+  return out;
+}
+
+function importTable(text, options) {
+  if (typeof text !== 'string') return null;
+  text = text.replace(/\r\n?/g, '\n');
+  var sheet = (text.indexOf('\t') >= 0 && readSpreadsheet(text, '\t')) ||
+    (text.indexOf(',') >= 0 && readSpreadsheet(text, ','));
+  /* A spreadsheet can itself contain a TeX array. Prefer the enclosing grid
+     unless its apparent header is a LaTeX preamble or alignment row. */
+  var first = text.replace(/^(?:[ \t]*\n)+/, '').split('\n', 1)[0];
+  var latexHeader = /^\s*(?:%|\\(?:begin|toprule|hline|centering)\b|\\\[)/.test(first) ||
+    /&.*\\\\\s*(?:%.*)?$/.test(first);
+  var t = (!latexHeader && sheet) || readLatexTable(text) || sheet;
+  if (!t) return null;
+  var head = [], body = [];
+  t.rows.forEach(function (row, index) {
+    var cells = row.cells;
+    if (index < t.headers) {
+      cells.forEach(function (v, c) { head[c] = [head[c], v].filter(Boolean).join(' '); });
+    } else {
+      if (cells.length > head.length) {
+        t.warnings.push({ message: 'Joined extra cells in the last column.', line: row.line });
+        cells = cells.slice(0, head.length - 1).concat(cells.slice(head.length - 1).join(' '));
+      }
+      while (cells.length < head.length) cells.push('');
+      body.push(cells);
+    }
+  });
+  var rows = [head, head.map(function (_, i) { return t.align[i] || ':-'; })].concat(body);
+  var markdown = rows.map(function (cells) { return '|' + cells.join('|') + '|'; }).join('\n');
+  markdown = fixAllText(markdown).text;
+  if (!options || options.pad !== false) {
+    /* Measure final Markdown, including shields added by Fix all. */
+    rows = markdown.split('\n').map(function (s) { return splitTableRow(s).cells; });
+    var widths = head.map(function (_, c) {
+      return rows.reduce(function (w, cells) { return Math.max(w, cells[c].length); }, 0);
+    });
+    markdown = rows.map(function (cells) {
+      return '| ' + cells.map(function (v, c) { return v + new Array(widths[c] - v.length + 1).join(' '); }).join(' | ') + ' |';
+    }).join('\n');
+  }
+  t.warnings.sort(function (a, b) { return a.line - b.line; });
+  return { markdown: markdown, warnings: t.warnings, format: t.format };
+}
+
 /* ---- compaction (pure): fewer characters, the same rendering ----
    OpenReview counts the Markdown source, so markup that renders to nothing
    (cell padding, long delimiter rows, a link label that repeats its URL) costs
@@ -3876,9 +4293,9 @@ function texProblems() {
   return { errors: errors, undef: undef };
 }
 
-function clearOldMath() {
+function clearOldMath(target) {
   if (window.MJ_READY && window.MathJax && typeof MathJax.typesetClear === 'function') {
-    try { MathJax.typesetClear([preview]); } catch (e) {}
+    try { MathJax.typesetClear([target]); } catch (e) {}
   }
 }
 
@@ -3909,7 +4326,11 @@ function resetTeXState() {
 function renderPreview() {
   if (renderBusy) { renderQueued = true; return; }
   renderBusy = true;
-  var text = ta.value;
+  /* Both previews share the TeX input jax. Queue them here so an import
+     cannot reset macros while the source preview is still being typeset. */
+  var importing = tableDialog.open;
+  var target = importing ? tablePreview : preview;
+  var text = importing ? (tableResult ? tableResult.markdown : '') : ta.value;
   var keep = scroller.scrollTop;
 
   var done = function () {
@@ -3918,27 +4339,34 @@ function renderPreview() {
     if (renderQueued) { renderQueued = false; renderPreview(); }
   };
 
-  clearOldMath(); /* MathJax must forget old items before their DOM is removed. */
+  clearOldMath(target); /* MathJax must forget old items before their DOM is removed. */
+  if (!importing && tablePreview.firstChild) {
+    clearOldMath(tablePreview);
+    tablePreview.textContent = '';
+  }
 
   if (!text.trim()) {
-    preview.innerHTML = '<p class="empty">Nothing to preview yet.</p>';
-    if (window.MJ_READY) setMathStatus('MathJax ready', 'good');
+    target.innerHTML = importing && tableInput.value.trim()
+      ? '<p class="empty">No table found. Paste the table with its header and rows.</p>'
+      : '<p class="empty">Nothing to preview yet.</p>';
+    if (!importing && window.MJ_READY) setMathStatus('MathJax ready', 'good');
     done();
     return;
   }
 
   try {
-    preview.innerHTML = renderOpenReviewMarkdown(text);
+    target.innerHTML = renderOpenReviewMarkdown(text);
   } catch (e) {
-    preview.innerHTML = '<p class="empty">Preview error: ' + escHtml(e && e.message ? e.message : e) + '</p>';
-    setMathStatus('Preview library error', 'err');
+    target.innerHTML = '<p class="empty">Preview error: ' + escHtml(e && e.message ? e.message : e) + '</p>';
+    if (!importing) setMathStatus('Preview library error', 'err');
     done();
     return;
   }
 
   if (window.MJ_READY && window.MathJax && typeof MathJax.typesetPromise === 'function') {
     resetTeXState();
-    MathJax.typesetPromise([preview]).then(function () {
+    MathJax.typesetPromise([target]).then(function () {
+      if (importing) { done(); return; }
       var p = texProblems();
       var parts = [];
       if (p.errors) parts.push(p.errors + ' TeX error' + (p.errors === 1 ? '' : 's'));
@@ -3947,7 +4375,8 @@ function renderPreview() {
       else setMathStatus('MathJax ready', 'good');
       done();
     }).catch(function (e) {
-      setMathStatus('MathJax: ' + (e && e.message ? e.message : e), 'err');
+      if (importing) target.textContent = 'MathJax: ' + (e && e.message ? e.message : e);
+      else setMathStatus('MathJax: ' + (e && e.message ? e.message : e), 'err');
       done();
     });
   } else {
@@ -4793,6 +5222,108 @@ function showToast(msg) {
   /* Long enough to read: a venue's rule is a full sentence. */
   toastTimer = setTimeout(function () { toast.classList.remove('show'); }, Math.max(1800, Math.min(7000, msg.length * 45)));
 }
+
+/* ---- import table ---- */
+var tableDialog = document.getElementById('tableDialog');
+var tableInput = document.getElementById('tableInput');
+var tablePreview = document.getElementById('tablePreview');
+var tableWarnings = document.getElementById('tableWarnings');
+var tablePad = document.getElementById('tablePad');
+var insertTableBtn = document.getElementById('insertTable');
+var tableOffer = document.getElementById('tableOffer');
+var tableResult = null, tableTarget = null, pastedTable = null;
+
+function refreshTableImport() {
+  tableResult = importTable(tableInput.value, { pad: tablePad.checked });
+  tableWarnings.textContent = '';
+  if (tableResult) tableResult.warnings.forEach(function (warning) {
+    var li = document.createElement('li');
+    li.textContent = 'Line ' + warning.line + ': ' + warning.message;
+    tableWarnings.appendChild(li);
+  });
+  insertTableBtn.disabled = !tableResult;
+  renderPreview();
+}
+
+function openTableImport(target, input) {
+  tableTarget = target;
+  tableInput.value = input;
+  tableDialog.showModal();
+  refreshTableImport();
+}
+
+document.getElementById('importTableBtn').addEventListener('click', function () {
+  openTableImport({ source: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, '');
+});
+tableInput.addEventListener('input', refreshTableImport);
+tablePad.addEventListener('change', refreshTableImport);
+document.getElementById('cancelTable').addEventListener('click', function () { tableDialog.close(); });
+tableDialog.addEventListener('close', function () {
+  if (tableDialog.open) return;
+  tableTarget = tableResult = null;
+  renderPreview();
+});
+
+insertTableBtn.addEventListener('click', function () {
+  if (!tableTarget || !tableResult) return;
+  if (tableTarget.source !== ta.value) {
+    tableDialog.close();
+    showToast('The draft changed. Open Import table again to choose where to insert.');
+    return;
+  }
+  var before = ta.value.slice(0, tableTarget.start), after = ta.value.slice(tableTarget.end);
+  /* Blank lines keep neighboring prose out of the GFM table, including when
+     the author opens the dialog in the middle of a paragraph. */
+  var left = !before || /\n\n$/.test(before) ? '' : /\n$/.test(before) ? '\n' : '\n\n';
+  var right = !after || /^\n\n/.test(after) ? '' : /^\n/.test(after) ? '\n' : '\n\n';
+  var prefix = before + left + tableResult.markdown;
+  tableDialog.close(); /* the editor must be focusable for its undo transaction */
+  setSourceText(prefix + right + after, prefix.length);
+  pastedTable = null;
+  tableOffer.hidden = true;
+  afterSourceChange();
+  showToast('Table inserted. ' + UNDO_HINT + ' undoes it.');
+});
+
+function looksLikeTablePaste(text) {
+  if (/\\begin\s*\{(?:tabular\*?|tabularx|array)\}/.test(text)) return true;
+  var lines = text.replace(/^\n+|\n+$/g, '').split('\n');
+  if (lines.length < 2) return false;
+  var tabs = lines[0].split('\t').length - 1;
+  if (tabs && lines.every(function (s) { return s.split('\t').length === tabs + 1; })) return true;
+  return lines.filter(function (s) { return /&.*\\\\/.test(s); }).length >= 2;
+}
+
+/* Let the native paste happen, including its undo entry. The offer belongs
+   to that exact draft and range and expires on the next change. */
+onEditor('paste', function (e) {
+  var text = e.clipboardData && e.clipboardData.getData('text/plain').replace(/\r\n?/g, '\n');
+  pastedTable = null;
+  tableOffer.hidden = true;
+  if (!text || !looksLikeTablePaste(text)) return;
+  var start = ta.selectionStart;
+  pastedTable = {
+    source: ta.value.slice(0, start) + text + ta.value.slice(ta.selectionEnd),
+    start: start, end: start + text.length
+  };
+});
+onEditor('input', function () {
+  if (pastedTable && pastedTable.source !== ta.value) pastedTable = null;
+  tableOffer.hidden = !pastedTable;
+});
+document.getElementById('convertPaste').addEventListener('click', function () {
+  if (pastedTable && pastedTable.source === ta.value) {
+    openTableImport(pastedTable, ta.value.slice(pastedTable.start, pastedTable.end));
+  } else {
+    pastedTable = null;
+    tableOffer.hidden = true;
+  }
+});
+document.getElementById('dismissPaste').addEventListener('click', function () {
+  pastedTable = null;
+  tableOffer.hidden = true;
+  ta.focus();
+});
 
 /* ---- boot ---- */
 applyPrefs();

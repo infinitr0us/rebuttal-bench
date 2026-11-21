@@ -232,6 +232,63 @@ try {
     return ok && prefs.venue === '' && currentIssues.length === 0 ||
       { before, limit: limitInput.value, issues: currentIssues.map((i) => i.title) };`);
 
+  await check('Import table previews sanitized cells, warnings and math, then inserts with one undo', `
+    const original = 'IntroSELECTConclusion';
+    setSourceText(original, 5, 11);
+    document.getElementById('importTableBtn').click();
+    if (!tableDialog.open || !insertTableBtn.disabled) return 'empty dialog';
+    tableInput.value = 'plain prose';
+    tableInput.dispatchEvent(new Event('input'));
+    if (!insertTableBtn.disabled) return 'prose accepted';
+    tableInput.value = 'Model & Score \\\\\\\\\\n\\\\underline{Ours} & $95\\\\%$ \\\\\\\\';
+    tableInput.dispatchEvent(new Event('input'));
+    for (let n = 0; n < 60 && !tablePreview.querySelector('mjx-container'); n++) await wait(100);
+    if (tablePreview.querySelector('th')?.textContent !== 'Model' ||
+        !tablePreview.querySelector('mjx-container') || !tableWarnings.textContent.includes('Line 2')) {
+      return { preview: tablePreview.innerHTML, warnings: tableWarnings.textContent };
+    }
+    tablePad.click();
+    insertTableBtn.click(); await wait(300);
+    const expected = 'Intro\\n\\n|Model|Score|\\n|:-|:-|\\n|Ours|$95\\\\\\\\%$|\\n\\nConclusion';
+    if (tableDialog.open || ta.value !== expected || !document.querySelector('#preview table')) return ta.value;
+    ta.focus(); document.execCommand('undo'); await wait(300);
+    return ta.value === original || ta.value;`);
+
+  await check('pasting offers conversion, Cancel keeps the paste, and one undo restores its exact range', `
+    const original = 'before replace after', pasted = 'Group\\tAP\\nA\\t9';
+    setSourceText(original, 7, 14);
+    const data = new DataTransfer(); data.setData('text/plain', pasted);
+    // A synthetic paste has no browser default action, so perform that insertion
+    // after the event and let the real input and undo events reach the editor.
+    if (!ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, cancelable: true }))) return 'paste cancelled';
+    document.execCommand('insertText', false, pasted);
+    const plain = 'before ' + pasted + ' after';
+    if (tableOffer.hidden || tableDialog.open || ta.value !== plain) return { offer: !tableOffer.hidden, value: ta.value };
+    document.getElementById('convertPaste').click();
+    if (!tableDialog.open || tableInput.value !== pasted) return tableInput.value;
+    document.getElementById('cancelTable').click(); await wait(50);
+    if (ta.value !== plain || tableOffer.hidden) return 'Cancel lost the paste';
+    ta.setSelectionRange(0, 0);
+    document.getElementById('convertPaste').click();
+    if (tablePad.checked) tablePad.click();
+    insertTableBtn.click(); await wait(250);
+    if (ta.value !== 'before \\n\\n|Group|AP|\\n|:-|-:|\\n|A|9|\\n\\n after' || !tableOffer.hidden) return ta.value;
+    ta.focus(); document.execCommand('undo'); await wait(250);
+    return ta.value === plain || ta.value;`);
+
+  await check('paste offers expire on edits and ignore ordinary prose and CSV', `
+    for (const [s, offered] of [['Research & development', false], ['A,B\\nx,1', false],
+        ['A & B \\\\\\\\\\nx & y \\\\\\\\', true], ['\\\\begin{tabular}{lr} A & B \\\\end{tabular}', true]]) {
+      setSourceText('Note: ', 6);
+      const data = new DataTransfer(); data.setData('text/plain', s);
+      ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data }));
+      document.execCommand('insertText', false, s);
+      if (!tableOffer.hidden !== offered) return { s, shown: !tableOffer.hidden };
+      document.execCommand('insertText', false, '.');
+      if (!tableOffer.hidden) return 'stale offer';
+    }
+    return true;`);
+
   // Compaction runs 300 ms after the last change.
   await check('Copy compact copies a shorter text that renders the same and leaves the editor alone', `
     const src = '| Method | Acc |\\n| --- | --- |\\n| A | 1 |';
@@ -353,6 +410,20 @@ try {
       !document.querySelector('#draftTools .dclose') &&
       gone.every((id) => localStorage.getItem('rebuttal-bench-draft-' + id) === null && draftMeta.gone[id]) ||
       { meta: draftMeta, value: ta.value };`);
+
+  await check('a fresh editor after a draft switch still offers to convert a pasted table', `
+    const origId = draftMeta.active;
+    document.querySelector('#draftTools .dadd').click(); await wait(50);
+    const pasted = 'Group\\tAP\\nA\\t9';
+    ta.focus();
+    const data = new DataTransfer(); data.setData('text/plain', pasted);
+    ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, cancelable: true }));
+    document.execCommand('insertText', false, pasted); await wait(50);
+    const offered = !tableOffer.hidden;
+    tableOffer.querySelector('#dismissPaste').click();
+    window.confirm = () => true;
+    deleteDraft(draftMeta.active); switchDraft(origId);
+    return offered || 'no offer after the switch';`);
 
   await check('Split cuts an over-limit draft into parts under the limit, which can become drafts', `
     limitInput.value = '300'; limitInput.dispatchEvent(new Event('input'));
