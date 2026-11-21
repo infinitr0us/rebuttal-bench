@@ -63,12 +63,17 @@ RegisterHTMLHandler(jsdomAdaptor(JSDOM));
 // output jax to compile, and no rebuttal uses proof trees.
 const PACKAGES = AllPackages.filter((p) => p !== 'bussproofs');
 
+/** The sanitized HTML openreview.net puts on the page, before MathJax runs. */
+function renderHtml(src) {
+  return DOMPurify.sanitize(marked(src));
+}
+
 /**
  * Render `src` the way openreview.net does and report what MathJax typesets.
  * @returns {{html: string, items: {tex: string, display: boolean, err: string|null}[]}}
  */
 function renderLikeOpenReview(src) {
-  const html = DOMPurify.sanitize(marked(src));
+  const html = renderHtml(src);
   const doc = mathjax.document('<!DOCTYPE html><html><body><div>' + html + '</div></body></html>', {
     InputJax: new TeX({ inlineMath: [['$', '$'], ['\\(', '\\)']], packages: PACKAGES }),
   });
@@ -100,4 +105,4 @@ function typeset(src) {
   return renderLikeOpenReview(src).items.map((i) => (i.display ? 'D:' : 'I:') + i.tex + (i.err ? ' [ERR ' + i.err + ']' : ''));
 }
 
-module.exports = { renderLikeOpenReview, typeset };
+module.exports = { renderHtml, renderLikeOpenReview, typeset };

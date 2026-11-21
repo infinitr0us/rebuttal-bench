@@ -199,6 +199,43 @@ try {
     btn.click(); await wait(100);
     return ta.value === 'Set \`\\\\{x\\\\}\` here.' || ta.value;`);
 
+  // Compaction runs 300 ms after the last change.
+  await check('Copy compact copies a shorter text that renders the same and leaves the editor alone', `
+    const src = '| Method | Acc |\\n| --- | --- |\\n| A | 1 |';
+    setSourceText(src, 0); updateAll(); await wait(700);
+    let copied = null;
+    Object.defineProperty(navigator, 'clipboard', { configurable: true,
+      value: { writeText: (t) => { copied = t; return Promise.resolve(); } } });
+    copyCompactBtn.click(); await wait(100);
+    return copied === '|Method|Acc|\\n|-|-|\\n|A|1|' && ta.value === src &&
+      renderOpenReviewMarkdown(copied) === renderOpenReviewMarkdown(src) &&
+      compactStat.textContent === '24 compact' && copyCompactBtn.classList.contains('primary') ||
+      { copied, value: ta.value, stat: compactStat.textContent };`);
+
+  await check('Apply to source compacts the editor, and one undo brings the text back', `
+    const src = ta.value;
+    applyCompactBtn.click(); await wait(300);
+    const applied = ta.value === '|Method|Acc|\\n|-|-|\\n|A|1|';
+    ta.focus(); document.execCommand('undo'); await wait(300);
+    return applied && ta.value === src || { applied, value: ta.value };`);
+
+  await check('the character chip says when only the compact form fits the limit', `
+    limitInput.value = '30'; limitInput.dispatchEvent(new Event('input')); await wait(700);
+    const rescued = charChip.classList.contains('over') && charChip.classList.contains('rescued') &&
+      !compactStat.classList.contains('over');
+    limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input')); await wait(700);
+    return rescued && !charChip.classList.contains('rescued') || { rescued, cls: charChip.className };`);
+
+  await check('a compaction switch turned off applies at once', `
+    compactList.querySelector('input[data-trick="tables"]').click(); await wait(500);
+    return prefs.compact.tables === false && compactStat.hidden || { tables: prefs.compact.tables, stat: compactStat.textContent };`);
+  await load();
+  await check('a compaction switch stays off after a reload', `
+    const box = compactList.querySelector('input[data-trick="tables"]');
+    const off = prefs.compact.tables === false && !box.checked;
+    box.click(); await wait(500);
+    return off && prefs.compact.tables === true || { off, now: prefs.compact.tables };`);
+
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).

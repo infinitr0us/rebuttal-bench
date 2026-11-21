@@ -326,7 +326,12 @@ window.MathJax = {
   .charchip.near .fill { background: var(--chip-near); }
   .charchip.over .fill { background: var(--chip-over); }
   .charchip.over { border-color: var(--err); color: var(--chip-over-fg); }
+  /* Over the limit as typed, but the compact form fits. */
+  .charchip.over.rescued { border-color: var(--warn); color: var(--title-warn); }
+  .charchip.over.rescued .fill { background: var(--chip-near); }
   .charchip .txt { position: relative; }
+  #compactStat { color: var(--ok); }
+  #compactStat.over { color: var(--err); }
 
   #hazStat.bad { color: var(--title-warn); }
   #hazStat.err { color: var(--err); }
@@ -512,13 +517,32 @@ window.MathJax = {
     color: var(--text);
   }
 
+  /* compaction */
+  .compact {
+    border-top: 1px solid var(--line);
+    background: var(--head-bg);
+    font-size: 12.5px;
+  }
+  .compact-sum { margin-left: 6px; color: var(--ok); text-transform: none; letter-spacing: 0.02em; }
+  .compact-sum.zero { color: var(--dim); }
+  .compact-body { max-height: 200px; overflow-y: auto; padding: 0 18px 10px; }
+  .compact-note { margin: 0 0 8px; color: var(--dim); font-size: 12px; line-height: 1.5; }
+  .compact-note b { color: var(--text); font-weight: 600; }
+  .trick { display: flex; align-items: center; gap: 8px; padding: 1px 0; color: var(--text); cursor: pointer; }
+  .trick input { margin: 0; accent-color: var(--accent); }
+  .trick .name { flex: 1; }
+  .trick .gain { font-family: var(--mono); font-size: 11.5px; color: var(--ok); white-space: nowrap; }
+  .trick .gain.off, .trick .gain.none { color: var(--dim); }
+  .compact-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  #compactFoot { font-size: 11.5px; color: var(--dim); }
+
   /* cheat sheet */
   .cheat {
     border-top: 1px solid var(--line);
     background: var(--head-bg);
     font-size: 12.5px;
   }
-  .cheat summary {
+  .cheat summary, .compact summary {
     padding: 8px 18px;
     cursor: pointer;
     color: var(--dim);
@@ -527,7 +551,7 @@ window.MathJax = {
     letter-spacing: 0.14em;
     text-transform: uppercase;
   }
-  .cheat summary:hover { color: var(--text); }
+  .cheat summary:hover, .compact summary:hover { color: var(--text); }
   .cheat table { border-collapse: collapse; margin: 0 18px 14px; width: calc(100% - 36px); }
   .cheat th, .cheat td {
     text-align: left;
@@ -709,12 +733,14 @@ window.MathJax = {
     <button id="themeBtn">Dark mode</button>
     <button id="exampleBtn">Load example</button>
     <button id="clearBtn">Clear</button>
+    <button id="copyCompactBtn" title="Copy a shorter form of the source that OpenReview renders exactly the same (see Compaction under the hazards); the editor keeps your text">Copy compact</button>
     <button id="copyBtn" class="primary">Copy source</button>
   </div>
 </header>
 
 <div class="statsbar">
   <span class="charchip" id="charChip" title="Counted like OpenReview’s own counter: length after trimming leading/trailing whitespace"><span class="fill" id="charFill"></span><span class="txt" id="charStat">0 / 5,000 characters</span></span>
+  <span id="compactStat" hidden title="What OpenReview counts for the text Copy compact puts on the clipboard: the same rendering, fewer characters"></span>
   <span id="wordStat">0 words</span>
   <span id="mathStat">0 math spans</span>
   <span id="hazStat" class="good">0 hazards</span>
@@ -724,12 +750,23 @@ window.MathJax = {
 
 <main>
   <section class="pane" aria-label="Source editor">
-    <div class="pane-head"><h2>Source</h2><span class="hint">exactly what you'll paste into OpenReview</span></div>
+    <div class="pane-head"><h2>Source</h2><span class="hint">exactly what you'll paste into OpenReview, or its compact form</span></div>
     <textarea id="src" spellcheck="false" placeholder="Type or paste your rebuttal…"></textarea>
     <div class="lint">
       <div class="lint-head"><span>Hazards</span> <span id="lintCount" class="zero">0</span><button type="button" id="fixAllBtn" hidden title="Rewrite every hazard that has a mechanical fix. One Ctrl+Z undoes the whole pass.">Fix all</button></div>
       <div id="lintList"></div>
     </div>
+    <details class="compact" id="compactBox">
+      <summary>Compaction <span id="compactSum" class="compact-sum zero"></span></summary>
+      <div class="compact-body">
+        <p class="compact-note">Shorter source, the same rendering on OpenReview: every change is checked against the rendered comment and dropped if anything would differ. <b>Copy compact</b> copies the short form; the editor keeps your text.</p>
+        <div id="compactList"></div>
+        <div class="compact-actions">
+          <button type="button" id="applyCompactBtn" title="Replace the editor text with the compact form (one undo brings it back)">Apply to source</button>
+          <span id="compactFoot"></span>
+        </div>
+      </div>
+    </details>
     <details class="cheat">
       <summary>Escape cheat sheet</summary>
       <table>
@@ -1946,6 +1983,478 @@ function fixAllText(text) {
   return { text: text, applied: applied };
 }
 
+/* ---- compaction (pure): fewer characters, the same rendering ----
+   OpenReview counts the Markdown source, so markup that renders to nothing
+   (cell padding, long delimiter rows, a link label that repeats its URL) costs
+   as much as content. Each trick below proposes edits; compactText keeps an
+   edit only when the whole comment still renders to exactly the same sanitized
+   HTML and the analyzer reports no hazard it did not report before. Equal HTML
+   means MathJax receives the same text, so no trick has to be argued correct
+   case by case: a candidate that would change anything is simply dropped.
+   The caller passes the renderer (the page: Marked + DOMPurify configured as
+   on OpenReview; the tests: the reference pipeline). The whole comment is
+   compared rather than one block because Markdown reaches across blocks (link
+   reference definitions, lazy continuation lines, a table swallowing the next
+   line). */
+
+function compactEdit(text, start, end, repl) {
+  return { start: start, end: end, text: repl, was: text.slice(start, end) };
+}
+
+/* The lines that start inside [a, b), without their newlines. */
+function compactLines(text, a, b) {
+  var out = [];
+  for (var s = a; s < b;) {
+    var e = text.indexOf('\n', s);
+    if (e < 0) e = text.length;
+    out.push({ start: s, end: e });
+    s = e + 1;
+  }
+  return out;
+}
+
+function maskHits(mask, a, b) {
+  for (var i = Math.max(0, a); i < b && i < mask.length; i++) if (mask[i]) return true;
+  return false;
+}
+
+/* Code and HTML blocks keep every character (OpenReview shows an HTML block as
+   typed); code spans, inline HTML and link syntax are off limits for edits
+   inside a line. */
+function compactContext(text) {
+  var model = collectMarkedRanges(text);
+  if (!model) return null;
+  var block = [], inline = [];
+  model.ranges.forEach(function (r) {
+    if (r.type === 'code' || (r.type === 'html' && !r.inline)) block.push(r);
+    else if (r.type === 'codespan' || r.type === 'html') inline.push(r);
+  });
+  var mathMask = null;
+  return {
+    model: model,
+    blockMask: makeMask(text.length, block),
+    inlineMask: makeMask(text.length, block.concat(inline, model.hidden)),
+    /* Formulas, including the ones MathJax will not typeset: whitespace inside
+       \text{...} is visible, so the whitespace tricks stay out of all of them. */
+    mathMask: function () {
+      if (!mathMask) mathMask = makeMask(text.length, analyze(text).spans);
+      return mathMask;
+    }
+  };
+}
+
+/* Marked keeps a paragraph's soft-wrap indentation and single trailing spaces
+   in its HTML, where the browser collapses them (OpenReview's note text is
+   white-space: normal; only <pre> keeps whitespace). The whitespace tricks are
+   compared on this collapsed form; everything else must match exactly. */
+function collapseWhitespace(html) {
+  return html.split(/(<pre[\s>][\s\S]*?<\/pre>)/).map(function (part, i) {
+    return i % 2 ? part : part.replace(/[ \t\n\r\f]+/g, ' ');
+  }).join('');
+}
+
+function mathSignature(res) {
+  return JSON.stringify(res.spans.map(function (sp) { return [sp.tex, !!sp.display, !!sp.recovered]; }));
+}
+
+function rangesOfType(ctx, type, topOnly) {
+  return ctx.model.ranges.filter(function (r) { return r.type === type && (!topOnly || r.depth === 0); });
+}
+
+/* GFM splits a table row at every pipe preceded by an even number of
+   backslashes (code spans included) and trims each cell. */
+function splitTableRow(line) {
+  var prefix = /^[ \t>]*/.exec(line)[0];
+  var body = line.slice(prefix.length).replace(/[ \t]+$/, '');
+  var parts = [], cur = 0;
+  for (var p = 0; p < body.length; p++) {
+    if (body[p] === '|' && countBackslashesBefore(body, p) % 2 === 0) {
+      parts.push(body.slice(cur, p));
+      cur = p + 1;
+    }
+  }
+  parts.push(body.slice(cur));
+  var lead = parts.length > 1 && parts[0] === '';
+  var trail = parts.length > (lead ? 2 : 1) && parts[parts.length - 1] === '';
+  return {
+    prefix: prefix, lead: lead, trail: trail,
+    cells: parts.slice(lead ? 1 : 0, trail ? parts.length - 1 : parts.length)
+  };
+}
+
+function joinTableRow(row, cells, lead, trail) {
+  return row.prefix + (lead ? '|' : '') + cells.join('|') + (trail ? '|' : '');
+}
+
+/* "| path\ |": without its space the backslash would escape the pipe. */
+function trimTableCell(cell, beforePipe) {
+  var c = cell.replace(/^[ \t]+/, '').replace(/[ \t]+$/, '');
+  if (beforePipe && c && countBackslashesBefore(c, c.length) % 2 === 1) c += ' ';
+  return c;
+}
+
+function eachTableRow(text, ctx, fn) {
+  rangesOfType(ctx, 'table').forEach(function (r) {
+    compactLines(text, r.start, r.end).forEach(function (ln, idx) {
+      var line = text.slice(ln.start, ln.end);
+      if (line.trim()) fn(ln, line, splitTableRow(line), idx === 1);
+    });
+  });
+}
+
+function findTablePadding(text, ctx) {
+  var edits = [];
+  eachTableRow(text, ctx, function (ln, line, row, isDelimiter) {
+    var cells;
+    if (isDelimiter) {
+      cells = row.cells.map(function (c) {
+        var t = c.trim();
+        if (!/^:?-+:?$/.test(t)) return null;
+        return (t.charAt(0) === ':' ? ':' : '') + '-' + (t.length > 1 && t.charAt(t.length - 1) === ':' ? ':' : '');
+      });
+      if (cells.indexOf(null) !== -1) return;
+    } else {
+      cells = row.cells.map(function (c, k) { return trimTableCell(c, k < row.cells.length - 1 || row.trail); });
+    }
+    var next = joinTableRow(row, cells, row.lead, row.trail);
+    if (next !== line) edits.push(compactEdit(text, ln.start, ln.end, next));
+  });
+  return edits;
+}
+
+/* Edge pipes are optional, except where the first cell would then start
+   another block (a list, quote, heading, HTML) or an empty edge cell needs its
+   pipe. Only rows outside lists and quotes, so no container prefix is in play. */
+var COMPACT_BLOCK_START = /^(?:[-+*>#=~`<]|\d{1,9}[.)](?:\s|$))/;
+function findTableEdges(text, ctx) {
+  var edits = [];
+  eachTableRow(text, ctx, function (ln, line, row, isDelimiter) {
+    if (row.prefix || row.cells.length < 2) return;
+    var first = row.cells[0].trim(), last = row.cells[row.cells.length - 1].trim();
+    var lead = row.lead && !(first && (isDelimiter ? /^:?-+:?$/.test(first) : !COMPACT_BLOCK_START.test(first)));
+    var trail = row.trail && !(last && countBackslashesBefore(last, last.length) % 2 === 0);
+    if (lead === row.lead && trail === row.trail) return;
+    edits.push(compactEdit(text, ln.start, ln.end, joinTableRow(row, row.cells, lead, trail)));
+  });
+  return edits;
+}
+
+/* Runs of blank lines, and blank lines that hold spaces, are one blank line. */
+function findBlankLines(text, ctx) {
+  var edits = [], re = /\n(?:[ \t]*\n)+/g, m;
+  while ((m = re.exec(text))) {
+    if (m[0] === '\n\n' || maskHits(ctx.blockMask, m.index, m.index + m[0].length)) continue;
+    edits.push(compactEdit(text, m.index, m.index + m[0].length, '\n\n'));
+  }
+  return edits;
+}
+
+/* Trailing spaces render as nothing, except two or more inside a paragraph,
+   which are a hard line break: a backslash before the newline is the same
+   break, one or more characters shorter. */
+function findTrailingSpace(text, ctx) {
+  var edits = [], re = /[ \t]+(?=\n|$)/g, m;
+  var paras = ctx.model.ranges.filter(function (r) { return r.type === 'paragraph' || r.type === 'text'; });
+  while ((m = re.exec(text))) {
+    var a = m.index, b = a + m[0].length, repl = '';
+    if (maskHits(ctx.blockMask, a, b) || maskHits(ctx.mathMask(), a, b)) continue;
+    var lineStart = text.lastIndexOf('\n', a - 1) + 1;
+    if (lineStart < a && /^ {2,}$/.test(m[0]) &&
+        paras.some(function (r) { return r.start <= a && r.end > b + 1; })) {
+      if (text[a - 1] === '\\') continue; /* "\\" would turn into an escaped backslash */
+      repl = '\\';
+    }
+    edits.push(compactEdit(text, a, b, repl));
+  }
+  return edits;
+}
+
+/* "##   Title ##" -> "## Title"; a one-line setext heading -> ATX. */
+function findHeadings(text, ctx) {
+  var edits = [];
+  rangesOfType(ctx, 'heading', true).forEach(function (r) {
+    var raw = text.slice(r.start, r.end).replace(/\n+$/, '');
+    var lines = raw.split('\n');
+    if (lines.length === 1) {
+      var m = /^ {0,3}(#{1,6})(?=[ \t]|$)([\s\S]*)$/.exec(lines[0]);
+      if (!m) return;
+      var content = m[2].trim().replace(/(^|[ \t]+)#+$/, '').trim();
+      var next = m[1] + (content ? ' ' + content : '');
+      if (next !== lines[0]) edits.push(compactEdit(text, r.start, r.start + lines[0].length, next));
+    } else if (lines.length === 2 && /^ {0,3}(=+|-+)[ \t]*$/.test(lines[1])) {
+      var atx = (r.token.depth === 1 ? '# ' : '## ') + lines[0].trim();
+      if (atx.length < raw.length) edits.push(compactEdit(text, r.start, r.start + raw.length, atx));
+    }
+  });
+  return edits;
+}
+
+/* "* * * * *" or "----------" -> "***" / "---". */
+function findRules(text, ctx) {
+  var edits = [];
+  rangesOfType(ctx, 'hr').forEach(function (r) {
+    var end = text.indexOf('\n', r.start);
+    if (end < 0 || end > r.end) end = r.end;
+    var line = text.slice(r.start, end), k = line.search(/[-*_]/);
+    if (k < 0) return;
+    var next = line.slice(0, k) + new Array(4).join(line.charAt(k));
+    if (next.length < line.length) edits.push(compactEdit(text, r.start, end, next));
+  });
+  return edits;
+}
+
+/* "[https://x.org/a](https://x.org/a)" and "<https://x.org/a>" -> the bare URL
+   (GFM links it by itself); "[t](<https://x.org/a>)" -> "[t](https://x.org/a)". */
+function findLinks(text, ctx) {
+  var edits = [];
+  rangesOfType(ctx, 'link').forEach(function (r) {
+    if (maskHits(ctx.blockMask, r.start, r.end)) return;
+    var raw = text.slice(r.start, r.end), m, next = null;
+    if ((m = /^<(https?:\/\/[^<>\s]+)>$/i.exec(raw))) next = m[1];
+    else if ((m = /^\[([^\[\]\\]+)\]\((https?:\/\/[^()\s<>\\]+)\)$/i.exec(raw)) && m[1] === m[2]) next = m[2];
+    else if ((m = /^(\[[^\]]*\]\()<([^<>\s()\\]+)>(\))$/.exec(raw))) next = m[1] + m[2] + m[3];
+    if (next !== null) edits.push(compactEdit(text, r.start, r.end, next));
+  });
+  return edits;
+}
+
+/* "> > quoted" -> ">>quoted": the space after ">" is optional. Only a single
+   space before a non-space, so indented code inside the quote stays code. */
+function findQuotes(text, ctx) {
+  var edits = [];
+  rangesOfType(ctx, 'blockquote', true).forEach(function (r) {
+    compactLines(text, r.start, r.end).forEach(function (ln) {
+      var line = text.slice(ln.start, ln.end), q = 0, out = '';
+      while (q < 3 && line[q] === ' ') q++;
+      if (line[q] !== '>') return; /* a lazy continuation line */
+      while (line[q] === '>') {
+        out += '>';
+        q++;
+        if (line[q] === ' ' && q + 1 < line.length && line[q + 1] !== ' ' && line[q + 1] !== '\t') q++;
+      }
+      if (out.length < q) edits.push(compactEdit(text, ln.start, ln.start + q, out));
+    });
+  });
+  return edits;
+}
+
+/* "-   item" -> "- item", for one-line items only: a longer item's
+   continuation lines are aligned to the old content column. */
+function findListMarkers(text, ctx) {
+  var edits = [];
+  rangesOfType(ctx, 'list_item').forEach(function (r) {
+    var raw = text.slice(r.start, r.end).replace(/\n+$/, '');
+    if (raw.indexOf('\n') !== -1) return;
+    var m = /^( *)([-+*]|\d{1,9}[.)])( {2,4})(?=\S)/.exec(raw);
+    if (!m) return;
+    var at = r.start + m[1].length + m[2].length;
+    edits.push(compactEdit(text, at, at + m[3].length, ' '));
+  });
+  return edits;
+}
+
+/* Indentation of paragraph lines (common in text pasted from .tex files or
+   e-mail) is stripped by Markdown. */
+function findIndentation(text, ctx) {
+  var edits = [];
+  rangesOfType(ctx, 'paragraph', true).forEach(function (r) {
+    compactLines(text, r.start, r.end).forEach(function (ln) {
+      var m = /^[ \t]+/.exec(text.slice(ln.start, ln.end));
+      /* The newline before the line counts too: it is inside a formula that
+         continues on this line. */
+      if (m && !maskHits(ctx.blockMask, ln.start, ln.end) && !maskHits(ctx.mathMask(), ln.start - 1, ln.start + m[0].length)) {
+        edits.push(compactEdit(text, ln.start, ln.start + m[0].length, ''));
+      }
+    });
+  });
+  return edits;
+}
+
+/* Named character references worth decoding, as "name:hex" pairs. A wrong or
+   missing entry costs nothing but a missed saving: the rendering check drops
+   any decode that does not produce the same HTML. */
+var COMPACT_ENTITIES = (function () {
+  var map = {};
+  ('nbsp:a0 cent:a2 pound:a3 yen:a5 euro:20ac sect:a7 copy:a9 reg:ae deg:b0 plusmn:b1 pm:b1 sup2:b2 sup3:b3 ' +
+   'micro:b5 para:b6 middot:b7 frac14:bc frac12:bd half:bd frac34:be times:d7 divide:f7 laquo:ab raquo:bb ' +
+   'ndash:2013 mdash:2014 lsquo:2018 rsquo:2019 ldquo:201c rdquo:201d bull:2022 hellip:2026 prime:2032 ' +
+   'Prime:2033 dagger:2020 Dagger:2021 permil:2030 trade:2122 larr:2190 uarr:2191 rarr:2192 darr:2193 ' +
+   'harr:2194 lArr:21d0 uArr:21d1 rArr:21d2 dArr:21d3 hArr:21d4 forall:2200 part:2202 exist:2203 ' +
+   'empty:2205 nabla:2207 isin:2208 notin:2209 ni:220b prod:220f sum:2211 minus:2212 radic:221a ' +
+   'prop:221d infin:221e ang:2220 and:2227 or:2228 cap:2229 cup:222a int:222b there4:2234 sim:223c ' +
+   'cong:2245 asymp:2248 approx:2248 ne:2260 equiv:2261 le:2264 leq:2264 ge:2265 geq:2265 sub:2282 ' +
+   'sup:2283 sube:2286 supe:2287 oplus:2295 otimes:2297 perp:22a5 sdot:22c5 lceil:2308 rceil:2309 ' +
+   'lfloor:230a rfloor:230b check:2713 cross:2717 star:2606 starf:2605 ' +
+   'Alpha:391 Beta:392 Gamma:393 Delta:394 Epsilon:395 Zeta:396 Eta:397 Theta:398 Iota:399 Kappa:39a ' +
+   'Lambda:39b Mu:39c Nu:39d Xi:39e Omicron:39f Pi:3a0 Rho:3a1 Sigma:3a3 Tau:3a4 Upsilon:3a5 Phi:3a6 ' +
+   'Chi:3a7 Psi:3a8 Omega:3a9 alpha:3b1 beta:3b2 gamma:3b3 delta:3b4 epsilon:3b5 zeta:3b6 eta:3b7 ' +
+   'theta:3b8 iota:3b9 kappa:3ba lambda:3bb mu:3bc nu:3bd xi:3be omicron:3bf pi:3c0 rho:3c1 ' +
+   'sigmaf:3c2 sigma:3c3 tau:3c4 upsilon:3c5 phi:3c6 chi:3c7 psi:3c8 omega:3c9').split(' ').forEach(function (p) {
+    var kv = p.split(':');
+    map[kv[0]] = String.fromCharCode(parseInt(kv[1], 16));
+  });
+  return map;
+})();
+
+function charFromCodePoint(cp) {
+  if (cp > 0xffff) {
+    cp -= 0x10000;
+    return String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff));
+  }
+  return String.fromCharCode(cp);
+}
+
+/* Decoded characters that are safe to type: no ASCII punctuation (Markdown
+   syntax, and "&#36;" is a deliberate dollar shield), no controls, and nothing
+   invisible (soft hyphen, zero-width and bidi marks, odd spaces), which would
+   be a trap in the source. A no-break space stays allowed: it is the common
+   case and renders exactly as its reference. */
+function compactableCodePoint(cp) {
+  if (cp < 0x80) return /[A-Za-z0-9]/.test(String.fromCharCode(cp));
+  if (cp < 0xa0 || cp === 0xad || (cp >= 0x300 && cp < 0x370)) return false;
+  if ((cp >= 0x2000 && cp <= 0x200f) || (cp >= 0x2028 && cp <= 0x202f) || (cp >= 0x205f && cp <= 0x206f)) return false;
+  if ((cp >= 0xd800 && cp <= 0xdfff) || cp === 0xfeff || cp >= 0xfff0 && cp <= 0xffff || cp > 0x10ffff) return false;
+  return true;
+}
+
+function findEntities(text, ctx) {
+  var edits = [], m;
+  var re = /&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z][A-Za-z0-9]{1,31}));/g;
+  while ((m = re.exec(text))) {
+    var a = m.index, b = a + m[0].length, ch;
+    if (maskHits(ctx.inlineMask, a, b)) continue;
+    if (m[3]) {
+      ch = COMPACT_ENTITIES.hasOwnProperty(m[3]) ? COMPACT_ENTITIES[m[3]] : null;
+    } else {
+      var cp = m[1] ? parseInt(m[1], 10) : parseInt(m[2], 16);
+      ch = compactableCodePoint(cp) ? charFromCodePoint(cp) : null;
+    }
+    if (ch && ch.length < m[0].length) edits.push(compactEdit(text, a, b, ch));
+  }
+  return edits;
+}
+
+/* In application order. `on` is the default; table edge pipes are off by
+   default because a table without them reads worse as plain text (the
+   notification e-mail, a co-author's copy) for 2 characters a row. */
+var COMPACT_TRICKS = [
+  { id: 'entities', on: true, find: findEntities, label: 'Character references',
+    hint: '&plusmn; becomes ±, &nbsp; a no-break space; never &lt; &amp; &#36; or invisible characters' },
+  { id: 'links', on: true, find: findLinks, label: 'Links that repeat their URL',
+    hint: '[https://x.org](https://x.org) and <https://x.org> become the bare URL, which OpenReview links by itself' },
+  { id: 'headings', on: true, find: findHeadings, label: 'Heading syntax',
+    hint: 'closing #s and extra spaces go; a Title / ===== heading becomes # Title' },
+  { id: 'rules', on: true, find: findRules, label: 'Horizontal rules', hint: '---------- becomes ---' },
+  { id: 'quotes', on: true, find: findQuotes, label: 'Space after > in quotes', hint: '> quoted text becomes >quoted text' },
+  { id: 'lists', on: true, find: findListMarkers, label: 'Spaces after list markers', hint: '-   item becomes - item' },
+  { id: 'indent', on: true, ws: true, find: findIndentation, label: 'Indented paragraph lines',
+    hint: 'leading spaces on the lines of a paragraph, common in text pasted from .tex files' },
+  { id: 'trailing', on: true, ws: true, find: findTrailingSpace, label: 'Trailing spaces',
+    hint: 'spaces at line ends; a two-space line break becomes a backslash break' },
+  { id: 'blank', on: true, find: findBlankLines, label: 'Extra blank lines', hint: 'runs of blank lines become one' },
+  { id: 'tables', on: true, find: findTablePadding, label: 'Table padding and delimiter rows',
+    hint: '| A | B | and | --- | :---: | become |A|B| and |-|:-:|' },
+  { id: 'tableEdges', on: false, find: findTableEdges, label: 'Outer table pipes',
+    hint: '|A|B| becomes A|B where Markdown allows it; harder to read as plain text' }
+];
+
+function compactDefaults() {
+  var on = {};
+  COMPACT_TRICKS.forEach(function (t) { on[t.id] = t.on; });
+  return on;
+}
+
+function issueCounts(issues) {
+  var counts = {};
+  issues.forEach(function (iss) {
+    var k = iss.sev + '|' + iss.title;
+    counts[k] = (counts[k] || 0) + 1;
+  });
+  return counts;
+}
+
+/* Rewrite `text` with the tricks switched on in `enabled` ({id: bool}).
+   `render(text)` must return the sanitized HTML OpenReview would show.
+   Returns {text, saved, tricks: [{id, on, count, kept, saved}], complete}, or
+   null when the text cannot be rendered. A trick that is off is still run on
+   the result, so the caller can show what it would add. `complete` is false
+   when the check budget ran out; the text is then still safe, only less short. */
+function compactText(text, enabled, render, maxChecks) {
+  var base;
+  try { base = render(text); } catch (e) { return null; }
+  var baseRes = analyze(text), baseIssues = issueCounts(baseRes.issues);
+  var baseWs = collapseWhitespace(base), baseMath = mathSignature(baseRes);
+  var checks = 0, budget = maxChecks || 400;
+
+  /* `ws`: compare with collapsible whitespace collapsed, and require every
+     formula (MathJax's input) to stay byte for byte the same. */
+  function sameRendering(candidate, ws) {
+    if (checks >= budget) return false;
+    checks++;
+    try {
+      var html = render(candidate);
+      if (ws ? collapseWhitespace(html) !== baseWs : html !== base) return false;
+      var res = analyze(candidate), now = issueCounts(res.issues);
+      if (ws && mathSignature(res) !== baseMath) return false;
+      return Object.keys(now).every(function (k) { return now[k] <= (baseIssues[k] || 0); });
+    } catch (e) { return false; }
+  }
+
+  /* Try a whole batch at once (the usual case: every edit is fine); when the
+     batch fails, split it until the edits that change the rendering are found. */
+  function keep(cur, kept, cands, ws) {
+    if (!cands.length) return kept;
+    var all = kept.concat(cands);
+    if (sameRendering(applyEditsToText(cur, all), ws)) return all;
+    if (cands.length === 1) return kept;
+    var mid = cands.length >> 1;
+    return keep(cur, keep(cur, kept, cands.slice(0, mid), ws), cands.slice(mid), ws);
+  }
+
+  function run(cur, trick) {
+    var ctx = compactContext(cur);
+    if (!ctx) return { text: cur, count: 0, kept: 0 };
+    var cands = [], taken = [];
+    trick.find(cur, ctx).forEach(function (e) {
+      if (e.text === e.was || editsOverlap([e], taken)) return;
+      taken.push(e);
+      cands.push(e);
+    });
+    var edits = keep(cur, [], cands, !!trick.ws);
+    return { text: applyEditsToText(cur, edits), count: edits.length, kept: cands.length - edits.length };
+  }
+
+  var cur = text, stats = {};
+  COMPACT_TRICKS.forEach(function (t) { stats[t.id] = { id: t.id, on: !!enabled[t.id], count: 0, kept: 0, saved: 0 }; });
+  /* A second pass catches what one trick uncovers for an earlier one (a
+     decoded entity in a table cell, a quote marker inside a table row). */
+  for (var pass = 0; pass < 2; pass++) {
+    var before = cur;
+    COMPACT_TRICKS.forEach(function (t) {
+      if (!enabled[t.id]) return;
+      var r = run(cur, t), s = stats[t.id];
+      s.count += r.count;
+      s.kept = r.kept;
+      s.saved += cur.trim().length - r.text.trim().length;
+      cur = r.text;
+    });
+    if (cur === before) break;
+  }
+  COMPACT_TRICKS.forEach(function (t) {
+    if (enabled[t.id]) return;
+    var r = run(cur, t), s = stats[t.id];
+    s.count = r.count;
+    s.kept = r.kept;
+    s.saved = cur.trim().length - r.text.trim().length;
+  });
+  return {
+    text: cur,
+    saved: text.trim().length - cur.trim().length,
+    tricks: COMPACT_TRICKS.map(function (t) { return stats[t.id]; }),
+    complete: checks < budget
+  };
+}
+
 function escHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -2060,6 +2569,14 @@ var themeBtn = document.getElementById('themeBtn');
 var fsEditorVal = document.getElementById('fsEditorVal');
 var fsPreviewVal = document.getElementById('fsPreviewVal');
 var saveStateEl = document.getElementById('saveState');
+var copyBtn = document.getElementById('copyBtn');
+var copyCompactBtn = document.getElementById('copyCompactBtn');
+var compactStat = document.getElementById('compactStat');
+var compactBox = document.getElementById('compactBox');
+var compactSum = document.getElementById('compactSum');
+var compactList = document.getElementById('compactList');
+var compactFoot = document.getElementById('compactFoot');
+var applyCompactBtn = document.getElementById('applyCompactBtn');
 
 /* ---- persistence: artifact storage -> localStorage -> memory ---- */
 var canArtifactStore = !!(window.storage && typeof window.storage.get === 'function' && typeof window.storage.set === 'function' && typeof window.storage.delete === 'function');
@@ -2111,7 +2628,7 @@ var PREFS_KEY = 'rebuttal-bench-prefs';
 var DRAFT_KEY = 'rebuttal-bench-draft';
 var FS_RANGES = { fsEditor: [11, 20], zoomPreview: [70, 200] };
 var FS_STEPS = { fsEditor: 1, zoomPreview: 10 };
-var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, sync: true };
+var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, sync: true, compact: compactDefaults(), compactOpen: false };
 
 function applyPrefs() {
   document.documentElement.setAttribute('data-theme', prefs.theme === 'dark' ? 'dark' : 'light');
@@ -2122,6 +2639,10 @@ function applyPrefs() {
   themeBtn.textContent = prefs.theme === 'dark' ? 'Light mode' : 'Dark mode';
   limitInput.value = prefs.limit;
   syncBox.checked = !!prefs.sync;
+  compactBox.open = !!prefs.compactOpen;
+  Array.prototype.forEach.call(compactList.querySelectorAll('input[data-trick]'), function (box) {
+    box.checked = !!prefs.compact[box.getAttribute('data-trick')];
+  });
 }
 
 var prefsTimer = null;
@@ -2358,6 +2879,7 @@ function updateAll() {
   charFill.style.width = pct + '%';
   charChip.classList.toggle('over', limit > 0 && chars > limit);
   charChip.classList.toggle('near', limit > 0 && chars <= limit && chars >= 0.85 * limit);
+  if (!(limit > 0 && chars > limit)) charChip.classList.remove('rescued');
 
   wordStat.textContent = fmt(words) + ' words';
   mathStat.textContent = fmt(res.mathCount) + ' math span' + (res.mathCount === 1 ? '' : 's');
@@ -2399,7 +2921,98 @@ function updateAll() {
   var fixable = currentIssues.reduce(function (acc, iss) { return acc + (iss.fix ? 1 : 0); }, 0);
   fixAllBtn.hidden = fixable === 0;
   fixAllBtn.textContent = 'Fix all (' + fixable + ')';
+  scheduleCompaction();
 }
+
+/* ---- compaction: applied on copy, the editor keeps the readable text ---- */
+
+/* One row per trick, built once so a focused checkbox survives updates. */
+COMPACT_TRICKS.forEach(function (t) {
+  var row = document.createElement('label');
+  row.className = 'trick';
+  row.innerHTML = '<input type="checkbox" data-trick="' + t.id + '"><span class="name">' + escHtml(t.label) +
+    '</span><span class="gain none"></span>';
+  compactList.appendChild(row);
+});
+
+var compactCache = null; /* {source, key, result} */
+var compactTimer = null;
+
+/* Compaction renders the draft a few dozen times, so it runs once the editor
+   has been idle for a moment rather than on every keystroke, and the copy
+   buttons reuse its result as long as the text and the switches are the same. */
+function compactResult() {
+  var text = ta.value, key = JSON.stringify(prefs.compact);
+  if (compactCache && compactCache.source === text && compactCache.key === key) return compactCache.result;
+  var result = null;
+  if (MARKED_READY && purifier) {
+    try { result = compactText(text, prefs.compact, renderOpenReviewMarkdown); } catch (e) { result = null; }
+  }
+  compactCache = { source: text, key: key, result: result };
+  return result;
+}
+
+function scheduleCompaction() {
+  clearTimeout(compactTimer);
+  compactTimer = setTimeout(updateCompaction, 300);
+}
+
+function updateCompaction() {
+  clearTimeout(compactTimer);
+  var r = compactResult();
+  var chars = ta.value.trim().length, saved = r ? r.saved : 0, after = chars - saved;
+  var limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
+
+  compactStat.hidden = saved <= 0;
+  compactStat.textContent = fmt(after) + ' compact';
+  compactStat.classList.toggle('over', limit > 0 && after > limit);
+  charChip.classList.toggle('rescued', limit > 0 && chars > limit && after <= limit);
+  copyCompactBtn.classList.toggle('primary', saved > 0);
+  copyBtn.classList.toggle('primary', saved <= 0);
+  copyCompactBtn.disabled = !r;
+  applyCompactBtn.disabled = !r || r.text === ta.value;
+  compactSum.textContent = !r ? 'unavailable' : saved > 0 ? '−' + fmt(saved) + ' characters' : 'nothing to save';
+  compactSum.classList.toggle('zero', saved <= 0);
+  compactFoot.textContent = r && !r.complete ? 'Stopped early on this long draft: the result is safe, but could be shorter.' : '';
+
+  Array.prototype.forEach.call(compactList.querySelectorAll('.trick'), function (row, i) {
+    var t = COMPACT_TRICKS[i], s = r ? r.tricks[i] : null, gain = row.querySelector('.gain');
+    row.querySelector('input').checked = !!prefs.compact[t.id];
+    gain.textContent = !s || !s.saved ? '' : '−' + fmt(s.saved) + (s.on ? '' : ' if on');
+    gain.className = 'gain' + (!s || !s.saved ? ' none' : s.on ? '' : ' off');
+    row.title = t.hint + (s && s.kept ? '. Left alone in ' + s.kept + (s.kept === 1 ? ' place' : ' places') +
+      ', where the change would alter the rendering.' : '');
+  });
+}
+
+compactList.addEventListener('change', function (e) {
+  var id = e.target && e.target.getAttribute('data-trick');
+  if (!id) return;
+  prefs.compact[id] = e.target.checked;
+  savePrefs();
+  updateCompaction();
+});
+
+compactBox.addEventListener('toggle', function () {
+  prefs.compactOpen = compactBox.open;
+  savePrefs();
+});
+
+applyCompactBtn.addEventListener('click', function () {
+  var r = compactResult();
+  if (!r || r.text === ta.value) { showToast('Nothing to compact'); return; }
+  setSourceText(r.text, Math.min(ta.selectionStart, r.text.length));
+  afterSourceChange();
+  showToast('Compacted: ' + fmt(r.saved) + ' characters fewer, same rendering. ' + UNDO_HINT + ' undoes it.');
+});
+
+copyCompactBtn.addEventListener('click', function () {
+  var r = compactResult();
+  if (!r) { showToast('Compaction needs Marked and DOMPurify, which did not load'); return; }
+  copyText(r.text, r.saved > 0
+    ? 'Copied the compact form: ' + fmt(r.saved) + ' characters fewer, same rendering'
+    : 'Copied (nothing to compact)');
+});
 
 /* ---- autofix ---- */
 
@@ -2580,19 +3193,33 @@ ta.addEventListener('scroll', function () {
   scroller.scrollTop = ratio * (scroller.scrollHeight - scroller.clientHeight);
 });
 
-document.getElementById('copyBtn').addEventListener('click', function () {
-  var txt = ta.value;
-  var ok = function () { showToast('Copied — paste it straight into OpenReview'); };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(txt).then(ok).catch(function () { fallbackCopy(ok); });
-  } else {
-    fallbackCopy(ok);
-  }
+copyBtn.addEventListener('click', function () {
+  copyText(ta.value, 'Copied — paste it straight into OpenReview');
 });
-function fallbackCopy(ok) {
-  ta.focus();
-  ta.select();
+function copyText(txt, msg) {
+  var ok = function () { showToast(msg); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(ok).catch(function () { fallbackCopy(txt, ok); });
+  } else {
+    fallbackCopy(txt, ok);
+  }
+}
+/* The editor itself is selected when it holds the text; anything else (the
+   compact form) goes through a temporary off-screen textarea. */
+function fallbackCopy(txt, ok) {
+  var box = ta;
+  if (txt !== ta.value) {
+    box = document.createElement('textarea');
+    box.value = txt;
+    box.setAttribute('readonly', '');
+    box.style.position = 'fixed';
+    box.style.left = '-9999px';
+    document.body.appendChild(box);
+  }
+  box.focus();
+  box.select();
   try { document.execCommand('copy'); ok(); } catch (e) { showToast('Copy failed — select and copy manually'); }
+  if (box !== ta) { document.body.removeChild(box); ta.focus(); }
 }
 
 /* Both go through setSourceText so the browser's undo stack can bring the
@@ -2640,6 +3267,13 @@ storeGet(PREFS_KEY).then(function (v) {
       if (zoom !== null && zoom >= FS_RANGES.zoomPreview[0] && zoom <= FS_RANGES.zoomPreview[1]) prefs.zoomPreview = zoom;
       if (typeof p.limit === 'number' && p.limit >= 0) prefs.limit = p.limit;
       if (typeof p.sync === 'boolean') prefs.sync = p.sync;
+      /* Only known tricks: one removed in a later version is simply forgotten. */
+      if (p.compact && typeof p.compact === 'object') {
+        Object.keys(prefs.compact).forEach(function (id) {
+          if (typeof p.compact[id] === 'boolean') prefs.compact[id] = p.compact[id];
+        });
+      }
+      if (typeof p.compactOpen === 'boolean') prefs.compactOpen = p.compactOpen;
     } catch (e) {}
   }
   applyPrefs();
