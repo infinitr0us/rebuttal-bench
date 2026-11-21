@@ -660,6 +660,88 @@ try {
     dropHistory('d1');
     return waiting && written || { waiting, written };`);
 
+  await check('an import whose list of drafts does not fit adds nothing, and leaves no text behind', `
+    const before = draftMeta.list.map((d) => d.id).join();
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      if (k === DRAFTS_KEY) throw new DOMException('full', 'QuotaExceededError');
+      return setItem.call(this, k, v);
+    };
+    try { importDrafts('An answer that has no room.', 'Lost.md', draftMeta.active); } finally { Storage.prototype.setItem = setItem; }
+    saveDraftMeta(); await wait(50);
+    const left = Object.keys(localStorage).filter((k) => (localStorage.getItem(k) || '').indexOf('An answer that has no room.') >= 0);
+    return draftMeta.list.map((d) => d.id).join() === before && !left.length && /nothing was imported/.test(toast.textContent) ||
+      { list: draftMeta.list.map((d) => d.name), left, toast: toast.textContent };`);
+
+  await check('an edit undone after its save failed does not come back on the next save', `
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      if (k === DRAFT_KEY) throw new DOMException('full', 'QuotaExceededError');
+      return setItem.call(this, k, v);
+    };
+    try { setSourceText('Discard this edit', 0); saveDraftNow(); } finally { Storage.prototype.setItem = setItem; }
+    const failed = !!memNewer[DRAFT_KEY];
+    setSourceText('First draft $x$.', 0); clearTimeout(draftTimer); clearTimeout(timer);
+    retryLocalWrites();
+    return failed && localStorage.getItem(DRAFT_KEY) === 'First draft $x$.' && !memNewer[DRAFT_KEY] ||
+      { failed, stored: localStorage.getItem(DRAFT_KEY) };`);
+
+  await check('Restore does not replace text another window saved since this one loaded it', `
+    keepVersion('test', 'An older version.');
+    localStorage.setItem(DRAFT_KEY, 'Saved by another window.'); /* as another window's autosave */
+    document.querySelector('#draftTools [data-act="history"]').click(); await wait(50);
+    const btn = [...historyList.querySelectorAll('[data-restore]')].find((b) => historyShown[+b.getAttribute('data-restore')].text === 'An older version.');
+    btn.click(); await wait(50);
+    const kept = ta.value === 'First draft $x$.' && localStorage.getItem(DRAFT_KEY) === 'Saved by another window.';
+    const msg = toast.textContent;
+    localStorage.setItem(DRAFT_KEY, 'First draft $x$.'); dropHistory('d1');
+    return kept && historyDialog.hidden && /Another window saved a newer version/.test(msg) || { kept, msg, value: ta.value };`);
+
+  await check('Split saves the draft first, and makes all parts drafts or none', `
+    limitInput.value = '40'; limitInput.dispatchEvent(new Event('input')); splitLabelBox.checked = false;
+    setSourceText('First part of the answer here.\\n\\nSecond part of the answer here.', 0); updateAll();
+    document.getElementById('splitBtn').click(); await wait(50);
+    const n = splitResult.parts.length, before = draftMeta.list.length;
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      if (k === DRAFTS_KEY) throw new DOMException('full', 'QuotaExceededError');
+      return setItem.call(this, k, v);
+    };
+    try { splitDraftsBtn.click(); } finally { Storage.prototype.setItem = setItem; }
+    saveDraftMeta(); await wait(50);
+    const sourceSaved = localStorage.getItem(DRAFT_KEY) === 'First part of the answer here.\\n\\nSecond part of the answer here.';
+    const none = draftMeta.list.length === before && !splitDialog.hidden;
+    /* Copy from the dialog keeps the focus there, with the editor behind it untouched. */
+    const realWrite = navigator.clipboard && navigator.clipboard.writeText;
+    if (navigator.clipboard) navigator.clipboard.writeText = () => Promise.reject(new Error('denied'));
+    splitParts.querySelector('[data-copy="0"]').click(); await wait(100);
+    const focusKept = !!document.activeElement && document.activeElement.matches('[data-copy="0"]');
+    if (navigator.clipboard) navigator.clipboard.writeText = realWrite;
+    closeSplit(); splitLabelBox.checked = true;
+    limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
+    setSourceText('First draft $x$.', 0); saveDraftNow();
+    return n === 2 && sourceSaved && none && focusKept || { n, sourceSaved, none, focusKept, count: draftMeta.list.length };`);
+
+  await check('a file read while the page moved on is not imported', `
+    const before = draftMeta.list.length;
+    importDrafts('Late file.', 'Late.md', 'dnotopen');
+    const refused = /changed while the file was being read/.test(toast.textContent) && draftMeta.list.length === before;
+    const bad = decodeTextFile(new Uint8Array([0xFF, 0xFE, 0x41, 0x00, 0x42]));
+    const twice = decodeTextFile(new Uint8Array([0xFF, 0xFE, 0xFF, 0xFE, 0x41, 0x00]));
+    return refused && !!bad.error && twice.text === '\\ufeffA' || { refused, bad, twice };`);
+
+  await check('Export asks about a draft whose read never answered, and forgets a deleted draft’s unsaved versions', `
+    const id = createDraft('Never answered', ''); saveDraftMeta();
+    fallbackDel(keyOfDraft(id)); delete draftTexts[id]; bodyKnown[id] = false; /* as after the 8 s watchdog */
+    let asked = '';
+    window.confirm = (q) => { asked = q; return false; };
+    exportAllDrafts();
+    historyUnsaved[id] = [{ at: 1, why: 'test', text: 'Unsaved version.' }];
+    window.confirm = () => true; deleteDraft(id); switchDraft('d1');
+    historyUnsaved[id] = [{ at: 1, why: 'test', text: 'Unsaved version.' }]; /* as if it came back */
+    pruneHistory();
+    return /“Never answered” has not loaded/.test(asked) && !historyUnsaved[id] || { asked, unsaved: !!historyUnsaved[id] };`);
+
   await check('a fresh editor after a draft switch still offers to convert a pasted table', `
     const origId = draftMeta.active;
     document.querySelector('#draftTools .dadd').click(); await wait(50);

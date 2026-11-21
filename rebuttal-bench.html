@@ -4420,12 +4420,16 @@ function readDraftsFile(content, fileName) {
   return { drafts: [{ name: cleanDraftName(base) || 'Imported', text: content.replace(/\r\n?/g, '\n') }], error: null };
 }
 
-/* What an import adds to `existing` drafts ({name, text}): each incoming
-   draft whose text no draft has yet, under a name no draft has yet. Nothing
-   is ever replaced; `same` counts the drafts already there. */
+/* What an import adds to `existing` drafts ({name, text}; text null when it
+   is not known here): each incoming draft whose text no known draft has yet,
+   under a name no draft has yet. Nothing is ever replaced; `same` counts
+   the drafts already there. */
 function importPlan(existing, incoming) {
   var texts = Object.create(null), names = Object.create(null), add = [], same = 0;
-  existing.forEach(function (d) { texts['t' + d.text] = true; names[d.name.toLowerCase()] = true; });
+  existing.forEach(function (d) {
+    if (typeof d.text === 'string') texts['t' + d.text] = true; /* null: a text not known here */
+    names[d.name.toLowerCase()] = true;
+  });
   incoming.forEach(function (d) {
     if (texts['t' + d.text]) { same++; return; }
     texts['t' + d.text] = true;
@@ -4957,7 +4961,7 @@ function markPending(key) {
    pending, and a newer one stays pending against this confirmed base. */
 function confirmRemote(key, value) {
   remoteDrafts[key] = value;
-  if (fallbackGet(key) === value) fallbackDel(pendingKey(key));
+  if (fallbackGet(key) === value) { fallbackDel(pendingKey(key)); retryHistory(); /* a marker's space is free */ }
   else if (fallbackGet(pendingKey(key)) !== null) markPending(key);
 }
 
@@ -5005,6 +5009,14 @@ function retryDeletes() {
    have come back (a switch, a deletion, leaving the page): until then the
    newer text lives in memory only. */
 function retryLocalWrites() {
+  /* The open draft's refused write is retried with what the editor holds
+     now, not the text that was refused: an edit undone since must not come
+     back. */
+  if (draftReady && !ta.readOnly && memNewer[draftKey]) {
+    if (memStore[draftKey] !== ta.value) storeDraft(ta.value, draftKey);
+    else fallbackSet(draftKey, ta.value);
+    if (!memNewer[draftKey]) { savedText = ta.value; bodyKnown[draftMeta.active] = true; }
+  }
   Object.keys(memNewer).forEach(function (key) {
     if (Object.prototype.hasOwnProperty.call(memStore, key)) fallbackSet(key, memStore[key]);
   });
@@ -5058,7 +5070,7 @@ function saveDraftNow() {
      newer one saved elsewhere. */
   if (value === savedText && !memNewer[key]) { saveStateEl.textContent = ''; return; }
   var done = storeDraft(value, key);
-  if (!memNewer[key]) savedText = value; /* only once it is really stored here */
+  if (!memNewer[key]) { savedText = value; bodyKnown[draftMeta.active] = true; } /* only once it is really stored here */
   if (key === draftKey) keepVersionWhileEditing(value);
   retryHistory(); /* versions that waited for space a save may have freed */
   done.then(function (persisted) {
@@ -5418,6 +5430,8 @@ var draftTabs = document.getElementById('draftTabs');
 var draftTools = document.getElementById('draftTools');
 var draftPanel = document.getElementById('draftPanel');
 var bodyState = {}; /* id -> 'loading' | 'ready' | 'failed': whether its text has been read */
+var bodyKnown = {}; /* id -> true once its text is known here: read, created or saved by this window
+                       (not after a read that failed or never answered) */
 var bodyLoads = {}; /* id -> the read in progress */
 
 function draftById(id) {
@@ -5436,6 +5450,7 @@ function startBodyLoad(id) {
   var key = keyOfDraft(id);
   bodyLoads[id] = loadDraft(key).then(function (res) {
     bodyState[id] = res.failed ? 'failed' : 'ready';
+    if (!res.failed) bodyKnown[id] = true;
     if (!res.failed && id !== draftMeta.active) draftTexts[id] = typeof res.value === 'string' ? res.value : '';
     /* Bring the store up to date with a local copy it never got. */
     if (res.pending && id !== draftMeta.active && typeof res.value === 'string') storeDraft(res.value, key);
@@ -5550,7 +5565,11 @@ function renderDraftTabs() {
    whose text has not been read yet (or could not be) is read first, with the
    editor locked meanwhile. */
 function openDraft(id) {
-  if (historyDialog && !historyDialog.hidden) closeHistory(); /* its versions belong to the draft left */
+  /* Dialogs work on the draft being left: History's versions, Split's parts,
+     the table about to be inserted. */
+  if (historyDialog && !historyDialog.hidden) closeHistory();
+  if (splitDialog && !splitDialog.hidden) closeSplit();
+  if (tableDialog && tableDialog.open) tableDialog.close();
   var local = fallbackGet(keyOfDraft(id)); /* read before `id` becomes the open draft */
   var text = typeof local === 'string' ? local : (draftTexts[id] || '');
   var state = bodyState[id] || 'ready';
@@ -5624,6 +5643,7 @@ function createDraft(name, text) {
   }
   draftMeta.list.push({ id: id, name: name.slice(0, 40), at: Date.now() });
   bodyState[id] = 'ready';
+  bodyKnown[id] = true;
   storeDraft(text, key);
   draftTexts[id] = text;
   return id;
@@ -5784,25 +5804,31 @@ splitDialog.addEventListener('click', function (e) {
   var copy = e.target.closest('[data-copy]');
   if (copy && splitResult) {
     var i = parseInt(copy.getAttribute('data-copy'), 10);
-    copyText(splitResult.parts[i].text, 'Copied part ' + (i + 1) + ' of ' + splitResult.parts.length);
+    copyText(splitResult.parts[i].text, 'Copied part ' + (i + 1) + ' of ' + splitResult.parts.length, copy);
   }
 });
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape' && !splitDialog.hidden) closeSplit();
 });
+/* All parts become drafts, or none: the draft being split is saved first,
+   and when a part or the list does not fit, the parts made are taken out
+   again and stay in the dialog to be copied. */
 splitDraftsBtn.addEventListener('click', function () {
-  if (!splitResult || splitResult.parts.length < 2 || !draftReady) return;
-  var base = draftById(draftMeta.active).name.slice(0, 30), n = splitResult.parts.length, first = null, made = 0;
+  if (!splitResult || splitResult.parts.length < 2 || !draftReady || ta.readOnly) return;
+  if (!secureOpenDraft()) { showToast('No space left in this browser even for this draft. ' + NO_ROOM); return; }
+  var base = draftById(draftMeta.active).name.slice(0, 30), n = splitResult.parts.length, made = [];
   splitResult.parts.forEach(function (p, i) {
-    var id = made === i ? createDraft(base + ' (' + (i + 1) + '/' + n + ')', p.text) : null;
-    if (id) made++;
-    if (!first) first = id;
+    var id = made.length === i ? createDraft(base + ' (' + (i + 1) + '/' + n + ')', p.text) : null;
+    if (id) made.push(id);
   });
+  if (made.length < n) discardNewDrafts(made);
+  if (made.length < n || !commitNewDrafts(made)) {
+    showToast('No space left in this browser for the parts as drafts: copy them from here instead. ' + NO_ROOM);
+    return;
+  }
   closeSplit();
-  if (!first) { showToast('No space left in this browser for the parts. Export your drafts, then delete some.'); return; }
-  switchDraft(first);
-  showToast(made === n ? n + ' new drafts, one per part; the draft you split is unchanged.'
-    : 'Only ' + made + ' of ' + n + ' parts fit in this browser: copy the others from the split instead.');
+  switchDraft(made[0]);
+  showToast(n + ' new drafts, one per part; the draft you split is unchanged.');
 });
 
 /* ---- history: earlier versions of each draft, in this browser only ----
@@ -5886,31 +5912,39 @@ function dropAllHistory() {
   return keys.length > 0;
 }
 /* The versions of a draft deleted elsewhere (another window, another
-   device) go with it, unless the draft was re-created since. */
+   device) go with it, unless the draft was re-created since: decided on
+   this window's list merged with the newest one stored here, since a
+   storage event can be older than what another window has already saved. */
 function pruneHistory() {
-  historyKeys().forEach(function (k) {
-    var id = k.slice(HISTORY_PREFIX.length);
-    if (draftMeta.gone[id] !== undefined && !draftById(id)) dropHistory(id);
+  var latest = fallbackGet(DRAFTS_KEY), meta = draftMeta;
+  if (typeof latest === 'string') meta = mergeDraftMeta(draftMeta, parseDraftMeta(latest), Date.now());
+  var ids = historyKeys().map(function (k) { return k.slice(HISTORY_PREFIX.length); })
+    .concat(Object.keys(historyUnsaved), Object.keys(memHistory));
+  ids.forEach(function (id) {
+    var alive = meta.list.some(function (d) { return d.id === id; });
+    if (meta.gone[id] !== undefined && !alive) dropHistory(id);
   });
 }
 
 /* The text of draft `id` as far as this window knows it, or null while it
-   is still loading or could not be read. For the open draft that is the
-   editor, unless it is unchanged here and another window of this browser
-   has saved a newer copy since. */
+   is still loading or was never read (a read that failed or did not answer
+   in time: bodyKnown). For the open draft that is the editor once it has
+   been edited, and otherwise the newest copy this browser keeps, which
+   another window may have saved since. The example stands in for a draft
+   never written: its text is empty. */
 function knownDraftText(id) {
   var local = fallbackGet(keyOfDraft(id)), state = bodyState[id] || 'ready';
   if (id === draftMeta.active) {
     if (ta.readOnly) return null;
-    var clean = ta.value === savedText && !memNewer[draftKey];
-    if (!clean) return ta.value;
-    if (state === 'failed') return null;
+    if (ta.value !== savedText || memNewer[draftKey]) return ta.value;
+    if (state === 'loading' || !bodyKnown[id]) return typeof local === 'string' && state !== 'loading' ? local : null;
     if (typeof local === 'string') return local;
-    return ta.value === EXAMPLE ? '' : ta.value; /* the example stands in for a draft never written */
+    return ta.value === EXAMPLE ? '' : ta.value;
   }
-  if (state !== 'ready') return null;
+  if (state === 'loading') return null;
   if (typeof local === 'string') return local;
-  return draftTexts[id] !== undefined ? draftTexts[id] : null;
+  if (!bodyKnown[id]) return null;
+  return draftTexts[id] === undefined || draftTexts[id] === EXAMPLE ? '' : draftTexts[id];
 }
 
 function versionTime(at) {
@@ -5922,7 +5956,23 @@ function versionTime(at) {
   }
 }
 
+/* Redrawn while open (a rename, a version from another window), the list
+   keeps the focus on the same version's button, or on the dialog. */
 function renderHistory() {
+  var el = document.activeElement, keep = null;
+  if (el && historyList.contains(el)) {
+    var attr = el.hasAttribute('data-restore') ? 'data-restore' : el.hasAttribute('data-copy-version') ? 'data-copy-version' : null;
+    var was = attr ? historyShown[parseInt(el.getAttribute(attr), 10)] : null;
+    keep = { attr: attr, v: was };
+  }
+  drawHistory();
+  if (!keep) return;
+  var at = -1;
+  if (keep.v) historyShown.forEach(function (v, i) { if (at < 0 && v.at === keep.v.at && v.text === keep.v.text) at = i; });
+  var again = at >= 0 && keep.attr ? historyList.querySelector('[' + keep.attr + '="' + at + '"]') : null;
+  (again || historyDialog.querySelector('.modal-x')).focus();
+}
+function drawHistory() {
   var d = draftById(draftMeta.active);
   historyFor = draftMeta.active;
   historyTitle.textContent = 'History of “' + (d ? d.name : 'this draft') + '”';
@@ -5967,15 +6017,20 @@ function closeHistory() {
   (btn || ta).focus();
 }
 
-/* A restore is one more edit: one undo brings the text back. The text it
-   replaces is kept as a version first, and so is a newer copy another
-   window saved meanwhile, which this editor has not shown. */
+/* A restore is one more edit: one undo brings the text back, and the text
+   it replaces is kept as a version first. */
 function restoreVersion(v) {
   if (!v || !draftReady || ta.readOnly) return;
   if (historyFor !== draftMeta.active) { closeHistory(); showToast('The open draft changed: open History again'); return; }
   if (v.text === ta.value) return;
+  /* Another window saved newer text since this editor loaded: this window
+     must not replace what it has never shown. */
   var stored = fallbackGet(draftKey);
-  if (typeof stored === 'string' && stored !== ta.value && stored !== savedText) keepVersion('saved in another window', stored);
+  if (typeof stored === 'string' && stored !== ta.value && stored !== savedText) {
+    closeHistory();
+    showToast('Another window saved a newer version of this draft. Reload the page to see it, then restore.');
+    return;
+  }
   keepVersion('before a restore');
   closeHistory();
   setSourceText(v.text, 0);
@@ -6034,32 +6089,60 @@ function exportOpenDraft() {
   if (!downloadFile(fileSafe(d ? d.name : 'draft') + '.md', text, 'text/markdown')) showToast('The browser did not allow the download');
 }
 
+/* Before new drafts take space, the open draft's edit is saved, through the
+   ordinary save (its version and status included): false when its text or
+   the mark that lets a reload choose it could not be stored here. */
+function secureOpenDraft() {
+  clearTimeout(draftTimer);
+  retryLocalWrites();
+  saveDraftNow();
+  return !memNewer[draftKey] && !memNewer[pendingKey(draftKey)];
+}
+/* New drafts count only once the list naming them is stored too: otherwise
+   they are taken out again (a tab whose name lived in memory only would
+   reopen as "Recovered draft", or not at all for blank text). */
+function commitNewDrafts(ids) {
+  saveDraftMeta();
+  if (!memNewer[DRAFTS_KEY]) return true;
+  discardNewDrafts(ids);
+  return false;
+}
+/* Take out drafts just made (with createDraft) that are not to stay. */
+function discardNewDrafts(ids) {
+  ids.forEach(function (id) {
+    var d = draftById(id);
+    if (d) draftMeta.list.splice(draftMeta.list.indexOf(d), 1);
+    draftMeta.gone[id] = Date.now();
+    deleteDraftStorage(keyOfDraft(id));
+    delete draftTexts[id];
+    delete bodyState[id];
+    delete bodyKnown[id];
+  });
+  saveDraftMeta();
+}
+var NO_ROOM = 'Export your drafts, then delete some.';
+
 /* An import only adds drafts, and only what this browser can keep: the open
-   draft's edit is saved first, and an imported draft whose text does not
-   fit is not added (createDraft). */
-function importDrafts(content, fileName) {
+   draft's edit is saved first, a draft whose text does not fit is not added
+   (createDraft), and none is added when the list cannot be stored. `forId`:
+   the draft that was open when the file was chosen; if the page moved on
+   while the file was read, nothing happens. */
+function importDrafts(content, fileName, forId) {
   if (!draftReady || ta.readOnly) { showToast('Wait until the open draft has loaded'); return; }
+  if ((forId && forId !== draftMeta.active) || !splitDialog.hidden || tableDialog.open) {
+    showToast('The page changed while the file was being read: import it again.');
+    return;
+  }
   var got = readDraftsFile(content, fileName);
   if (got.error) { showToast(got.error); return; }
   var latest = fallbackGet(DRAFTS_KEY); /* drafts another window added */
   if (typeof latest === 'string' && adoptDraftMeta(parseDraftMeta(latest))) saveDraftMeta();
-  clearTimeout(draftTimer);
-  retryLocalWrites();
-  if (ta.value !== savedText || memNewer[draftKey]) {
-    flushDraftLocally(ta.value, draftKey);
-    storeDraft(ta.value, draftKey);
-    if (!memNewer[draftKey]) savedText = ta.value;
-  }
-  if (memNewer[draftKey]) {
-    showToast('This browser has no space left even for the open draft, so nothing was imported. Export your drafts, then delete some.');
+  if (!secureOpenDraft()) {
+    showToast('This browser has no space left even for the open draft, so nothing was imported. ' + NO_ROOM);
     return;
   }
-  /* Only texts known here count as already here. */
-  var existing = [];
-  draftMeta.list.forEach(function (d) {
-    var text = knownDraftText(d.id);
-    existing.push({ name: d.name, text: text === null ? '\u0000unknown ' + d.id : text });
-  });
+  /* Only texts known here count as already here; unknown ones keep their names. */
+  var existing = draftMeta.list.map(function (d) { return { name: d.name, text: knownDraftText(d.id) }; });
   var plan = importPlan(existing, got.drafts), added = [], failed = [];
   if (!plan.add.length) {
     showToast(plan.same === 1 ? 'That draft is already here.' : 'All ' + plan.same + ' drafts are already here.');
@@ -6070,26 +6153,28 @@ function importDrafts(content, fileName) {
     if (id) added.push(id);
     else failed.push('“' + d.name + '”');
   });
-  if (!added.length) {
-    showToast('No space left in this browser for the imported drafts. Export your drafts, then delete some.');
+  if (!added.length || !commitNewDrafts(added)) {
+    showToast('No space left in this browser for the imported drafts, so nothing was imported. ' + NO_ROOM);
     return;
   }
   closeHistory();
-  switchDraft(added[0]); /* also saves the list */
+  switchDraft(added[0]);
   var n = added.length;
   showToast('Imported ' + n + ' draft' + (n === 1 ? '' : 's') + (plan.same ? '; ' + plan.same + ' already here' : '') +
-    (failed.length ? '. No space left for ' + failed.join(', ') + ': export your drafts, delete some, and import again' : '') + '.');
+    (failed.length ? '. No space left for ' + failed.join(', ') + ': ' + NO_ROOM.toLowerCase().replace(/\.$/, '') + ', and import again' : '') +
+    (!canLocalRead && !canArtifactStore ? '. This browser cannot keep drafts: export them before you leave' : '') + '.');
 }
 
 /* Text files as UTF-8 (with or without a byte order mark) or UTF-16 with
-   one; anything else is refused rather than read as replacement characters. */
+   one; anything else, malformed UTF-16 included, is refused rather than
+   read with replacement characters. Only the first mark is dropped. */
 function decodeTextFile(bytes) {
   try {
-    if (bytes[0] === 0xFF && bytes[1] === 0xFE) return { text: new TextDecoder('utf-16le').decode(bytes.subarray(2)) };
-    if (bytes[0] === 0xFE && bytes[1] === 0xFF) return { text: new TextDecoder('utf-16be').decode(bytes.subarray(2)) };
+    if (bytes[0] === 0xFF && bytes[1] === 0xFE) return { text: new TextDecoder('utf-16le', { fatal: true, ignoreBOM: true }).decode(bytes.subarray(2)) };
+    if (bytes[0] === 0xFE && bytes[1] === 0xFF) return { text: new TextDecoder('utf-16be', { fatal: true, ignoreBOM: true }).decode(bytes.subarray(2)) };
     return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes) };
   } catch (e) {
-    return { error: 'This file is not UTF-8 text. Save it as UTF-8 and import it again.' };
+    return { error: 'This file is not UTF-8 or UTF-16 text. Save it as UTF-8 and import it again.' };
   }
 }
 
@@ -6111,19 +6196,23 @@ window.addEventListener('storage', function (e) {
 });
 document.getElementById('exportAllBtn').addEventListener('click', exportAllDrafts);
 document.getElementById('exportOneBtn').addEventListener('click', exportOpenDraft);
+var importFor = null; /* the draft open when the file was chosen */
 document.getElementById('importBtn').addEventListener('click', function () {
   importFile.value = '';
+  importFor = draftMeta.active;
   importFile.click();
 });
 importFile.addEventListener('change', function () {
-  var f = importFile.files && importFile.files[0];
+  var f = importFile.files && importFile.files[0], forId = importFor;
   if (!f) return;
-  if (f.size > 30e6) { showToast('That file is too large to be drafts.'); return; }
+  /* An export escapes control characters six times over: far beyond what
+     browser storage holds, so any export of it still fits under this. */
+  if (f.size > 100e6) { showToast('That file is too large to be drafts.'); return; }
   var reader = new FileReader();
   reader.onload = function () {
     var got = decodeTextFile(new Uint8Array(reader.result));
     if (got.error) showToast(got.error);
-    else importDrafts(got.text, f.name);
+    else importDrafts(got.text, f.name, forId);
   };
   reader.onerror = function () { showToast('Could not read that file.'); };
   reader.readAsArrayBuffer(f);
@@ -6711,7 +6800,11 @@ setTimeout(function () {
   if (draftReady) return;
   draftMeta = parseDraftMeta(fallbackGet(DRAFTS_KEY));
   draftKey = keyOfDraft(draftMeta.active);
-  draftMeta.list.forEach(function (d) { bodyState[d.id] = 'ready'; });
+  /* Known: this browser's copies; a draft without one stays unknown. */
+  draftMeta.list.forEach(function (d) {
+    bodyState[d.id] = 'ready';
+    if (typeof fallbackGet(keyOfDraft(d.id)) === 'string') bodyKnown[d.id] = true;
+  });
   finishBoot({ value: fallbackGet(draftKey), pending: false, failed: false },
     'Storage did not answer: working from this browser’s copy');
 }, 8000);

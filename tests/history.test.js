@@ -110,6 +110,10 @@ test('an import adds only new texts, under names no draft has, and replaces noth
     ],
     same: 2,
   });
+  // A draft whose text is not known here keeps its name but matches no text,
+  // not even one an archive could hold.
+  assert.deepEqual(plain(A.importPlan([{ name: 'B', text: null }], [{ name: 'B', text: '\u0000unknown d2' }, { name: 'X', text: '' }])),
+    { add: [{ name: 'B (2)', text: '\u0000unknown d2' }, { name: 'X', text: '' }], same: 0 });
   // Texts that look like object keys are ordinary texts.
   assert.equal(A.importPlan([], [{ name: 'x', text: '__proto__' }, { name: 'y', text: 'constructor' }]).add.length, 2);
 });

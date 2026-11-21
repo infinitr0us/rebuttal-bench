@@ -218,21 +218,33 @@ cases, Chrome probes); keep their rules:
   deletes its history, here and, through tombstones, in other windows and after a boot
   (`pruneHistory`). Two windows adding versions of one draft at the same moment can lose one of
   the two versions.
-- **The History dialog is modal** (`setModal`: everything behind it is `inert`, so no draft switch
-  or keystroke reaches the editor while it is open; the split dialog uses it too). Its versions
-  belong to `historyFor`: a draft switch closes it, and `restoreVersion` refuses a version of
-  another draft. Before a restore it keeps both the editor's text and a newer copy another window
-  saved. Copy passes its button to `copyText`, whose fallback then never selects the editor.
-- **Files**: `knownDraftText(id)` is a draft's text or null while it loads or could not be read
-  (an unchanged editor yields to a newer copy another window saved). Export writes `draftsFile`
-  with every known text and names the others before leaving them out; Download refuses an unknown
-  text. Import reads a `.json` export (`readDraftsFile`, no limit on the number of drafts, format
-  version 1) or any other text file as one literal draft, decoded as UTF-8 or UTF-16 with a BOM
-  and refused otherwise (`decodeTextFile`). It first takes in other windows' drafts and saves the
-  open draft's edit, stops when even that does not fit, and `importPlan` adds only texts no
-  known draft has, under names no draft has. `createDraft` stores a body before giving it a tab,
-  and returns null (no draft) when it does not fit; the import then names what was left out. An
-  import never replaces or merges into a draft.
+- **Dialogs are modal** (`setModal`: everything behind History and Split is `inert`, so no draft
+  switch or keystroke reaches the editor while one is open) and **bound to their draft**: a draft
+  switch (`openDraft`) closes History, Split and Import table. `restoreVersion` refuses a version
+  of another draft (`historyFor`), and refuses when another window saved newer text since this
+  editor loaded it (reload first); otherwise it keeps the editor's text as a version first.
+  Copy in a dialog passes its button to `copyText`, whose fallback then never selects the editor.
+  `renderHistory` keeps the focus on the same version through a redraw.
+- **Files**: `knownDraftText(id)` is a draft's text or null while it loads or was never read
+  (`bodyKnown`: set by a successful read, `createDraft` or a successful save; not by the 8 s
+  watchdog unless this browser has a copy). An edited editor is the author's text; an unchanged one
+  yields to a newer copy another window saved; the example stands for an empty draft. Export
+  writes `draftsFile` with every known text and names the others before leaving them out;
+  Download refuses an unknown text. Import reads a `.json` export (`readDraftsFile`, no limit on
+  the number of drafts, format version 1) or any other text file as one literal draft, decoded
+  strictly as UTF-8 or UTF-16 with one BOM (`decodeTextFile`), and is dropped when the open draft
+  or a dialog changed while the file was read (`importFor`). It takes in other windows' drafts,
+  saves the open draft through `secureOpenDraft` (the ordinary save; its body and pending mark
+  must both be stored), and `importPlan` adds only texts no known draft has (an unknown text
+  keeps only its name), under names no draft has. `createDraft` stores a body before giving it a
+  tab and returns null when it does not fit; `commitNewDrafts` then stores the list and, when
+  that does not fit, takes the new drafts out again (`discardNewDrafts`, with tombstones).
+  Split's "Open the parts as drafts" does the same, all parts or none. A failed write of the open
+  draft is retried with the editor's current text (`retryLocalWrites`), so an undone edit cannot
+  come back. Nothing is ever replaced or merged into a draft.
+- Known limits of Files: two windows importing the same file at the same instant can each add it
+  (two identical drafts, nothing lost); a browser that lets the page read local storage but not
+  write it, while an asynchronous store works, reports no space for an import.
 
 ## Splitting
 

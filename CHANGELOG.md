@@ -50,6 +50,14 @@
   as `.md`. *Import* reads such a file, or any `.md`/`.txt` file as one draft, and only adds
   drafts: a text already here is skipped, and a name already taken gets a number. The online
   page and a downloaded copy keep separate drafts, so this is also how drafts move between them.
+- Safe with storage nearly full, several windows and a slow store: an import or a split saves
+  the open draft first, adds drafts only when their text and the list naming them are stored
+  (all parts of a split or none), and says what it left out; a draft that has not loaded is never
+  written to a file as blank; Restore refuses to replace text another window saved since; a
+  failed save is retried with the current text, so an undone edit cannot come back (a problem
+  older versions had); History, Split and Import table close when the open draft changes.
+- Two Codex reviews of this feature found 34 problems, all fixed and covered by tests except two
+  documented limits (AGENTS.md, "Drafts and storage").
 
 ### Project
 - DOMPurify 3.4.17, which openreview-web now uses (reported by `npm run check-upstream`).
