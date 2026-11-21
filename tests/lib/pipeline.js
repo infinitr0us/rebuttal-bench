@@ -75,11 +75,12 @@ function mathDocument(html) {
 }
 
 /**
- * Render `src` the way openreview.net does and report what MathJax typesets.
+ * Render `src` the way openreview.net shows it once posted (constructEdit in
+ * client/view-v2.js trims a textarea first) and report what MathJax typesets.
  * @returns {{html: string, items: {tex: string, display: boolean, err: string|null}[]}}
  */
 function renderLikeOpenReview(src) {
-  const html = renderHtml(src);
+  const html = renderHtml(src.trim());
   const doc = mathDocument(html);
   doc.findMath();
   const items = [];
@@ -92,7 +93,7 @@ function renderLikeOpenReview(src) {
         if (err) return;
         if (n.isKind('merror')) err = n.attributes.get('data-mjx-error') || 'merror';
         // noundefined renders an unknown macro as red text instead of an error.
-        else if (n.isKind('mtext') && n.attributes.get('mathcolor') === 'red' && n.getText().startsWith('\\')) {
+        else if (n.isKind('mtext') && n.attributes.getExplicit('mathcolor') === 'red' && n.getText().startsWith('\\')) {
           err = 'undefined ' + n.getText();
         }
       });

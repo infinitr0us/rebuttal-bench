@@ -127,9 +127,11 @@ test('a BOM that posting trims away is not counted', () => {
 
 // ---- TeX problems reported by MathJax ----
 
-const problems = (src, reports = texReports(src)) => {
+// `stale`: the reports come from another version of the text, as while the
+// preview catches up with an edit.
+const problems = (src, reports = texReports(src), stale = false) => {
   const res = A.analyze(src);
-  return [...A.texProblemIssues(src, res.spans, reports, res.issues)];
+  return [...A.texProblemIssues(src, res.spans, reports, res.issues, { stale })];
 };
 const errorsAfter = (src) => renderLikeOpenReview(src).items.filter((i) => i.err).map((i) => i.err);
 
@@ -212,8 +214,10 @@ test('a TeX error gets a card at its formula, unless the analyzer already explai
   assert.match(card.detail, /Double exponent: use braces to clarify/);
   assert.equal(src.slice(card.start, card.end), '$x^2^3$');
   const res = A.analyze(src);
-  const other = { sev: 'warn', title: 'Something about this formula', start: 6, end: 9 };
+  const other = { sev: 'warn', title: 'Something about this formula', start: 6, end: 9, math: true };
   assert.deepEqual([...A.texProblemIssues(src, res.spans, texReports(src), [other])], []);
+  // A card that is not about Markdown damaging TeX explains nothing.
+  assert.equal([...A.texProblemIssues(src, res.spans, texReports(src), [{ ...other, math: false }])].length, 1);
   // Nor does the posting-trim card on the same line.
   const nbsp = ' # Bound $x^2^3$';
   const nbspRes = A.analyze(nbsp);
@@ -225,13 +229,15 @@ test('a TeX error gets a card at its formula, unless the analyzer already explai
   assert.equal([...A.texProblemIssues(ph, phRes.spans, texReports(ph), phRes.issues)].length, 1);
 });
 
-test('reports from an older version of the text follow the formulas to their new place', () => {
+test('reports from an older version of the text follow the formulas to their new place, without a fix', () => {
   const old = 'Bold $\\bm{x}$.';
   const now = 'A new first sentence. ' + old;
-  const [card] = problems(now, texReports(old));
+  const [card] = problems(now, texReports(old), true);
   assert.equal(now.slice(card.start, card.end), '\\bm');
+  assert.equal(card.fix, null, 'a fix waits for the typeset of this text');
+  assert.match(card.detail, /once the preview has caught up/);
   // A formula edited since the typeset has no report yet.
-  assert.deepEqual(problems('Bold $\\bm{y}$.', texReports(old)), []);
+  assert.deepEqual(problems('Bold $\\bm{y}$.', texReports(old), true), []);
 });
 
 test('the k-th report of a TeX belongs to the k-th formula with that TeX', () => {
@@ -245,4 +251,125 @@ test('the k-th report of a TeX belongs to the k-th formula with that TeX', () =>
 test('the preview reports what the posted comment typesets', () => {
   // texReports typesets the trimmed text, as the page's preview does.
   assert.deepEqual(texReports('    $\\bm x$ starts the comment').map((r) => r.undef), [['\\bm']]);
+});
+
+// ---- findings of the Codex review of 2026-11-21 (reviews/2026-11-21/codex-review-preflight) ----
+
+const errorsOf = (src) => texReports(src).flatMap((r) => r.undef.concat(r.errors));
+
+test('H1: the analyzer reads the comment as posted, so Fix all leaves code that posting creates alone', () => {
+  const src = '    ```text\n\nCost $5 to $10.\n\n```';
+  assert.equal(A.fixAllText(src).text, src);
+  assert.deepEqual(issues(src).map((i) => i.title), [TRIM]);
+});
+
+test('H2: a macro fix that would change another formula is not offered', () => {
+  for (const src of ['$\\R_i$ and $x_{j}$.', '$\\xspace$ then $$y$$.']) {
+    const [card] = problems(src);
+    assert.ok(card, src);
+    assert.equal(card.fix, null, src);
+    assert.match(card.detail, /the fix would change something else/);
+  }
+});
+
+test('M1: only the uses MathJax reported are rewritten', () => {
+  // A \label key: two words, one reported use.
+  assert.equal(problems('$$\\label{eq:\\R}\\tag{1}\\R$$ As in $\\ref{eq:\\R}$.')[0].fix, null);
+  // A macro expanded from another: no word to rewrite in the first formula.
+  assert.equal(problems('$\\def\\f{\\R}$ then $\\f$ and $\\R$')[0].fix, null);
+  // \verb text and TeX comments are not uses.
+  const verb = '$\\bm v + \\verb!\\bm!$';
+  assert.equal(applyFix(verb, problems(verb)[0]), '$\\boldsymbol v + \\verb!\\bm!$');
+  const comment = '$\\R + x % \\newcommand{\\R}{0}\n$';
+  assert.equal(applyFix(comment, problems(comment)[0]), '$\\mathbb{R} + x % \\newcommand{\\R}{0}\n$');
+});
+
+test('M2: a formula that inline Markdown cuts apart is not where the report goes', () => {
+  const src = '$\\bm{x}+a*b*c$\n\n$\\bm{x}+a\\*b\\*c$';
+  const [card] = problems(src);
+  assert.equal(card.start, src.lastIndexOf('\\bm'));
+  assert.deepEqual([...card.fix.edits].map((e) => e.start), [src.lastIndexOf('\\bm')]);
+});
+
+test('M3: the posted first block keeps its math, placeholders and code checks', () => {
+  const s = '    $\\bm{x}$ TODO';
+  assert.equal(A.analyze(s).mathCount, 1);
+  assert.deepEqual(placeholders(s), ['TODO']);
+  assert.equal(problems(s)[0].start, s.indexOf('\\bm'));
+  const t = '    # Results\n    $\\alpha$';
+  const ts = issues(t);
+  assert.ok(ts.some((i) => i.title === 'Indented text became a code block'));
+  assert.match(ts.find((i) => i.title === TRIM).detail, /becomes a heading/);
+  const u = '    $\\bm{x}$\n\n$\\newcommand{\\bm}[1]{(#1)}$ Later $\\bm{x}$.';
+  const [card] = problems(u);
+  assert.equal(card.start, u.indexOf('\\bm'));
+  assert.equal(card.fix, null);
+});
+
+test('M4: reports match formulas in lists and with named references', () => {
+  const list = '- $$\n  \\bm{x}\n  $$';
+  const [card] = problems(list);
+  assert.equal(list.slice(card.start, card.end), '\\bm');
+  assert.deepEqual(errorsOf(applyFix(list, card)), []);
+  // &alpha; reaches MathJax decoded: the card still appears, without a rewrite.
+  const named = problems('$\\bm{x}+&alpha;$');
+  assert.equal(named.length, 1);
+  assert.equal(named[0].fix, null);
+});
+
+test('M5: substitutes keep TeX tokens, arguments and comments intact', () => {
+  const cases = [
+    ['$\\abs{x}y$', '$\\lvert x\\rvert y$'],
+    ['$\\abs{x% }\n +y}$', '$\\lvert x% }\n +y\\rvert$'],
+    ['$\\frac\\R2$', '$\\frac{\\mathbb{R}}2$'],
+  ];
+  for (const [src, want] of cases) {
+    const fixed = applyFix(src, problems(src)[0]);
+    assert.equal(fixed, want);
+    assert.deepEqual(errorsOf(fixed), [], fixed);
+  }
+  assert.equal(problems('$\\bm$')[0].fix, null, 'no argument to make bold');
+});
+
+test('M6: an unrelated card does not hide a TeX error', () => {
+  for (const src of ['$x^2^3+\\ref{missing}$', '<div>$x^2^3$</div>']) {
+    assert.ok(problems(src).some((c) => c.title === 'MathJax cannot typeset this formula'), src);
+  }
+});
+
+test('M9: red \\verb text is not an undefined macro', () => {
+  assert.deepEqual(texReports('$\\color{red}\\verb!\\bm!$').map((r) => r.undef), [[]]);
+});
+
+test('M10: definitions count where MathJax executes them', () => {
+  const later = problems('$\\abs{x}$ then $\\DeclarePairedDelimiter{\\abs}{\\lVert}{\\rVert}$ then $\\abs{x}$');
+  assert.equal(later[0].fix, null);
+  assert.match(later[0].detail, /defined in this comment, but after a formula/);
+  const verb = '$\\verb!\\def\\R{x}!$ then $\\R$';
+  assert.equal(problems(verb)[0].fix.label, 'use \\mathbb{R}');
+});
+
+test('M11, L2, L3: placeholders where they are visible, and only there', () => {
+  for (const src of ['\\<!-- literal\n\nTODO: add results', '<!--> Done. TODO', '$\\verb!<!--!$ TODO']) {
+    assert.deepEqual(placeholders(src), ['TODO'], src);
+  }
+  for (const src of ['[r]: https://example.org/TODO\n\nSee [r].', '![plot](/images/TODO.png)', '| x |\n|-|\n| 1 | TODO |']) {
+    assert.deepEqual(placeholders(src), [], src);
+  }
+  assert.deepEqual(placeholders('Accuracy improves to XX.X.'), ['XX.X']);
+  assert.deepEqual(placeholders('We evaluate TableX on R1/R2.'), []);
+  assert.deepEqual(placeholders('See Fig.X and Fig.~??.'), ['Fig.X', 'Fig.~??']);
+});
+
+test('M12, L1: check 16 compares the whole comment as the note shows it', () => {
+  assert.equal(titled('  ```python\n' + '#'.repeat(4000) + '\n  return 1\n```', TRIM).length, 1);
+  assert.deepEqual(titled('  - a\n     - b', TRIM), []);
+  assert.deepEqual(titled('  **Results**', TRIM), []);
+});
+
+test('L5: the invisible-character card never cuts a character in two', () => {
+  const src = '\u{1F600}' + 'a'.repeat(39) + '\u200b' + 'b'.repeat(38) + '\u{1F600}';
+  const [iss] = titled(src, 'Invisible characters from a copy');
+  const marked = src.slice(iss.start, iss.end);
+  assert.ok(!/^[\udc00-\udfff]|[\ud800-\udbff]$/.test(marked), JSON.stringify(marked));
 });

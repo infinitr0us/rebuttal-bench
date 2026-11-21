@@ -103,9 +103,12 @@ reports when any of those sources change.
    `/images/`, footnotes, and LaTeX pasted from the paper outside math (`\textbf{}`, `\cite{}`,
    ` ``quotes'' `, ties like `Table~1`, two of which can even pair into strikethrough).
 7. The last checks look at the draft as a whole: placeholders, invisible characters and
-   ligatures, and a first line that the trim on posting changes. After each typeset, what MathJax
-   reported for each formula is matched to the source formula with the same TeX, so its card
-   points at the right place even while you keep typing.
+   ligatures. All checks read the comment as posted, which OpenReview trims; a card says when
+   the trim changes how the start reads.
+8. After each typeset, what MathJax reported for each formula is matched to its source formula,
+   so its card points at the right place even while you keep typing. A replacement for an
+   unknown macro is offered only once the preview shows exactly the text in the editor, and only
+   when the whole comment, checked again with it, keeps every other formula intact.
 
 Because **Fix all** runs unattended, a fix is only offered when it can't damage correct text;
 ambiguous cases get a warning without a fix, or a fix that only a click on its card applies.

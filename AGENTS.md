@@ -63,26 +63,39 @@ exact pasted range and draft. Use `setSourceText` so one undo restores the text.
 - `scanMath` — real spans (what MathJax typesets) plus *recovered* spans: leftover delimiters
   paired across a boundary purely to explain breakage (`why`: blank, block, table, code,
   braces). Recovered spans are never counted as math.
-- `analyze(src, opts)` — the checks, numbered in the source. Each returns hazards
-  `{sev, title, detail(HTML), start, end, fix}`; a fix is a list of edits carrying `was`
-  (the text they expect), so stale fixes are refused. Checks 9–14 report what OpenReview shows
-  as typed (raw HTML, HTML comments, external images, footnotes, h4–h6, LaTeX outside math);
-  check 15 reports links under `opts.venue`'s rule (an id from `VENUES`; only the page passes
-  it, so Fix all and compaction never see venue hazards). Check 16 reports a first block that
-  OpenReview's trim on posting (`constructEdit` in `client/view-v2.js`, watched by
-  `npm run check-upstream`) reads differently (`firstBlockChanges`); check 7 then leaves that
-  block alone, and the preview renders `ta.value.trim()`. Check 17 reports placeholders, each
-  pattern limited to where it is unmistakable (no `??` in code, no `XXX` in math); check 18
-  invisible characters and ligatures, one card each, with a manual fix for all of them.
-- `texProblemIssues(src, spans, reports, issues)` turns what MathJax reported after the last
-  typeset (`texProblems()` in the DOM section: `{tex, undef, errors}` per formula, in document
-  order) into cards. The k-th report with a TeX goes to the k-th real span with that TeX, so the
-  cards follow the current source. An undefined macro gets one card for all its formulas, with
-  a manual fix from `TEX_SUBSTITUTES`: every replacement is Markdown-neutral (no `\` before ASCII
-  punctuation, no `*`, `_`, `[` or `|`) and `tests/preflight.test.js` typesets each one inline,
-  displayed and in a table cell. A macro the comment defines after using it gets advice, never a
-  rewrite. The page shows these cards next to the analyzer's (`renderIssues`), redrawn when a
-  typeset changes them; `fixAllText` never sees them.
+- `analyze(src, opts)` reads the comment **as posted**: OpenReview trims a textarea before it
+  posts it (`constructEdit` in `client/view-v2.js`, watched by `npm run check-upstream`), so
+  `analyze` runs `analyzeText` on the trimmed text and moves every offset (hazards, edits,
+  spans) back into the editor's text. The preview renders `ta.value.trim()`, and the reference
+  `renderLikeOpenReview` trims too. Check 16 (in `analyze`) reports leading whitespace whose
+  removal changes the rendered comment (`postedStartChanges`, compared with `visibleHtml`).
+- `analyzeText(src, opts)` — the checks, numbered in the source. Each returns hazards
+  `{sev, title, detail(HTML), start, end, fix, math}`; a fix is a list of edits carrying `was`
+  (the text they expect), so stale fixes are refused; `math` marks checks 1–7, the ones about
+  Markdown damaging TeX. Check 4 also marks formulas inline Markdown cuts apart (`sp.cut`).
+  Checks 9–14 report what OpenReview shows as typed (raw HTML, HTML comments, external images,
+  footnotes, h4–h6, LaTeX outside math); check 15 reports links under `opts.venue`'s rule (an
+  id from `VENUES`; only the page passes it, so Fix all and compaction never see venue hazards).
+  Check 17 reports placeholders in visible text only (not in code, link destinations and
+  definitions, image syntax, dropped cells or HTML comments), each pattern limited to where it
+  is unmistakable (no `??` in code, no `XXX` in math); check 18 invisible characters and
+  ligatures, one card each, with a manual fix for all of them.
+- `texProblemIssues(src, spans, reports, issues, {stale})` turns what MathJax reported after the
+  last typeset (`texProblems()` in the DOM section: `{tex, undef, errors}` per formula, in
+  document order) into cards. Formulas cut apart by inline Markdown are skipped (MathJax never
+  sees them whole). Reports of exactly the editor's text pair with the formulas by position when
+  the counts agree; otherwise the k-th report with a TeX goes to the k-th formula with that TeX.
+  Only reports of exactly this text (`stale` false: the page tracks `texReportsFor`) get fixes,
+  and an undefined macro's fix from `TEX_SUBSTITUTES` is offered only when (1) every word it
+  rewrites is a use MathJax reported (not a `\label` key, `\verb` text, a comment or a macro's
+  expansion), (2) no argument or token boundary breaks (`arg`, braces around several tokens,
+  a space after `\rvert`), and (3) the whole comment, analyzed again, keeps every other formula
+  and gains no hazard (`holds`: a `}` before `_` can make Markdown pair emphasis across
+  formulas). Replacements are Markdown-neutral and typeset in tests inline, displayed and in a
+  table cell. A macro the comment defines after using it gets advice, never a rewrite. A TeX
+  error card is left out only when a `math` card overlaps its formula. The page redraws the
+  cards when a typeset's reports change at all or catch up with the editor; `fixAllText` never
+  sees them.
 - `collectMarkedRanges` also records link reference definitions (`definitions`), which Marked
   consumes without a token, through a block extension that only observes.
 
@@ -223,8 +236,10 @@ limit, a moved file or marker, an unreadable snapshot; it never overwrites one w
 `npm run smoke`: it drives the installed Chrome/Edge headlessly (DevTools protocol, no
 dependencies) and checks Fix all + single-step undo, undoable *Clear* and *Load example*, the
 status bar's TeX-error and undefined-macro counts and their hazard cards (a macro fixed from its
-card, with undo), the preview of the trimmed comment, a fresh TeX state per preview (no duplicate
-`\label` errors, deleted `\newcommand`s and `\definecolor`s forgotten), drafts (a fresh one, switching, undo isolation, rename and delete,
+card, with undo; no fix before the typeset of the current text; a card that follows its formula
+after an edit; red `\verb` text not taken for a macro; Fix all's message while MathJax catches
+up), the preview of the trimmed comment, a fresh TeX state per preview (no duplicate
+`\label` errors, deleted `\newcommand`s, `\definecolor`s and `\DeclarePairedDelimiter`s forgotten), drafts (a fresh one, switching, undo isolation, rename and delete,
 across a reload and with a slow store), manual fixes outside Fix
 all, Fix all's added-character count, the selection count, venue presets, Copy compact and Apply to
 source (with undo), the compact chip state, compaction switches across a reload, jumping to a hazard on a

@@ -11,10 +11,11 @@
 - Invisible characters and ligatures from a PDF copy (soft hyphens, zero-width spaces,
   direction marks, `ﬁ`) get one card each, whose fix removes or spells out all of them. They
   count toward the limit and keep a search from finding the word.
-- The start of the comment as posted: OpenReview trims a comment when it posts it
-  (`constructEdit` in openreview-web's `client/view-v2.js`), so an indented first line is
-  ordinary text there, not a code block. The preview now shows the trimmed comment, and a card
-  says when the trim changes the first block.
+- The comment as posted: OpenReview trims a comment when it posts it (`constructEdit` in
+  openreview-web's `client/view-v2.js`), so an indented first line is ordinary text there, not
+  a code block. The preview and every check now read the trimmed comment, and a card says when
+  the trim changes how it reads. This also stops Fix all from editing text that the trim turns
+  into code, a problem older versions had.
 
 ### MathJax problems as cards
 - Once MathJax has typeset the preview, a formula it cannot typeset gets a card with MathJax's
@@ -25,11 +26,18 @@
   `\lvert x\rvert`, `\diag` → `\operatorname{diag}`, and others. Each replacement is tested to
   typeset inline, displayed and in a table cell. A macro defined after its first use gets
   advice instead, and an unknown one the `\newcommand` to copy from the paper.
+- A fix is offered only once the preview shows exactly the text in the editor, only for the uses
+  MathJax reported (not a `\label` key, `\verb` text or a comment), and only when the whole
+  comment, checked again with it, keeps every other formula and gains no hazard.
+- A Codex review of this feature found 20 problems (stale fixes, a fix that let Markdown pair
+  emphasis across two formulas, cards on the wrong formula, placeholders in hidden text, red
+  `\verb` text taken for a macro, a `\DeclarePairedDelimiter` from the table preview leaking into
+  the draft's preview, and others); all are fixed and covered by tests.
 
 ### Project
 - DOMPurify 3.4.17, which openreview-web now uses (reported by `npm run check-upstream`).
 - The drift check also watches the trim on posting.
-- `tests/preflight.test.js` and two smoke checks.
+- `tests/preflight.test.js` and seven smoke checks.
 
 ## 3.3.0 (2026-11-21)
 
