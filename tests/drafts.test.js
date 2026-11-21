@@ -9,10 +9,10 @@ const { loadAnalyzer } = require('./lib/page');
 const A = loadAnalyzer();
 const plain = (x) => JSON.parse(JSON.stringify(x)); // VM-realm objects to plain ones
 const parse = (raw) => plain(A.parseDraftMeta(raw));
-const merge = (a, b) => plain(A.mergeDraftMeta(A.parseDraftMeta(a), A.parseDraftMeta(b)));
+const merge = (a, b, now) => plain(A.mergeDraftMeta(A.parseDraftMeta(a), A.parseDraftMeta(b), now));
 
 test('nothing stored, or garbage: the single draft older versions had', () => {
-  const one = { active: 'd1', list: [{ id: 'd1', name: 'Draft 1', at: 0 }], gone: {} };
+  const one = { active: 'd1', list: [{ id: 'd1', name: 'Draft 1', at: 0 }], gone: {}, saved: 0 };
   for (const raw of [null, undefined, '', '{', '[]', '{"list": 5}', '{"list": [{"id": "x"}]}', 42]) {
     assert.deepEqual(parse(raw), one, JSON.stringify(raw));
   }
@@ -65,19 +65,30 @@ test('a deletion in one window is not undone by the other window\'s older list',
   }
 });
 
-test('a draft open in this window survives a deletion from elsewhere', () => {
-  const mine = { active: 'da', list: [{ id: 'd1', name: 'A' }, { id: 'da', name: 'B' }] };
+test('a draft open in a live window is re-created after a deletion from elsewhere', () => {
+  const mine = { active: 'da', list: [{ id: 'd1', name: 'A' }, { id: 'da', name: 'B', at: 3 }] };
   const theirs = { active: 'd1', list: [{ id: 'd1', name: 'A' }], gone: { da: 10 } };
-  const m = merge(mine, theirs);
-  assert.deepEqual(m.list.map((d) => d.id), ['d1', 'da']);
-  assert.equal(m.gone.da, undefined);
+  const live = merge(mine, theirs, 50);
+  assert.deepEqual(live.list.map((d) => [d.id, d.at]), [['d1', 0], ['da', 50]]);
+  assert.equal(live.gone.da, undefined);
+  // On a cold start (no live editor) the deletion wins, and stays won in later merges.
+  assert.deepEqual(merge(mine, theirs).list.map((d) => d.id), ['d1']);
+  assert.deepEqual(merge(live, { list: [{ id: 'd1', name: 'A' }], gone: { da: 10 } }).list.map((d) => d.id), ['d1', 'da']);
 });
 
-test('only the newest deletions are remembered', () => {
-  const gone = Object.fromEntries(Array.from({ length: 150 }, (_, i) => ['dg' + i, i]));
+test('a deletion wins over entries not newer than it; a newer entry is a re-creation', () => {
+  const del = { list: [{ id: 'd1', name: 'A' }], gone: { da: 10 } };
+  assert.deepEqual(merge(del, { list: [{ id: 'd1', name: 'A' }, { id: 'da', name: 'Old', at: 10 }] }).list.map((d) => d.id), ['d1']);
+  const back = merge(del, { list: [{ id: 'd1', name: 'A' }, { id: 'da', name: 'Again', at: 11 }] });
+  assert.deepEqual(back.list.map((d) => d.name), ['A', 'Again']);
+  assert.equal(back.gone.da, undefined);
+});
+
+test('deletions are remembered long enough (the newest 2,000)', () => {
+  const gone = Object.fromEntries(Array.from({ length: 2100 }, (_, i) => ['dg' + i, i]));
   const meta = parse({ list: [{ id: 'd1', name: 'A' }], gone });
-  assert.equal(Object.keys(meta.gone).length, 100);
-  assert.ok(meta.gone.dg149 === 149 && meta.gone.dg0 === undefined);
+  assert.equal(Object.keys(meta.gone).length, 2000);
+  assert.ok(meta.gone.dg2099 === 2099 && meta.gone.dg99 === undefined && meta.gone.dg100 === 100);
 });
 
 test('new ids are random, valid, and new drafts get a free name', () => {

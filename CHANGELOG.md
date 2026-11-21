@@ -7,12 +7,13 @@
   against the limit; double-click to rename, × to delete. Each draft autosaves under its own key
   with the same protection against a slow asynchronous store; existing drafts carry over as the
   first tab. Switching drafts gives the editor a fresh undo history, so Ctrl+Z cannot carry text
-  from one draft into another. Two windows of the page, a slow asynchronous store or a reload at
-  any moment cannot lose or mix up a draft (a Codex review found six ways they could in the first
-  version): random draft ids, the list merged rather than overwritten, writes queued in order,
-  only changed drafts written back, nothing typed before the drafts are restored, and any draft
-  body missing from the list given its tab back. The tabs work from the keyboard (arrows, Enter,
-  F2 to rename).
+  from one draft into another. Several windows, several devices sharing an asynchronous store, a
+  slow or failing store or a reload at any moment cannot lose or mix up a draft (two Codex reviews
+  probed this with 49 scenarios and Chrome checks): random draft ids, the list merged with every
+  other copy rather than overwritten, writes queued in order and marked pending until confirmed,
+  deletions retried until confirmed, only real edits written back, nothing typed before the open
+  draft is restored, and any draft body missing from the list given its tab back. The tabs work
+  from the keyboard (arrows, Enter, F2 to rename the focused tab).
 
 ### Splitting into several comments
 - *Split into comments…* (in the Compaction panel) cuts a draft over the limit into numbered parts
