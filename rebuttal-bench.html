@@ -4703,9 +4703,6 @@ var memStore = {};
 /* Keys whose last local write failed (quota): their newer value lives in
    memStore, and reads must not fall back to the older stored copy. */
 var memNewer = {};
-/* key -> what localStorage held when this window last wrote or read the key
-   there (null: nothing): a different value since is another window's save. */
-var diskSeen = {};
 
 function fallbackGet(key) {
   if (canLocalRead && !memNewer[key]) { try { return localStorage.getItem(key); } catch (e) {} }
@@ -4732,14 +4729,13 @@ function fallbackSet(key, val) {
     }
   }
   memStore[key] = val;
-  if (ok || !canLocalRead) { delete memNewer[key]; diskSeen[key] = val; }
+  if (ok || !canLocalRead) delete memNewer[key];
   else memNewer[key] = true;
   return ok;
 }
 function fallbackDel(key) {
   delete memStore[key];
   delete memNewer[key];
-  diskSeen[key] = null;
   if (canLocalRead) { try { localStorage.removeItem(key); } catch (e) {} }
 }
 /* The asynchronous store's methods may also throw synchronously; either way
@@ -4986,10 +4982,9 @@ function flushDraftLocally(value, key) {
    not be read and there is no local copy either. */
 function loadDraft(key) {
   key = key || draftKey;
-  if (!canArtifactStore) { diskSeen[key] = storedValue(key); return Promise.resolve({ value: fallbackGet(key), pending: false, failed: false }); }
+  if (!canArtifactStore) return Promise.resolve({ value: fallbackGet(key), pending: false, failed: false });
   return remoteRead(key).then(function (r) {
     var local = fallbackGet(key), pending = null;
-    diskSeen[key] = storedValue(key); /* read now, written below if the store holds something else */
     try { pending = JSON.parse(fallbackGet(pendingKey(key)) || 'null'); } catch (e) {}
     if (!r.ok) return { value: local, pending: !!pending && typeof local === 'string', failed: typeof local !== 'string' };
     var remote = r.value;
@@ -5024,7 +5019,11 @@ function saveDraftNow() {
   /* No change from what this window last saved (an edit undone, Clear on a
      blank draft): writing would put this window's possibly older copy over a
      newer one saved elsewhere. */
-  if (value === savedText && !refusedEdit(key)) { saveStateEl.textContent = ''; return; }
+  if (value === savedText && !refusedEdit(key)) {
+    saveStateEl.textContent = '';
+    delete historyHeld[draftMeta.active]; /* a bulk change undone: nothing of it is written */
+    return;
+  }
   var done = storeDraft(value, key);
   if (!memNewer[key]) { /* only once it is really stored here */
     savedText = value;
@@ -5814,9 +5813,10 @@ function writeHistory(id, list) {
     }
   }
   /* Written: memory lets go of it, unless a draft write may still need
-     space, which may yet evict what was just stored. */
-  if (fits.length < list.length) historyUnsaved[id] = list;
-  else if (!draftWritesWaiting() && !historyHeld[id]) delete historyUnsaved[id];
+     space, which may yet evict what was just stored: memory then keeps the
+     whole list just written. */
+  if (fits.length < list.length || draftWritesWaiting() || historyHeld[id]) historyUnsaved[id] = list;
+  else delete historyUnsaved[id];
 }
 /* A draft write (text, list, marks) that may still need space: one refused
    for lack of it, or one still on its way to the asynchronous store, whose
@@ -5827,9 +5827,9 @@ function draftWritesWaiting() {
       return k.indexOf(DRAFT_KEY) === 0 && (remoteQueue[k].busy || remoteQueue[k].waiting);
     });
 }
-function retryHistory() {
+function retryHistory(leaving) {
   if (!Object.keys(historyUnsaved).length) return;
-  pruneHistory(); /* never write back the versions of a draft deleted elsewhere */
+  pruneHistory(leaving); /* never write back the versions of a draft deleted elsewhere */
   Object.keys(historyUnsaved).forEach(function (id) { writeHistory(id, readHistory(id)); });
 }
 /* Keep `text` (the editor's by default) as the open draft's newest version. */
@@ -5887,10 +5887,13 @@ function dropAllHistory() {
    device) go with it, unless the draft was re-created since: decided on
    this window's list merged with the newest one stored here, since a
    storage event can be older than what another window has already saved. */
-function pruneHistory() {
+function pruneHistory(leaving) {
   var meta = draftMeta;
+  /* A live window re-creates its open draft deleted elsewhere (adoptDraftMeta),
+     and keeps its versions with it; a window going away re-creates nothing,
+     so a deletion stored here wins unless a re-creation was stored since. */
   [fallbackGet(DRAFTS_KEY), storedValue(DRAFTS_KEY)].forEach(function (latest) {
-    if (typeof latest === 'string') meta = mergeDraftMeta(meta, parseDraftMeta(latest), Date.now());
+    if (typeof latest === 'string') meta = mergeDraftMeta(meta, parseDraftMeta(latest), leaving ? 0 : Date.now());
   });
   var ids = historyKeys().map(function (k) { return k.slice(HISTORY_PREFIX.length); })
     .concat(Object.keys(historyUnsaved), Object.keys(memHistory));
@@ -5916,17 +5919,12 @@ function knownDraftText(id) {
     if (ta.readOnly) return bodyKnown[id] && typeof local === 'string' ? local : null;
     /* An edit since the last save. */
     if (ta.value !== savedText) return ta.value;
-    /* Memory holds what did not fit in localStorage, in front of it. */
-    if (memNewer[key]) {
-      var stored = storedValue(key);
-      /* Another window has saved here since this one last read or wrote it. */
-      if (typeof stored === 'string' && Object.prototype.hasOwnProperty.call(diskSeen, key) && stored !== diskSeen[key]) return stored;
-      /* A newer text read from the store counts; an edit refused for space,
-         perhaps undone since, does not: the editor does, the text this window
-         last saved or loaded, unless that is the example standing in for a
-         draft stored nowhere. */
-      if (refusedEdit(key)) local = ta.value === EXAMPLE && stored === null && remoteDrafts[key] == null ? null : ta.value;
-    }
+    /* Memory holds what did not fit in localStorage: a newer text read from
+       the store counts; an edit refused for space, perhaps undone since,
+       does not: the editor does (the text this window last saved or loaded),
+       and the example in it stands for a draft localStorage never held. A
+       newer text another window saved meanwhile is not looked for. */
+    if (refusedEdit(key)) local = ta.value === EXAMPLE && storedValue(key) === null ? null : ta.value;
     if (bodyKnown[id]) return typeof local === 'string' ? local : ta.value === EXAMPLE ? '' : ta.value;
     return state !== 'loading' && typeof local === 'string' ? local : null;
   }
@@ -6418,7 +6416,7 @@ function flushDraft() {
   if (!draftReady) return;
   retryLocalWrites();
   if (!ta.readOnly && (ta.value !== savedText || refusedEdit(draftKey))) flushDraftLocally(ta.value, draftKey);
-  retryHistory(); /* versions waiting for space, after the draft */
+  retryHistory(true); /* versions waiting for space, after the draft */
 }
 /* A write of this window that localStorage refused: an edit still to save.
    Not a newer text read from the store that did not fit (readCache), which

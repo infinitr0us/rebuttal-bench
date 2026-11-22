@@ -215,11 +215,13 @@ cases, Chrome probes); keep their rules:
   keeps one every `HISTORY_EVERY`. A history write that does not fit keeps fewer versions there
   and the rest in memory (`historyUnsaved`); before a bulk change that writes the draft, its
   versions (`hold`, even when the newest already is this text or the editor is blank; Clear of a
-  blank draft holds nothing) stay in memory until the draft has been saved since (`historyHeld`)
-  and they are written while no draft write waits for space or for the asynchronous store, whose
-  answer rewrites the pending mark (`draftWritesWaiting`). `retryHistory` runs after a draft save,
-  a confirmed store write, a storage event and on leaving the page, and prunes deleted drafts
-  first. Only a quota error on a draft key (body, list, pending or deleting mark) drops the
+  blank draft holds nothing) stay in memory until the draft has been saved since, or the change
+  was undone (`historyHeld`). While a draft write waits for space or for the asynchronous store,
+  whose answer rewrites the pending mark (`draftWritesWaiting`), every list written also stays in
+  memory whole. `retryHistory` runs after a draft save, a confirmed store write, a storage event
+  and on leaving the page, and prunes deleted drafts first: a live window keeps the versions of
+  its open draft deleted elsewhere (it re-creates the draft), a window going away does not
+  (`retryHistory(true)`). Only a quota error on a draft key (body, list, pending or deleting mark) drops the
   stored history and retries once (`fallbackSet` → `isQuotaError`, `dropAllHistory`); versions
   waiting in memory stay, and preferences never drop anything. Deleting a draft deletes its
   history, here and, through tombstones, in other windows and after a boot (`pruneHistory`, which
@@ -248,10 +250,9 @@ cases, Chrome probes); keep their rules:
   save or a switch's flush by this window, which also counts while an older read is outstanding;
   the 8 s watchdog only when this browser has a copy; while a known draft is read again, its
   stored copy). An edited editor (`ta.value !== savedText`) is the author's text; an unchanged one
-  yields to the newest copy, including a newer text read from the store that did not fit here
-  (`readCache`), or one another window saved since this window last read or wrote the key
-  (`diskSeen`), but not an edit refused for space and undone since; the example stands for an
-  empty draft.
+  yields to this window's newest copy, including a newer text read from the store that did not
+  fit here (`readCache`), but not an edit refused for space and undone since; the example stands
+  for an empty draft (after such an undo: when localStorage never held the draft).
   Export all merges, in a private copy, this window's list with the stored one (drafts another
   window just added), writes `draftsFile` with every known text and names the others before
   leaving them out; Download refuses an unknown text. Importing drafts is not part of the page:
@@ -262,7 +263,10 @@ cases, Chrome probes); keep their rules:
   a draft is retried with this window's old value (`retryLocalWrites`), which can write over a
   newer one another window saved meanwhile, or bring back an edit undone after the refusal; a
   pending mark that does not fit can let a reload choose the store's older text over a saved
-  local edit. Fixing them needs the same redesign as Import.
+  local edit. Fixing them needs the same redesign as Import. Likewise for Export: a window whose
+  last write or read of a draft did not fit exports its own copy, not a newer one another window
+  saved since (a baseline of what each window last saw was tried and reviewed twice, and kept
+  missing paths: `reviews/2026-11-21/codex-confirm3-history`).
 
 ## Splitting
 

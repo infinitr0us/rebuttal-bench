@@ -15,7 +15,9 @@
   saved it since this one loaded it.
 - *Export all drafts* writes every draft to one `.json` file, and *Download this draft* the open
   one as `.md`, as a backup; neither changes anything stored. A draft that has not loaded is
-  named and left out, never written as blank. Importing drafts is not included yet: three Codex
+  named and left out, never written as blank. With this browser's storage full, a window exports
+  its own copy of a draft it could not save, even if another window has saved a newer one since.
+  Importing drafts is not included yet: three Codex
   reviews kept finding ways for it to lose text when storage is full or several windows write at
   once, so it waits for a safer design.
 - History, Split and Import table are bound to the open draft: they close when it changes, and
@@ -26,7 +28,7 @@
   into that other draft.
 
 ### Project
-- `tests/history.test.js` and fourteen smoke checks. Seven Codex reviews (`reviews/2026-11-21`).
+- `tests/history.test.js` and fourteen smoke checks. Eight Codex reviews (`reviews/2026-11-21`).
 
 ## 3.4.0 (2026-11-21)
 

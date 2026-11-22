@@ -61,7 +61,8 @@ leave the browser: they autosave on this device only.
   while you edit (up to 20 per draft, in this browser only). *Restore* is one more edit, so one
   undo takes it back; it waits until the draft has loaded completely, and refuses when another
   window or device has saved the draft since this one loaded it. The same dialog exports every draft as one `.json` file, or the open draft as `.md`, as a
-  backup. The online page and a downloaded copy of it keep separate drafts; to move a draft
+  backup (with this browser's storage full, a window exports its own copy of a draft it could
+  not save). The online page and a downloaded copy of it keep separate drafts; to move a draft
   between them, download it and paste its text into a new draft.
 - **Before posting.** Cards also point out placeholders left in the text (`TODO`, `XX.X`,
   `Table X`, `[cite]`, `??`), invisible characters and ligatures (`ﬁ`) that a copy from a PDF
