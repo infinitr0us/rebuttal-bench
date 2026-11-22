@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.5.0 (unreleased)
+## 3.5.0 (2026-11-21)
 
 ### History and export
 - *History* (beside the draft tabs) lists earlier versions of the open draft, each with its
