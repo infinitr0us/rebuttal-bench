@@ -56,6 +56,15 @@ leave the browser: they autosave on this device only.
   say; *Delete* removes it. Every draft autosaves on its own, undo never crosses from one draft
   into another, and several windows of the page can be open at once without losing a draft (a
   draft deleted in one window comes back if another window still has it open).
+- **History and export.** *History* lists earlier versions of the open draft: one is kept before
+  *Fix all*, *Apply to source*, *Clear*, *Load example* and a restore, and one every 10 minutes
+  while you edit, of the text the edit replaces (up to 20 per draft, in this browser only; with
+  the browser's storage full, drafts come first and versions may be lost). *Restore* is one more
+  edit, so one undo takes it back; it waits until the draft has loaded completely, and refuses when another
+  window or device has saved the draft since this one loaded it. The same dialog exports every draft as one `.json` file, or the open draft as `.md`, as a
+  backup (with this browser's storage full, a window exports its own copy of a draft it could
+  not save). The online page and a downloaded copy of it keep separate drafts; to move a draft
+  between them, download it and paste its text into a new draft.
 - **Before posting.** Cards also point out placeholders left in the text (`TODO`, `XX.X`,
   `Table X`, `[cite]`, `??`), invisible characters and ligatures (`ﬁ`) that a copy from a PDF
   brings along, and a start that posting reads differently: OpenReview trims a comment when it

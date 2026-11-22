@@ -1,5 +1,38 @@
 # Changelog
 
+## 3.5.0 (unreleased)
+
+### History and export
+- *History* (beside the draft tabs) lists earlier versions of the open draft, each with its
+  time, why it was kept and its length. One is kept before *Fix all*, *Apply to source*, *Clear*,
+  *Load example* and a restore, and, every 10 minutes while you edit, the text before the edit:
+  up to 20 per draft, in this browser only. *Restore* is undoable; *Copy* copies a version.
+- Versions never cost a draft: when a draft cannot be saved for lack of space, the stored ones
+  give way, so with this browser's storage full earlier versions are kept on a best-effort basis
+  and may be lost (without browser storage, they last until the page is reloaded). Deleting a
+  draft deletes its versions, in other windows too; a draft that comes back because another
+  window still had it open comes back without them.
+- Restore writes like typing, so it waits until this window has the draft's latest text: it
+  refuses while the draft has not loaded completely, and when another window or device has
+  saved it since this one loaded it.
+- *Export all drafts* writes every draft to one `.json` file, and *Download this draft* the open
+  one as `.md`, as a backup; neither changes anything stored. A draft that has not loaded is
+  named and left out, never written as blank. With this browser's storage full, a window exports
+  its own copy of a draft it could not save, even if another window has saved a newer one since.
+  Importing drafts is not included yet: three Codex
+  reviews kept finding ways for it to lose text when storage is full or several windows write at
+  once, so it waits for a safer design.
+- History, Split and Import table are bound to the open draft: they close when it changes, and
+  nothing behind them can be reached while they are open.
+
+### Fixes
+- An offer to convert a pasted table could, after a switch to a draft with the same text, insert
+  into that other draft.
+
+### Project
+- `tests/history.test.js` and sixteen smoke checks. Nine Codex reviews and a design review by
+  Fable (`reviews/2026-11-21`).
+
 ## 3.4.0 (2026-11-21)
 
 ### Before posting

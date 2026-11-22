@@ -182,8 +182,9 @@ cases, Chrome probes); keep their rules:
   retried at the next start (`retryDeletes`).
 - **Only a real edit is written.** `savedText` is what this window last saved or loaded for the open
   draft (it advances only once a local write succeeded); switching away, leaving the page, the
-  autosave and Clear write only when the editor differs from it, so an undone edit or a Clear on a
-  blank draft cannot put a stale copy over a newer one. The built-in example counts as saved. A
+  autosave and Clear write only when the editor differs from it or memory holds an edit refused for
+  space (`refusedEdit`), so an undone edit or a Clear on a blank draft cannot put a stale copy over
+  a newer one, and an undone refused edit is not retried later. The built-in example counts as saved. A
   local write refused for lack of space is retried on switching, deleting and leaving
   (`retryLocalWrites`); a remote write is marked pending as soon as it is queued. Delete asks
   whenever the editor or the stored copy holds text, and every control that changes the text needs
@@ -206,6 +207,77 @@ cases, Chrome probes); keep their rules:
   asynchronous store, a list write that stalls while another device adds a draft can drop that
   entry until the other device's next save or start restores it (the text itself is kept; without
   store revisions this lost update cannot be excluded).
+- **History** (earlier versions) is a safety net that must never cost a draft, and is best effort
+  when storage is full. Each draft's versions
+  live under `HISTORY_PREFIX + id` in localStorage only (never the asynchronous store), newest
+  first, capped by `capHistory` (pure: `parseHistory`, `historyAdd`, `historyDue`, `mergeHistory`,
+  `tests/history.test.js`). `keepVersion` runs before every bulk change of the editor (Fix all,
+  Apply to source, Clear, Load example, a restore; none on a read-only draft) and `saveDraftNow`,
+  every `HISTORY_EVERY`, keeps the text its save replaces (`savedText`; not the startup example,
+  stored nowhere). The rest of this bullet, the quota machinery, is **frozen** for 3.5.0: nine
+  reviews kept finding orders that lose a version while storage is full, and fixes kept adding
+  new ones. 3.6 should replace it (`reviews/2026-11-21/fable-history-advice.md`, model A: a total
+  History budget well under the quota, oldest-first eviction across drafts, no write-back), not
+  patch it. A history write that does not fit keeps fewer versions there
+  and the rest in memory (`historyUnsaved`); before a bulk change that writes the draft, its
+  versions (`hold`, even when the newest already is this text or the editor is blank; Clear of a
+  blank draft holds nothing) stay in memory until the draft has been saved since, or the change
+  was undone (`historyHeld`). While a draft write waits for space or for the asynchronous store,
+  whose answer rewrites the pending mark (`draftWritesWaiting`), every list written also stays in
+  memory whole. `retryHistory` runs after a draft save, a confirmed store write, a storage event
+  and on leaving the page, and prunes deleted drafts first: a live window keeps the versions of
+  its open draft deleted elsewhere (it re-creates the draft), a window going away does not
+  (`retryHistory(true)`). Only a quota error on a draft key (body, list, pending or deleting mark) drops the
+  stored history and retries once (`fallbackSet` → `isQuotaError`, `dropAllHistory`); versions
+  waiting in memory stay, and preferences never drop anything. Deleting a draft deletes its
+  history, here and, through tombstones, in other windows and after a boot (`pruneHistory`, which
+  first merges this window's list with both the in-memory and the stored copy: `storedValue`).
+  Two windows adding versions of one draft at the same moment can lose one of the two versions.
+- **Dialogs are modal** (`setModal`: everything behind History and Split is `inert`, so no draft
+  switch or keystroke reaches the editor while one is open) and **bound to their draft**: a draft
+  switch (`openDraft`) closes History, Split and Import table and drops an offer to convert a
+  pasted table; the table dialog and the offer also check their draft before they insert. Copy in
+  a dialog passes its button to `copyText`, whose fallback then never selects the editor.
+  `renderHistory` keeps the focus on the same version.
+- **Restore writes like typing**, so `restoreVersion` refuses unless this window has the draft's
+  latest text: a version of the open draft (`historyFor`), its text read completely (`bodyKnown`,
+  `bodyState` ready: not the example or an old copy after a read that failed), the copy
+  localStorage holds (`storedValue`, not this window's copy in memory) equal to the editor or
+  `savedText`, as must what memory holds in front of it (a newer read that did not fit), and with
+  the asynchronous store a fresh read equal to the last confirmed value, the editor or
+  `savedText` (another device). The restore belongs to the click (`restoreSeq`, `editSeq`, which
+  `setSourceText` advances too, and the editor's text then): an edit, an undo, another restore or
+  a draft switch before it applies drops it, and every
+  condition is checked again just before writing. When this window holds text it could not
+  save, the refusal says to copy it before closing or reloading (the page-exit retry, a limit
+  shared with 3.4.0, may write it over the newer version).
+- **Export only reads**: it never adopts or saves the list. `knownDraftText(id)` is a draft's text
+  or null while it loads or was never read (`bodyKnown`: set by a successful read, `createDraft`, a
+  save or a switch's flush by this window, which also counts while an older read is outstanding;
+  the 8 s watchdog only when this browser has a copy; while a known draft is read again, its
+  stored copy). An edited editor (`ta.value !== savedText`) is the author's text; an unchanged one
+  yields to this window's newest copy, including a newer text read from the store that did not
+  fit here (`readCache`), but not an edit refused for space and undone since; the example stands
+  for an empty draft (after such an undo: when localStorage never held the draft).
+  Export all merges, in a private copy, this window's list with the stored one (drafts another
+  window just added), writes `draftsFile` with every known text and names the others before
+  leaving them out; Download refuses an unknown text. Importing drafts is not part of the page:
+  it was reviewed three times and kept losing text in corner cases (storage full, other windows
+  or devices writing, the asynchronous store), so it waits on the `feature/import` branch for a
+  design that stages new drafts privately until the whole operation is stored.
+- Known limits shared with 3.4.0, found by the History reviews: a refused write of the list or of
+  a draft is retried with this window's old value (`retryLocalWrites`), which can write over a
+  newer one another window saved meanwhile, or bring back an edit undone after the refusal; a
+  pending mark that does not fit can let a reload choose the store's older text over a saved
+  local edit. Fixing them needs the same redesign as Import. Likewise for Export: a window whose
+  last write or read of a draft did not fit exports its own copy, not a newer one another window
+  saved since (a baseline of what each window last saw was tried and reviewed twice, and kept
+  missing paths: `reviews/2026-11-21/codex-confirm3-history`). A draft deleted in one window that
+  comes back because another window still has it open comes back without its versions (the
+  deletion removed them; `codex-final2-history`). A page restored from the back/forward cache does
+  not take in list changes it missed while away (there is no `pageshow` handler, as in 3.4.0): if
+  its open draft was deleted meanwhile, text typed after returning is saved under a deleted key.
+  Both go with the 3.6 redesign.
 
 ## Splitting
 
@@ -240,8 +312,10 @@ dependencies) and checks Fix all + single-step undo, undoable *Clear* and *Load 
 status bar's TeX-error and undefined-macro counts and their hazard cards (a macro fixed from its
 card, with undo; no fix before the typeset of the current text; a card that follows its formula
 after an edit; red `\verb` text not taken for a macro; Fix all's message while MathJax catches
-up), the preview of the trimmed comment, a fresh TeX state per preview (no duplicate
-`\label` errors, deleted `\newcommand`s, `\definecolor`s and `\DeclarePairedDelimiter`s forgotten), drafts (a fresh one, switching, undo isolation, rename and delete,
+up), the preview of the trimmed comment, History (a version before Fix all, Restore with undo,
+deleted with its draft, dropped when a draft needs the space, a conflict with another window), Export, a fresh TeX
+state per preview (no duplicate `\label` errors, deleted `\newcommand`s, `\definecolor`s and
+`\DeclarePairedDelimiter`s forgotten), drafts (a fresh one, switching, undo isolation, rename and delete,
 across a reload and with a slow store), manual fixes outside Fix
 all, Fix all's added-character count, the selection count, venue presets, Copy compact and Apply to
 source (with undo), the compact chip state, compaction switches across a reload, jumping to a hazard on a

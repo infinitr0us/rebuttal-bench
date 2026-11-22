@@ -524,6 +524,237 @@ try {
       gone.every((id) => localStorage.getItem('rebuttal-bench-draft-' + id) === null && draftMeta.gone[id]) ||
       { meta: draftMeta, value: ta.value };`);
 
+  await check('History keeps the text from before Fix all, and Restore brings it back with one undo', `
+    document.querySelector('#draftTools .dadd').click(); await wait(50);
+    setSourceText('Set $a\\\\,b$ here.', 0); updateAll();
+    fixAllBtn.click(); await wait(100);
+    const fixed = ta.value;
+    document.querySelector('#draftTools [data-act="history"]').click(); await wait(50);
+    const shown = historyShown.map((v) => v.why + ':' + v.text);
+    const btn = historyList.querySelector('[data-restore="0"]');
+    if (!btn) return { shown, html: historyList.innerHTML.slice(0, 300) };
+    btn.click(); await wait(100);
+    const restored = ta.value, closed = historyDialog.hidden, kept = readHistory(draftMeta.active).map((v) => v.why);
+    ta.focus(); document.execCommand('undo'); await wait(300);
+    return shown[0] === 'before Fix all:Set $a\\\\,b$ here.' && restored === 'Set $a\\\\,b$ here.' && closed &&
+      kept[0] === 'before a restore' && ta.value === fixed || { shown, restored, closed, kept, undone: ta.value, fixed };`);
+
+  await check('Export writes every draft by name and text; Download writes the open one', `
+    const files = [];
+    const realDownload = downloadFile;
+    downloadFile = function (name, content) { files.push({ name, content }); return true; };
+    exportAllDrafts(); exportOpenDraft();
+    downloadFile = realDownload;
+    const [all, one] = files;
+    if (!all || !/^rebuttal-drafts-\\d{4}-\\d\\d-\\d\\d\\.json$/.test(all.name)) return files;
+    const file = JSON.parse(all.content);
+    const same = file.drafts.length === draftMeta.list.length &&
+      draftMeta.list.every((d, i) => file.drafts[i].name === d.name && file.drafts[i].text === draftText(d.id));
+    const open = draftById(draftMeta.active);
+    return same && one && one.name === open.name + '.md' && one.content === ta.value ||
+      { names: file.drafts.map((d) => d.name), one: one && one.name };`);
+
+  await check('a deleted draft takes its history along; a draft that needs the space comes before earlier versions', `
+    window.confirm = () => true;
+    const ids = draftMeta.list.map((d) => d.id).filter((id) => id !== 'd1');
+    const hadHistory = ids.filter((id) => localStorage.getItem(HISTORY_PREFIX + id) !== null).length;
+    ids.forEach(deleteDraft); switchDraft('d1'); await wait(50);
+    const orphans = ids.filter((id) => localStorage.getItem(HISTORY_PREFIX + id) !== null);
+    keepVersion('smoke', 'A version that gives way.');
+    const had = localStorage.getItem(HISTORY_PREFIX + 'd1') !== null;
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      if (k.indexOf(HISTORY_PREFIX) !== 0 && Object.keys(localStorage).some((x) => x.indexOf(HISTORY_PREFIX) === 0)) {
+        throw new DOMException('full', 'QuotaExceededError');
+      }
+      return setItem.call(this, k, v);
+    };
+    let ok, prefsKept;
+    try {
+      /* A preference that does not fit costs no version; a draft does. */
+      fallbackSet(PREFS_KEY + '-smoke', 'x');
+      prefsKept = localStorage.getItem(HISTORY_PREFIX + 'd1') !== null;
+      ok = fallbackSet(DRAFT_KEY + '-smokespace', 'needed');
+    } finally { Storage.prototype.setItem = setItem; }
+    const left = Object.keys(localStorage).filter((k) => k.indexOf(HISTORY_PREFIX) === 0).length;
+    fallbackDel(DRAFT_KEY + '-smokespace'); fallbackDel(PREFS_KEY + '-smoke');
+    return hadHistory >= 1 && !orphans.length && had && prefsKept && ok === true && left === 0 && ta.value === 'First draft $x$.' ||
+      { ids, hadHistory, orphans, had, prefsKept, ok, left, value: ta.value };`);
+
+  await check('History is modal, its Copy keeps the focus, and Restore stays with its draft', `
+    document.querySelector('#draftTools .dadd').click(); await wait(50);
+    const a = draftMeta.active;
+    setSourceText('A current', 0); updateAll(); keepVersion('test', 'A version');
+    document.querySelector('#draftTools [data-act="history"]').click(); await wait(50);
+    const inert = !!document.getElementById('draftTabs').closest('[inert]') && !!ta.closest('[inert]') && !historyDialog.closest('[inert]');
+    const realWrite = navigator.clipboard && navigator.clipboard.writeText;
+    if (navigator.clipboard) navigator.clipboard.writeText = () => Promise.reject(new Error('denied'));
+    historyList.querySelector('[data-copy-version="0"]').click(); await wait(100);
+    const focusKept = !!document.activeElement && document.activeElement.matches('[data-copy-version="0"]');
+    if (navigator.clipboard) navigator.clipboard.writeText = realWrite;
+    const version = historyShown.find((v) => v.text === 'A version');
+    switchDraft('d1'); await wait(50); /* any way the open draft could change meanwhile */
+    const closed = historyDialog.hidden && !ta.closest('[inert]');
+    restoreVersion(version); await wait(50);
+    const kept = ta.value === 'First draft $x$.';
+    window.confirm = () => true; deleteDraft(a); await wait(50);
+    return inert && focusKept && closed && kept && draftMeta.active === 'd1' || { inert, focusKept, closed, kept, active: draftMeta.active };`);
+
+  await check('Export names a draft that has not loaded instead of writing it as blank', `
+    const id = createDraft('Loading one', 'its text'); saveDraftMeta();
+    fallbackDel(keyOfDraft(id)); delete draftTexts[id]; bodyState[id] = 'loading';
+    let asked = '', downloaded = false;
+    window.confirm = (q) => { asked = q; return false; };
+    const realDownload = downloadFile;
+    downloadFile = function () { downloaded = true; return true; };
+    exportAllDrafts();
+    downloadFile = realDownload;
+    bodyState[id] = 'ready'; window.confirm = () => true; deleteDraft(id); switchDraft('d1');
+    return /“Loading one” has not loaded/.test(asked) && !downloaded || { asked, downloaded };`);
+
+  await check('A version that does not fit waits in memory and is written once there is space', `
+    dropHistory('d1');
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      if (k.indexOf(HISTORY_PREFIX) === 0) throw new DOMException('full', 'QuotaExceededError');
+      return setItem.call(this, k, v);
+    };
+    try { keepVersion('test', 'A version kept for later.'); } finally { Storage.prototype.setItem = setItem; }
+    const waiting = !!historyUnsaved.d1 && localStorage.getItem(HISTORY_PREFIX + 'd1') === null &&
+      readHistory('d1').some((v) => v.text === 'A version kept for later.');
+    retryHistory();
+    const written = !historyUnsaved.d1 && (localStorage.getItem(HISTORY_PREFIX + 'd1') || '').indexOf('A version kept for later.') >= 0;
+    dropHistory('d1');
+    return waiting && written || { waiting, written };`);
+
+  await check('Restore does not replace text another window saved since this one loaded it', `
+    keepVersion('test', 'An older version.');
+    localStorage.setItem(DRAFT_KEY, 'Saved by another window.'); /* as another window's autosave */
+    document.querySelector('#draftTools [data-act="history"]').click(); await wait(50);
+    const btn = [...historyList.querySelectorAll('[data-restore]')].find((b) => historyShown[+b.getAttribute('data-restore')].text === 'An older version.');
+    btn.click(); await wait(50);
+    const kept = ta.value === 'First draft $x$.' && localStorage.getItem(DRAFT_KEY) === 'Saved by another window.';
+    const msg = toast.textContent;
+    localStorage.setItem(DRAFT_KEY, 'First draft $x$.'); dropHistory('d1');
+    return kept && historyDialog.hidden && /saved a newer version/.test(msg) || { kept, msg, value: ta.value };`);
+
+  await check('Restore sees another window’s save even behind this window’s own refused write', `
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      if (k === DRAFT_KEY) throw new DOMException('full', 'QuotaExceededError');
+      return setItem.call(this, k, v);
+    };
+    try { setSourceText('A long edit that does not fit.', 0); saveDraftNow(); } finally { Storage.prototype.setItem = setItem; }
+    keepVersion('test', 'An older version.'); /* the refused write let stored versions go */
+    setItem.call(localStorage, DRAFT_KEY, 'Final from another window.');
+    document.querySelector('#draftTools [data-act="history"]').click(); await wait(50);
+    const btn = [...historyList.querySelectorAll('[data-restore]')].find((b) => historyShown[+b.getAttribute('data-restore')].text === 'An older version.');
+    btn.click(); await wait(50);
+    const kept = localStorage.getItem(DRAFT_KEY) === 'Final from another window.' && ta.value === 'A long edit that does not fit.';
+    const msg = toast.textContent;
+    setSourceText('First draft $x$.', 0); saveDraftNow(); dropHistory('d1');
+    return kept && /saved a newer version/.test(msg) && localStorage.getItem(DRAFT_KEY) === 'First draft $x$.' ||
+      { kept, msg, stored: localStorage.getItem(DRAFT_KEY) };`);
+
+  await check('Export changes nothing stored, even with a deletion from another window not yet taken in', `
+    const id = createDraft('Deleted elsewhere', 'Its text.'); switchDraft(id); await wait(50);
+    const theirs = JSON.parse(localStorage.getItem(DRAFTS_KEY)); /* the open draft, deleted in another window */
+    theirs.list = theirs.list.filter((d) => d.id !== id); theirs.gone[id] = Date.now(); theirs.saved = Date.now();
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(theirs)); /* as another window, before its storage event */
+    const snap = () => JSON.stringify(Object.keys(localStorage).sort().map((k) => [k, localStorage.getItem(k)]));
+    const before = snap();
+    const realDownload = downloadFile;
+    downloadFile = function () { return true; };
+    window.confirm = () => true;
+    exportAllDrafts(); exportOpenDraft();
+    downloadFile = realDownload;
+    const same = snap() === before;
+    deleteDraft(id); switchDraft('d1');
+    return same || 'storage changed';`);
+
+  await check('Restore waits for a draft whose text has not been read', `
+    keepVersion('test', 'An older version.');
+    bodyKnown.d1 = false; /* as after a read that failed */
+    document.querySelector('#draftTools [data-act="history"]').click(); await wait(50);
+    const v = historyShown.find((x) => x.text === 'An older version.');
+    restoreVersion(v); await wait(50);
+    const kept = ta.value === 'First draft $x$.', msg = toast.textContent;
+    bodyKnown.d1 = true; dropHistory('d1');
+    return kept && /has not loaded completely/.test(msg) || { kept, msg };`);
+
+  await check('the version kept while editing is the text the save replaces', `
+    dropHistory('d1');
+    const was = ta.value; /* saved */
+    setSourceText('x', 0); saveDraftNow();
+    const kept = readHistory('d1').map((v) => v.text);
+    setSourceText(was, 0); saveDraftNow(); dropHistory('d1');
+    return kept.length === 1 && kept[0] === was && localStorage.getItem(DRAFT_KEY) === was || kept;`);
+
+  await check('Restore works on a draft another window created', `
+    const id = 'd' + Date.now().toString(36) + 'smoke';
+    const theirs = JSON.parse(localStorage.getItem(DRAFTS_KEY));
+    theirs.list.push({ id, name: 'From another window', at: Date.now() }); theirs.saved = Date.now();
+    localStorage.setItem(keyOfDraft(id), 'Their text.'); /* as another window's createDraft */
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(theirs));
+    window.dispatchEvent(new StorageEvent('storage', { key: DRAFTS_KEY, newValue: JSON.stringify(theirs) }));
+    await wait(50);
+    switchDraft(id); await wait(50);
+    keepVersion('test', 'An older version.');
+    document.querySelector('#draftTools [data-act="history"]').click(); await wait(50);
+    restoreVersion(historyShown.find((x) => x.text === 'An older version.')); await wait(50);
+    const restored = ta.value === 'An older version.', msg = toast.textContent;
+    window.confirm = () => true;
+    deleteDraft(id); switchDraft('d1'); await wait(50);
+    return restored && draftMeta.active === 'd1' && !draftById(id) || { value: ta.value, msg };`);
+
+  await check('versions waiting in memory survive when stored versions give way to a draft', `
+    keepVersion('test', 'Stored version.');
+    historyUnsaved.d1 = [{ at: Date.now(), why: 'test', text: 'Waiting in memory.' }]; /* did not fit */
+    dropAllHistory();
+    const kept = readHistory('d1').some((v) => v.text === 'Waiting in memory.');
+    dropHistory('d1');
+    return kept || readHistory('d1');`);
+
+  await check('an offer to convert a pasted table expires when the open draft changes', `
+    const origId = draftMeta.active;
+    const tsv = 'A\\tB\\n1\\t2';
+    pastedTable = { draft: origId, source: tsv, start: 0, end: tsv.length }; tableOffer.hidden = false;
+    document.querySelector('#draftTools .dadd').click(); await wait(50);
+    const gone = !pastedTable && tableOffer.hidden;
+    setSourceText(tsv, 0); clearTimeout(timer);
+    pastedTable = { draft: origId, source: tsv, start: 0, end: tsv.length }; /* as if left over */
+    document.getElementById('convertPaste').click(); await wait(50);
+    const refused = !tableDialog.open;
+    if (tableDialog.open) tableDialog.close();
+    window.confirm = () => true; deleteDraft(draftMeta.active); switchDraft(origId);
+    return gone && refused || { gone, refused };`);
+
+  await check('Split’s Copy keeps the focus in its dialog when the clipboard refuses', `
+    limitInput.value = '40'; limitInput.dispatchEvent(new Event('input'));
+    setSourceText('First part of the answer here.\\n\\nSecond part of the answer here.', 0); updateAll();
+    document.getElementById('splitBtn').click(); await wait(50);
+    const realWrite = navigator.clipboard && navigator.clipboard.writeText;
+    if (navigator.clipboard) navigator.clipboard.writeText = () => Promise.reject(new Error('denied'));
+    splitParts.querySelector('[data-copy="0"]').click(); await wait(100);
+    const focusKept = !!document.activeElement && document.activeElement.matches('[data-copy="0"]');
+    if (navigator.clipboard) navigator.clipboard.writeText = realWrite;
+    closeSplit();
+    limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
+    setSourceText('First draft $x$.', 0); saveDraftNow();
+    return focusKept || document.activeElement && document.activeElement.outerHTML.slice(0, 80);`);
+
+  await check('Export asks about a draft whose read never answered, and forgets a deleted draft’s unsaved versions', `
+    const id = createDraft('Never answered', ''); saveDraftMeta();
+    fallbackDel(keyOfDraft(id)); delete draftTexts[id]; bodyKnown[id] = false; /* as after the 8 s watchdog */
+    let asked = '';
+    window.confirm = (q) => { asked = q; return false; };
+    exportAllDrafts();
+    historyUnsaved[id] = [{ at: 1, why: 'test', text: 'Unsaved version.' }];
+    window.confirm = () => true; deleteDraft(id); switchDraft('d1');
+    historyUnsaved[id] = [{ at: 1, why: 'test', text: 'Unsaved version.' }]; /* as if it came back */
+    pruneHistory();
+    return /“Never answered” has not loaded/.test(asked) && !historyUnsaved[id] || { asked, unsaved: !!historyUnsaved[id] };`);
+
   await check('a fresh editor after a draft switch still offers to convert a pasted table', `
     const origId = draftMeta.active;
     document.querySelector('#draftTools .dadd').click(); await wait(50);
