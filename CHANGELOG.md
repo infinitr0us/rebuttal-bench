@@ -5,11 +5,13 @@
 ### History and export
 - *History* (beside the draft tabs) lists earlier versions of the open draft, each with its
   time, why it was kept and its length. One is kept before *Fix all*, *Apply to source*, *Clear*,
-  *Load example* and a restore, and one every 10 minutes while you edit: up to 20 per draft, in
-  this browser only. *Restore* is undoable; *Copy* copies a version.
+  *Load example* and a restore, and, every 10 minutes while you edit, the text before the edit:
+  up to 20 per draft, in this browser only. *Restore* is undoable; *Copy* copies a version.
 - Versions never cost a draft: when a draft cannot be saved for lack of space, the stored ones
-  give way (versions waiting in memory stay and are written once there is room), and deleting a
-  draft deletes its versions, in other windows too.
+  give way, so with this browser's storage full earlier versions are kept on a best-effort basis
+  and may be lost (without browser storage, they last until the page is reloaded). Deleting a
+  draft deletes its versions, in other windows too; a draft that comes back because another
+  window still had it open comes back without them.
 - Restore writes like typing, so it waits until this window has the draft's latest text: it
   refuses while the draft has not loaded completely, and when another window or device has
   saved it since this one loaded it.
@@ -28,7 +30,8 @@
   into that other draft.
 
 ### Project
-- `tests/history.test.js` and fourteen smoke checks. Eight Codex reviews (`reviews/2026-11-21`).
+- `tests/history.test.js` and sixteen smoke checks. Nine Codex reviews and a design review by
+  Fable (`reviews/2026-11-21`).
 
 ## 3.4.0 (2026-11-21)
 

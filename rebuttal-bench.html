@@ -988,7 +988,7 @@ window.MathJax = {
       <h3 id="historyTitle">History</h3>
       <button type="button" class="modal-x" data-close aria-label="Close">×</button>
     </div>
-    <p class="modal-note">Earlier versions are kept before <em>Fix all</em>, <em>Apply to source</em>, <em>Clear</em>, <em>Load example</em> and a restore, and every 10 minutes while you edit: up to 20 per draft, in this browser only.</p>
+    <p class="modal-note">Earlier versions are kept before <em>Fix all</em>, <em>Apply to source</em>, <em>Clear</em>, <em>Load example</em> and a restore, and every 10 minutes while you edit: up to 20 per draft, in this browser only. With its storage full, drafts come first and versions may be lost.</p>
     <div id="historyList" class="split-parts"></div>
     <p class="modal-note">Drafts are kept in this browser only, and the online page and a downloaded copy of it each keep their own. Export them to keep a backup, or to copy them into another browser.</p>
     <div class="modal-actions">
@@ -5015,7 +5015,7 @@ function saveDraftSoon() {
    draft, or of an older text of this one, finishing late does not claim it. */
 function saveDraftNow() {
   if (!draftReady || ta.readOnly) return;
-  var key = draftKey, value = ta.value;
+  var key = draftKey, value = ta.value, before = savedText;
   /* No change from what this window last saved (an edit undone, Clear on a
      blank draft): writing would put this window's possibly older copy over a
      newer one saved elsewhere. */
@@ -5030,7 +5030,9 @@ function saveDraftNow() {
     bodyKnown[draftMeta.active] = true;
     delete historyHeld[draftMeta.active]; /* the bulk change it followed is stored: retryHistory may let go */
   }
-  if (key === draftKey) keepVersionWhileEditing(value);
+  /* The version kept while editing is the text this save replaces (not the
+     startup example, stored nowhere): the edit itself is in the draft. */
+  if (key === draftKey && !(before === EXAMPLE && storedValue(key) === null)) keepVersionWhileEditing(before);
   retryHistory(); /* versions that waited for space a save may have freed */
   done.then(function (persisted) {
     if (key === draftKey && value === ta.value) saveStateEl.textContent = persisted ? 'Draft saved' : 'Draft in memory only';
@@ -5691,7 +5693,13 @@ draftTools.addEventListener('click', function (e) {
 window.addEventListener('storage', function (e) {
   if (!draftReady || e.key !== DRAFTS_KEY || typeof e.newValue !== 'string') return;
   if (adoptDraftMeta(parseDraftMeta(e.newValue))) saveDraftMeta();
-  draftMeta.list.forEach(function (d) { if (!bodyState[d.id]) bodyState[d.id] = 'ready'; });
+  /* A draft new here: its text is the copy the other window stored (known,
+     so Restore and Export may use it), as at a start without the store. */
+  draftMeta.list.forEach(function (d) {
+    if (bodyState[d.id]) return;
+    bodyState[d.id] = 'ready';
+    if (typeof fallbackGet(keyOfDraft(d.id)) === 'string') bodyKnown[d.id] = true;
+  });
   pruneHistory();
   retryHistory(); /* a deletion there may have freed space for versions waiting here */
   renderDraftTabs();
@@ -5922,9 +5930,10 @@ function knownDraftText(id) {
     /* Memory holds what did not fit in localStorage: a newer text read from
        the store counts; an edit refused for space, perhaps undone since,
        does not: the editor does (the text this window last saved or loaded),
-       and the example in it stands for a draft localStorage never held. A
+       and the example in it stands for a draft localStorage never held,
+       unless the example is itself the write refused (Load example). A
        newer text another window saved meanwhile is not looked for. */
-    if (refusedEdit(key)) local = ta.value === EXAMPLE && storedValue(key) === null ? null : ta.value;
+    if (refusedEdit(key)) local = ta.value === EXAMPLE && memStore[key] !== EXAMPLE && storedValue(key) === null ? null : ta.value;
     if (bodyKnown[id]) return typeof local === 'string' ? local : ta.value === EXAMPLE ? '' : ta.value;
     return state !== 'loading' && typeof local === 'string' ? local : null;
   }

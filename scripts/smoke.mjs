@@ -682,6 +682,31 @@ try {
     bodyKnown.d1 = true; dropHistory('d1');
     return kept && /has not loaded completely/.test(msg) || { kept, msg };`);
 
+  await check('the version kept while editing is the text the save replaces', `
+    dropHistory('d1');
+    const was = ta.value; /* saved */
+    setSourceText('x', 0); saveDraftNow();
+    const kept = readHistory('d1').map((v) => v.text);
+    setSourceText(was, 0); saveDraftNow(); dropHistory('d1');
+    return kept.length === 1 && kept[0] === was && localStorage.getItem(DRAFT_KEY) === was || kept;`);
+
+  await check('Restore works on a draft another window created', `
+    const id = 'd' + Date.now().toString(36) + 'smoke';
+    const theirs = JSON.parse(localStorage.getItem(DRAFTS_KEY));
+    theirs.list.push({ id, name: 'From another window', at: Date.now() }); theirs.saved = Date.now();
+    localStorage.setItem(keyOfDraft(id), 'Their text.'); /* as another window's createDraft */
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(theirs));
+    window.dispatchEvent(new StorageEvent('storage', { key: DRAFTS_KEY, newValue: JSON.stringify(theirs) }));
+    await wait(50);
+    switchDraft(id); await wait(50);
+    keepVersion('test', 'An older version.');
+    document.querySelector('#draftTools [data-act="history"]').click(); await wait(50);
+    restoreVersion(historyShown.find((x) => x.text === 'An older version.')); await wait(50);
+    const restored = ta.value === 'An older version.', msg = toast.textContent;
+    window.confirm = () => true;
+    deleteDraft(id); switchDraft('d1'); await wait(50);
+    return restored && draftMeta.active === 'd1' && !draftById(id) || { value: ta.value, msg };`);
+
   await check('versions waiting in memory survive when stored versions give way to a draft', `
     keepVersion('test', 'Stored version.');
     historyUnsaved.d1 = [{ at: Date.now(), why: 'test', text: 'Waiting in memory.' }]; /* did not fit */

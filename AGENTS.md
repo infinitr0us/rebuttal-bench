@@ -207,12 +207,18 @@ cases, Chrome probes); keep their rules:
   asynchronous store, a list write that stalls while another device adds a draft can drop that
   entry until the other device's next save or start restores it (the text itself is kept; without
   store revisions this lost update cannot be excluded).
-- **History** (earlier versions) is a safety net that must never cost a draft. Each draft's versions
+- **History** (earlier versions) is a safety net that must never cost a draft, and is best effort
+  when storage is full. Each draft's versions
   live under `HISTORY_PREFIX + id` in localStorage only (never the asynchronous store), newest
   first, capped by `capHistory` (pure: `parseHistory`, `historyAdd`, `historyDue`, `mergeHistory`,
   `tests/history.test.js`). `keepVersion` runs before every bulk change of the editor (Fix all,
-  Apply to source, Clear, Load example, a restore; none on a read-only draft) and `saveDraftNow`
-  keeps one every `HISTORY_EVERY`. A history write that does not fit keeps fewer versions there
+  Apply to source, Clear, Load example, a restore; none on a read-only draft) and `saveDraftNow`,
+  every `HISTORY_EVERY`, keeps the text its save replaces (`savedText`; not the startup example,
+  stored nowhere). The rest of this bullet, the quota machinery, is **frozen** for 3.5.0: nine
+  reviews kept finding orders that lose a version while storage is full, and fixes kept adding
+  new ones. 3.6 should replace it (`reviews/2026-11-21/fable-history-advice.md`, model A: a total
+  History budget well under the quota, oldest-first eviction across drafts, no write-back), not
+  patch it. A history write that does not fit keeps fewer versions there
   and the rest in memory (`historyUnsaved`); before a bulk change that writes the draft, its
   versions (`hold`, even when the newest already is this text or the editor is blank; Clear of a
   blank draft holds nothing) stay in memory until the draft has been saved since, or the change
@@ -266,7 +272,12 @@ cases, Chrome probes); keep their rules:
   local edit. Fixing them needs the same redesign as Import. Likewise for Export: a window whose
   last write or read of a draft did not fit exports its own copy, not a newer one another window
   saved since (a baseline of what each window last saw was tried and reviewed twice, and kept
-  missing paths: `reviews/2026-11-21/codex-confirm3-history`).
+  missing paths: `reviews/2026-11-21/codex-confirm3-history`). A draft deleted in one window that
+  comes back because another window still has it open comes back without its versions (the
+  deletion removed them; `codex-final2-history`). A page restored from the back/forward cache does
+  not take in list changes it missed while away (there is no `pageshow` handler, as in 3.4.0): if
+  its open draft was deleted meanwhile, text typed after returning is saved under a deleted key.
+  Both go with the 3.6 redesign.
 
 ## Splitting
 
