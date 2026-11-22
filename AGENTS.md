@@ -213,10 +213,13 @@ cases, Chrome probes); keep their rules:
   `tests/history.test.js`). `keepVersion` runs before every bulk change of the editor (Fix all,
   Apply to source, Clear, Load example, a restore; none on a read-only draft) and `saveDraftNow`
   keeps one every `HISTORY_EVERY`. A history write that does not fit keeps fewer versions there
-  and the rest in memory (`historyUnsaved`); a bulk change's version (`hold`, even when it is
-  already the newest) stays in memory until it is written while no draft write waits for space
-  (`draftWritesWaiting`) and the draft has been saved since (`historyHeld`). `retryHistory` runs after a draft save, a confirmed store write, a
-  storage event and on leaving the page, and prunes deleted drafts first. Only a quota error on a draft key (body, list, pending or deleting mark) drops the
+  and the rest in memory (`historyUnsaved`); before a bulk change that writes the draft, its
+  versions (`hold`, even when the newest already is this text or the editor is blank; Clear of a
+  blank draft holds nothing) stay in memory until the draft has been saved since (`historyHeld`)
+  and they are written while no draft write waits for space or for the asynchronous store, whose
+  answer rewrites the pending mark (`draftWritesWaiting`). `retryHistory` runs after a draft save,
+  a confirmed store write, a storage event and on leaving the page, and prunes deleted drafts
+  first. Only a quota error on a draft key (body, list, pending or deleting mark) drops the
   stored history and retries once (`fallbackSet` → `isQuotaError`, `dropAllHistory`); versions
   waiting in memory stay, and preferences never drop anything. Deleting a draft deletes its
   history, here and, through tombstones, in other windows and after a boot (`pruneHistory`, which
@@ -234,8 +237,9 @@ cases, Chrome probes); keep their rules:
   localStorage holds (`storedValue`, not this window's copy in memory) equal to the editor or
   `savedText`, as must what memory holds in front of it (a newer read that did not fit), and with
   the asynchronous store a fresh read equal to the last confirmed value, the editor or
-  `savedText` (another device). The restore belongs to the click (`restoreSeq`, the editor's text
-  then): an edit, another restore or a draft switch before it applies drops it, and every
+  `savedText` (another device). The restore belongs to the click (`restoreSeq`, `editSeq`, which
+  `setSourceText` advances too, and the editor's text then): an edit, an undo, another restore or
+  a draft switch before it applies drops it, and every
   condition is checked again just before writing. When this window holds text it could not
   save, the refusal says to copy it before closing or reloading (the page-exit retry, a limit
   shared with 3.4.0, may write it over the newer version).
@@ -245,7 +249,8 @@ cases, Chrome probes); keep their rules:
   the 8 s watchdog only when this browser has a copy; while a known draft is read again, its
   stored copy). An edited editor (`ta.value !== savedText`) is the author's text; an unchanged one
   yields to the newest copy, including a newer text read from the store that did not fit here
-  (`readCache`), but not an edit refused for space and undone since; the example stands for an
+  (`readCache`), or one another window saved since this window last read or wrote the key
+  (`diskSeen`), but not an edit refused for space and undone since; the example stands for an
   empty draft.
   Export all merges, in a private copy, this window's list with the stored one (drafts another
   window just added), writes `draftsFile` with every known text and names the others before
