@@ -210,7 +210,14 @@ cases, Chrome probes); keep their rules:
 - **Back from the back/forward cache**, a page got no storage events while it was away: `pageshow`
   with `persisted` takes in the list as localStorage holds it (`takeInList`, the storage event's
   handler, merged with this window's list), so its open draft deleted meanwhile is re-created like
-  in a live window, not saved under a deleted key.
+  in a live window, not saved under a deleted key. Chrome may still deliver the queued events
+  afterwards, so `takeInList` merges every event's list with the one stored now.
+- **Re-creating the open draft** (`adoptDraftMeta` → `recreateOpenDraft`) happens only when the
+  deletion is newer than this window's entry, and never writes over a different text stored under
+  the key since this window last saved or loaded it: here (`storedValue`) or, with the asynchronous
+  store, there (read first; another device may have written it). That text is kept, and this
+  window's stays in its editor. The store's merge in `saveDraftMeta` can revive the open draft
+  too (deleted on another device): it reports that, and the text goes back the same way.
 - **History** (earlier versions) is a safety net that must never cost a draft, and is best effort.
   Each draft's versions live under `HISTORY_PREFIX + id` in localStorage only (never the
   asynchronous store), newest first, capped per draft by `capHistory` and for all drafts together
@@ -226,7 +233,12 @@ cases, Chrome probes); keep their rules:
   (`fitHistory`), and when storage refuses the write, frees about what the write adds, oldest first
   again, twice as much each time, until it fits or no version is left. A draft's write refused for
   lack of space (body, list, pending or deleting mark: `fallbackSet` → `isQuotaError`) makes room
-  the same way (`setMakingRoom`); preferences and imported texts never give up a version. Do not bring
+  the same way (`setMakingRoom`), and as a last resort, like 3.5.0, removes every History key
+  (also one that cannot be read or shortened: a browser over its quota refuses a shorter value but
+  not a removal) and tries once more; preferences and imported texts never give up a version. The
+  budget is approximate (one character per list and the key names are not counted) and trimming
+  is best effort; `fitHistory` expects each list newest first, as `parseHistory` returns it.
+  Without readable localStorage, versions stay in memory with the per-draft caps only. Do not bring
   back a write-back of versions that did not fit. Deleting a draft deletes its history, here and,
   through tombstones, in other windows and after a boot (`pruneHistory`, which first merges this
   window's list with both the in-memory and the stored copy: `storedValue`); a window keeps the
@@ -269,8 +281,11 @@ cases, Chrome probes); keep their rules:
   file read that ends after a switch still only adds tabs. A text is written to localStorage
   before its draft is listed (`newDraft(name, text, true)`), without making room: a draft that
   does not fit is left out and named, and no version is given up for its text, since the file
-  still holds it (the list written afterwards follows the ordinary rules). Without localStorage, the asynchronous store's answers decide whether a second
-  message asks to keep the file. The 3.5.0 design made a multi-draft import all-or-nothing, with
+  still holds it (the list written afterwards, and the pending marks, follow the ordinary rules).
+  With the asynchronous store, the list goes there only once the imported texts' writes have
+  settled (`saveDraftMeta(true)` first: this browser's list, pending), so another device never
+  reads a new entry before its text; a text the store did not confirm is named, and without
+  localStorage the first message says to keep the file. The 3.5.0 design made a multi-draft import all-or-nothing, with
   the open draft secured first, a commit and a rollback, and a switch to the first new draft; three
   reviews kept finding ways for it to lose text (`reviews/2026-11-21/codex-final-history`). Do not
   bring back a rollback or a switch.
@@ -284,8 +299,12 @@ cases, Chrome probes); keep their rules:
   saved since (a baseline of what each window last saw was tried and reviewed twice, and kept
   missing paths: `reviews/2026-11-21/codex-confirm3-history`). A draft deleted in one window that
   comes back because another window still has it open comes back without its versions (the
-  deletion removed them; `codex-final2-history`). Two windows importing the same file at the
-  same moment can both add its drafts.
+  deletion removed them; `codex-final2-history`). A window or device that has not yet seen
+  another's import of the same file (at the same moment, or with an older list) adds its drafts
+  again. Split's *Open the parts as drafts* still sends the list with the parts' texts, so for a
+  moment another device can see a part without its text (since 3.3.0). Re-creating the open
+  draft reads the asynchronous store first, so only a text another device writes there during
+  that read can still be overwritten (`reviews/2026-11-25/codex-review-storage36`).
 
 ## Splitting
 

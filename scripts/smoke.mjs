@@ -668,6 +668,60 @@ try {
     window.confirm = () => true; deleteDraft(id); switchDraft('d1'); await wait(50);
     return listed && saved || { listed, saved, stored: stored.list.map((d) => d.id) };`);
 
+  await check('a late storage event never writes the open draft over a newer text another window saved', `
+    const id = createDraft('Re-created elsewhere', 'Mine.'); switchDraft(id); await wait(50);
+    const base = JSON.parse(localStorage.getItem(DRAFTS_KEY));
+    const deleted = JSON.parse(JSON.stringify(base)); /* another window deletes it */
+    deleted.list = deleted.list.filter((d) => d.id !== id); deleted.gone[id] = Date.now(); deleted.saved = Date.now();
+    await wait(5);
+    const later = JSON.parse(JSON.stringify(base)); /* a third re-creates it and saves a newer text */
+    later.list.forEach((d) => { if (d.id === id) d.at = Date.now(); }); later.gone[id] = deleted.gone[id]; later.saved = Date.now();
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(later));
+    localStorage.setItem(keyOfDraft(id), 'Newer, saved by another window.');
+    window.dispatchEvent(new StorageEvent('storage', { key: DRAFTS_KEY, newValue: JSON.stringify(deleted) })); await wait(50);
+    const kept = localStorage.getItem(keyOfDraft(id)) === 'Newer, saved by another window.';
+    /* A newer deletion stored, but a text written after it under the key: kept too, and listed again. */
+    const again = JSON.stringify({ ...deleted, gone: { ...deleted.gone, [id]: Date.now() + 500 } });
+    localStorage.setItem(DRAFTS_KEY, again); localStorage.setItem(keyOfDraft(id), 'Written after the deletion.');
+    window.dispatchEvent(new StorageEvent('storage', { key: DRAFTS_KEY, newValue: again })); await wait(50);
+    const guarded = localStorage.getItem(keyOfDraft(id)) === 'Written after the deletion.' &&
+      JSON.parse(localStorage.getItem(DRAFTS_KEY)).list.some((d) => d.id === id);
+    /* A deletion nobody answered still brings the draft back with this window's text. */
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify({ ...deleted, gone: { ...deleted.gone, [id]: Date.now() + 2000 } }));
+    localStorage.removeItem(keyOfDraft(id));
+    window.dispatchEvent(new StorageEvent('storage', { key: DRAFTS_KEY, newValue: localStorage.getItem(DRAFTS_KEY) })); await wait(50);
+    const recreated = localStorage.getItem(keyOfDraft(id)) === ta.value && !!draftById(id);
+    window.confirm = () => true; deleteDraft(id); switchDraft('d1'); await wait(50);
+    return kept && guarded && recreated || { kept, guarded, recreated, stored: localStorage.getItem(keyOfDraft(id)), value: ta.value };`);
+
+  await check('a draft that needs the space gets it even from History keys that cannot be read or shortened', `
+    historyKeys().forEach((k) => localStorage.removeItem(k)); historyNewest = {};
+    localStorage.setItem(HISTORY_PREFIX + 'dbroken01', 'broken'); localStorage.setItem(HISTORY_PREFIX + 'dempty001', '[]');
+    let setItem = Storage.prototype.setItem, ok, left;
+    Storage.prototype.setItem = function (k, v) {
+      if (k.indexOf(HISTORY_PREFIX) !== 0 && Object.keys(localStorage).some((x) => x.indexOf(HISTORY_PREFIX) === 0)) throw new DOMException('full', 'QuotaExceededError');
+      return setItem.call(this, k, v);
+    };
+    try { ok = fallbackSet(DRAFT_KEY + '-smokeroom', 'needed'); } finally { Storage.prototype.setItem = setItem; }
+    left = historyKeys().length; fallbackDel(DRAFT_KEY + '-smokeroom');
+    /* Over its quota, a browser refuses even a shorter History list, but not a removal. */
+    localStorage.setItem(HISTORY_PREFIX + 'd1', JSON.stringify([{ at: 2, why: 'test', text: 'b'.repeat(300) }, { at: 1, why: 'test', text: 'a'.repeat(300) }]));
+    const used = () => Object.keys(localStorage).reduce((n, k) => n + k.length + localStorage.getItem(k).length, 0);
+    const cap = used() - 100;
+    Storage.prototype.setItem = function (k, v) {
+      const was = localStorage.getItem(k);
+      if (used() - (was === null ? 0 : k.length + was.length) + k.length + String(v).length > cap) throw new DOMException('full', 'QuotaExceededError');
+      return setItem.call(this, k, v);
+    };
+    let over;
+    try { over = fallbackSet(DRAFT_KEY + '-smokeroom', 'needed'); } finally { Storage.prototype.setItem = setItem; }
+    fallbackDel(DRAFT_KEY + '-smokeroom'); dropHistory('d1');
+    return ok === true && left === 0 && over === true || { ok, left, over };`);
+
+  await check('messages show above History and Split', `
+    const z = (el) => +getComputedStyle(el).zIndex;
+    return z(toast) > z(historyDialog) && z(toast) > z(splitDialog) || [z(toast), z(historyDialog), z(splitDialog)];`);
+
   await check('Import adds an exported file’s new drafts as tabs, skips those already here, and changes nothing else', `
     const files = [], realDownload = downloadFile;
     downloadFile = function (name, content) { files.push(content); return true; };
@@ -922,10 +976,12 @@ try {
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).
   await send('Page.addScriptToEvaluateOnNewDocument', { source: `
-    const later = (f) => new Promise((r) => setTimeout(() => r(f()), +(localStorage.getItem('stub:delay') || 50)));
+    const later = (f, ms) => new Promise((r) => setTimeout(() => r(f()), ms || +(localStorage.getItem('stub:delay') || 50)));
+    /* 'stub:slow': the texts of drafts other than the first take 1.5 s to write. */
+    const slow = (k) => localStorage.getItem('stub:slow') && /^rebuttal-bench-draft-(?!pending)/.test(k) && !/-pending$/.test(k) ? 1500 : 0;
     window.storage = {
       get: (k) => later(() => { const v = localStorage.getItem('stub:' + k); return v === null ? null : { value: v }; }),
-      set: (k, v) => later(() => { localStorage.setItem('stub:' + k, v); }),
+      set: (k, v) => later(() => { localStorage.setItem('stub:' + k, v); }, slow(k)),
       delete: (k) => later(() => { localStorage.removeItem('stub:' + k); }),
     };` }, sessionId);
   await load();
@@ -988,6 +1044,30 @@ try {
     const ok = inStore && draftText(d.id) === 'Imported $q$.' && ta.value === 'Theirs $b$.';
     if (d) { window.confirm = () => true; deleteDraft(d.id); await wait(300); }
     return ok || { found: !!d, inStore, list: draftMeta.list.map((x) => x.name), value: ta.value };`);
+
+  await check('with an asynchronous store, an import’s list reaches it only once the text has', `
+    localStorage.setItem('stub:slow', '1');
+    importDrafts(JSON.stringify({ format: 'rebuttal-bench-drafts', drafts: [{ name: 'Slow one', text: 'Slow $s$.' }] }), 'x.json');
+    const d = draftMeta.list.find((x) => x.name === 'Slow one');
+    const inStore = () => JSON.parse(localStorage.getItem('stub:' + DRAFTS_KEY) || '{"list":[]}').list.some((x) => x.id === d.id);
+    await wait(700); /* the list alone would be there by now */
+    const early = inStore(), here = JSON.parse(localStorage.getItem(DRAFTS_KEY)).list.some((x) => x.id === d.id);
+    for (let i = 0; i < 40 && !inStore(); i++) await wait(100);
+    const late = inStore(), body = localStorage.getItem('stub:' + keyOfDraft(d.id));
+    localStorage.removeItem('stub:slow');
+    window.confirm = () => true; deleteDraft(d.id); await wait(300);
+    return !early && here && late && body === 'Slow $s$.' || { early, here, late, body };`);
+
+  await check('with an asynchronous store, a merge that brings back the open draft deleted on another device brings back its text', `
+    const id = createDraft('Deleted on another device', 'Still here $r$.'); switchDraft(id); await wait(500);
+    const s = JSON.parse(localStorage.getItem('stub:' + DRAFTS_KEY)); /* that device deleted it */
+    s.list = s.list.filter((d) => d.id !== id); s.gone[id] = Date.now(); s.saved = Date.now();
+    localStorage.setItem('stub:' + DRAFTS_KEY, JSON.stringify(s)); localStorage.removeItem('stub:' + keyOfDraft(id));
+    saveDraftMeta(); await wait(700);
+    const listed = JSON.parse(localStorage.getItem('stub:' + DRAFTS_KEY)).list.some((d) => d.id === id);
+    const body = localStorage.getItem('stub:' + keyOfDraft(id));
+    window.confirm = () => true; deleteDraft(id); await wait(300);
+    return listed && body === 'Still here $r$.' || { listed, body };`);
 
   results.push([errors.length === 0, 'no uncaught page errors', errors.join(' | ')]);
 } catch (e) {
