@@ -6066,52 +6066,58 @@ function adoptDraftMeta(theirs) {
 /* The open draft, deleted elsewhere, comes back with this editor's text,
    unless a different text was stored under its key since this window last
    saved or loaded it (another window re-created and saved it first): that
-   one is kept, and this window's text stays in its editor. With the
-   asynchronous store, the same holds for a text another device wrote there
-   (the store is read first). A draft still loading is not written here;
-   its read sends a local copy the store lacks. */
+   one is kept, and this window's text stays in its editor. A draft still
+   loading is not written here; its read sends a local copy the store lacks.
+   This browser's copy is written at once, as before 3.6, so a switch right
+   after finds it. With the asynchronous store, the local copy is pending
+   (the next start reconciles it), and the store gets the text only once a
+   read shows it holds no newer text from another device and the local copy
+   is still this one: a window that saved meanwhile wins. */
 function recreateOpenDraft() {
-  if (ta.readOnly) return;
-  var key = draftKey, id = draftMeta.active, stored = storedValue(key);
-  if (typeof stored === 'string' && stored !== savedText && stored !== ta.value) return;
-  function write() {
-    if (draftMeta.active !== id || ta.readOnly) return;
-    storeDraft(ta.value, key);
-    savedText = ta.value;
-  }
-  if (!canArtifactStore) { write(); return; }
+  recreateBody(draftMeta.active);
+}
+/* The same for draft `id`, which may no longer be the open one (a switch
+   before the store's merge answered): its text is then its local copy. */
+function recreateBody(id) {
+  var open = id === draftMeta.active, key = keyOfDraft(id);
+  if (open && ta.readOnly) return;
+  var text = open ? ta.value : fallbackGet(key), stored = storedValue(key);
+  if (typeof text !== 'string') return;
+  if (open && typeof stored === 'string' && stored !== savedText && stored !== text) return;
+  if (!canArtifactStore) { storeDraft(text, key); if (open) savedText = text; return; }
+  flushDraftLocally(text, key);
+  if (open && !memNewer[key]) savedText = text;
   remoteRead(key).then(function (r) {
     var confirmed = Object.prototype.hasOwnProperty.call(remoteDrafts, key) ? remoteDrafts[key] : null;
-    if (r.ok && r.value !== null && r.value !== confirmed && r.value !== ta.value) return;
-    write();
+    if (!r.ok || (r.value !== null && r.value !== confirmed && r.value !== text)) return;
+    if (fallbackGet(key) !== text) return;
+    storeDraft(text, key);
   });
 }
 
 /* The list is merged with the latest local copy before it is written, and
    with the store's copy while it is written (several devices write it), so
-   no window or device drops another's drafts or undoes its deletions.
-   `localOnly`: this browser only for now (pending, so a later write or the
-   next start sends it to the asynchronous store). */
-function saveDraftMeta(localOnly) {
+   no window or device drops another's drafts or undoes its deletions. */
+function saveDraftMeta() {
   var latest = fallbackGet(DRAFTS_KEY);
   if (typeof latest === 'string' && adoptDraftMeta(parseDraftMeta(latest))) { /* body re-created */ }
   draftMeta.saved = Date.now();
   var json = JSON.stringify(draftMeta);
   flushDraftLocally(json, DRAFTS_KEY);
-  if (!canArtifactStore || localOnly) return Promise.resolve(true);
+  if (!canArtifactStore) return Promise.resolve(true);
   var revived = null;
   return remoteWrite(DRAFTS_KEY, json, function (mine, stored) {
     if (stored === null) return mine;
-    var m = parseDraftMeta(mine), s = parseDraftMeta(stored), open = null;
-    m.list.forEach(function (d) { if (d.id === m.active) open = d; });
-    /* Deleted on another device after this window's entry: the merge brings
-       it back (the open draft), so its text has to go back as well. */
-    revived = open && s.gone[m.active] !== undefined && s.gone[m.active] >= open.at ? m.active : null;
+    var m = parseDraftMeta(mine), s = parseDraftMeta(stored);
+    /* Deleted on another device: the merge brings the open draft back (as
+       does a rename here since, newer than the deletion), so its text has
+       to go back as well. */
+    revived = s.gone[m.active] !== undefined && !s.list.some(function (d) { return d.id === m.active; }) ? m.active : null;
     return JSON.stringify(mergeDraftMeta(m, s, Date.now()));
   }).then(function (r) {
     if (!r.ok) { markPending(DRAFTS_KEY); return false; }
     confirmRemote(DRAFTS_KEY, r.value);
-    if (revived && revived === draftMeta.active && draftReady) recreateOpenDraft();
+    if (revived && draftReady && draftById(revived)) recreateBody(revived);
     if (r.value !== json) {
       /* The store knew drafts or deletions this window did not. */
       adoptDraftMeta(parseDraftMeta(r.value));
@@ -6847,27 +6853,26 @@ function importDrafts(content, fileName) {
   var added = [], left = [], made = [];
   plan.add.forEach(function (d) {
     var m = newDraft(d.name, d.text, true);
-    if (m) { added.push('“' + d.name + '”'); made.push({ m: m, key: keyOfDraft(m.id), text: d.text, name: '“' + d.name + '”' }); }
+    if (m) { added.push('“' + d.name + '”'); made.push({ stored: m.stored, name: '“' + d.name + '”' }); }
     else left.push('“' + d.name + '”');
   });
   function names(list) {
     return list.length > 5 ? list.slice(0, 5).join(', ') + ' and ' + (list.length - 5) + ' more' : list.join(', ');
   }
   if (added.length) {
-    /* With the asynchronous store another device may read the list at any
-       moment, so the store gets the list once it has the texts: a draft it
-       names is never one whose text it lacks. This browser lists them now. */
-    saveDraftMeta(canArtifactStore);
+    var listSaved = saveDraftMeta();
     renderDraftTabs();
-    if (canArtifactStore) {
-      Promise.all(made.map(function (x) { return x.m.stored; })).then(function () {
-        saveDraftMeta();
-        var unconfirmed = made.filter(function (x) { return remoteDrafts[x.key] !== x.text; }).map(function (x) { return x.name; });
-        if (unconfirmed.length) {
-          showToast('Storage did not confirm ' + names(unconfirmed) + '. ' + (canLocalRead
-            ? 'This browser keeps ' + (unconfirmed.length === 1 ? 'it' : 'them') + ' and sends ' + (unconfirmed.length === 1 ? 'it' : 'them') + ' again on the next visit; keep the file until then.'
-            : 'Keep the file: after a reload, import it again if one is missing.'));
-        } else if (!canLocalRead) showToast('Storage has the imported drafts.');
+    /* Without localStorage, the asynchronous store is the only copy: report
+       what it confirmed, from each write's own answer (with localStorage,
+       this browser keeps the texts and sends any the store missed again). */
+    if (!canLocalRead && canArtifactStore) {
+      Promise.all(made.map(function (x) { return x.stored; })).then(function (ok) {
+        listSaved.then(function (listOk) {
+          var failed = made.filter(function (x, i) { return !ok[i]; }).map(function (x) { return x.name; });
+          showToast(failed.length ? 'Storage did not confirm ' + names(failed) + '. Keep the file: after a reload, import it again if one is missing.'
+            : !listOk ? 'Storage did not confirm the list of drafts. Keep the file: after a reload, import it again if the drafts are missing.'
+            : 'Storage has the imported drafts.');
+        });
       });
     }
   }
