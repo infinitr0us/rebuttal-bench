@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.6.0 (unreleased)
+## 3.6.0 (2026-11-25)
 
 ### Import
 - *Import…* in the History dialog reads back a file that *Export all drafts* wrote, or a `.md` or
