@@ -35,6 +35,9 @@ test('each block is located at its own source, in order', () => {
   ]);
   // The repeated paragraph is found at its second place, not the first.
   assert.equal(blocks[3].start, text.lastIndexOf('Intro text.'));
+  // Nor inside a link definition's title that repeats it.
+  const def = '[a]: https://x.org "Same words"\n\nSame words';
+  assert.deepEqual(plain(A.blockSources(def)).map((b) => b.start), [def.lastIndexOf('Same words')]);
   for (const odd of [null, undefined, 7, '']) assert.deepEqual(plain(A.blockSources(odd)), []);
   assert.doesNotThrow(() => A.blockSources('\u0000'));
 });

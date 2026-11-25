@@ -96,6 +96,15 @@ test('not labels: bold that starts a sentence, words that only look like points,
   assert.equal(plain(A.commentSections('Hello.\n\n## Then one\n\ntext')).sections.length, 2);
 });
 
+test('review 2026-11-25: a bold subject before a citation is no point; a definition title is not the paragraph', () => {
+  assert.equal(A.commentSections('**Our method** (Sec. 3) improves recall.\n\n**The baseline** (Sec. 4) uses more memory.'), null);
+  assert.equal(plain(A.commentSections('**W3** (novelty): yes.\n\n**Q4** (scale): no.')).sections.length, 2);
+  const text = '[a]: https://x.org "W1: Answer"\n\nW1: Answer\n\nW2: Other';
+  const r = plain(A.commentSections(text));
+  assert.equal(r.sections[0].start, text.indexOf('\n\nW1: Answer') + 2);
+  assert.equal(r.sections[0].chars, 'W1: Answer'.length);
+});
+
 test('list items each count, from their own start; blank text before is not an opening', () => {
   const text = '\n\n1. **W1.** first\n2. **W2.** second\n\n   more of the second\n3. plain third';
   const r = plain(A.commentSections(text));

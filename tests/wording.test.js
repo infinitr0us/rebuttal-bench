@@ -56,6 +56,25 @@ test('near misses are not fillers', () => {
   }
 });
 
+test('review 2026-11-25: no hint that changes the meaning, none in code a list indents with tabs', () => {
+  for (const text of [
+    'We would like to release the data, but the license prohibits it.',
+    'We keep a validation set whether or not labels are available.',
+  ]) {
+    assert.deepEqual(texts(text), [], text);
+  }
+  assert.deepEqual(texts('We would like to clarify the setup.'), ['filler:would like to>']);
+  // A fence in a list item indented with a tab: Marked expands the tab, so its token is not found.
+  const tabbed = '- Reproduction steps:\n\n\t```python\n\t# in order to reproduce\n\t```\n\nWe ran it in order to test.';
+  const h = hints(tabbed).hints.filter((x) => x.text.toLowerCase() === 'in order to');
+  assert.equal(h.length, 1);
+  assert.deepEqual(h[0].at.map((x) => x.start), [tabbed.lastIndexOf('in order to')]);
+  // An abbreviation seen only in a link's address is not defined for the reader.
+  const g = hints('Graph Neural Network a. Graph Neural Network b. Graph Neural Network c. [see](https://x.org/GNN)')
+    .hints.find((x) => x.kind === 'name');
+  assert.equal(g.defined, false);
+});
+
 test('a long name used three times or more: an abbreviation of its capitals', () => {
   const name = 'Contrastive Language-Image Pre-training';
   const text = `We compare with ${name}. Unlike ${name}, ours is small. ${name} is strong, and ${name} is slow.`;

@@ -342,22 +342,32 @@ because OpenReview typesets each comment from a fresh TeX state.
 - `commentSections(text)` (pure, `tests/sections.test.js`) finds the parts of a draft for the
   *Sections* panel from Marked's top-level tokens only: a heading runs to the next heading of its
   level or higher, a labelled point (`sectionLabel`: bold that ends in punctuation or stands
-  alone, or a point name such as `W1:`) to the next part of any kind. Counts are trimmed UTF-16
-  lengths, as the limit counts. Bold that starts a sentence is no label; keep it that way.
+  alone, or a point name such as `W1:`; bold followed by a parenthesis only for a point name) to
+  the next part of any kind. Counts are trimmed UTF-16 lengths, as the limit counts. Bold that
+  starts a sentence is no label; keep it that way. Blocks are located past link definitions
+  (`locateBlock`), whose titles can repeat a paragraph's words.
 - `wordingHints(text, spans)` (pure, `tests/wording.test.js`) is advice and is **never applied**,
   not even as a manual fix: a phrase can be the author's choice. It reads only the author's
-  visible prose (`proseMask`: not code, math, HTML, quotes, link or image syntax, definitions).
-  Add a filler to `FILLERS` only with a shorter form that keeps the meaning in every context
-  (no *with respect to*, which a derivative needs) and a near-miss case in the tests.
+  visible prose (`proseMask`: not code, math, HTML, quotes, link or image syntax, definitions;
+  also code Marked's tokens could not be located, through a looser fence scan, since masking too
+  much only drops a hint). Add a filler to `FILLERS` only with a shorter form that keeps the
+  meaning in every context (no *with respect to*, which a derivative needs; no *whether or not*,
+  which can mean regardless; *would like to* only before a courtesy verb) and a near-miss case
+  in the tests.
+- Both panels read the comment **as posted** (`text.trim()`, like the preview) and move their
+  offsets back into the editor's text (`leadOf`).
 - `blockSources(text)` (pure, `tests/editing.test.js`, which checks it against the rendered
   elements) lists each top-level block that renders an element, with its tag. A double-click in
   the preview lines it up with the preview's children by tag, then finds the n-th use of the
-  word (formulas left out) or the n-th formula in that block's source. OpenReview renders an HTML
-  block as text, so it has no entry.
+  word (formulas left out) or the n-th formula in that block's source, counting only what the
+  preview shows: not formulas, an image's syntax and alt text, link destinations, definitions or
+  a fence's info string, with word boundaries of letters and digits (`WORD_CHAR`; not `_`, which
+  is emphasis, or curly quotes). OpenReview renders an HTML block as text, so it has no entry.
 - Find works on the source as typed. A textarea shows no selection while the focus is elsewhere,
   so `drawFindMarks` lays the text out in `caretTop`'s twin (`prepareMirror`) and draws boxes in
-  `#findMarks` over the editor; it is redrawn on scroll, input, selection, resize and after every
-  analysis (a draft switch). *Replace* goes through `execCommand('insertText')` and *Replace
+  `#findMarks` over the editor; it is redrawn on scroll, input, selection, the editor's resize
+  (`ResizeObserver`, moved to a fresh editor), a font change (`applyPrefs`) and after every
+  analysis (a draft switch). A *Replace all* that changes nothing says so and records nothing. *Replace* goes through `execCommand('insertText')` and *Replace
   all* through `setSourceText`, so each is one undo; *Replace all* keeps a version in History.
   Ctrl+F is taken only in the editor and the find bar; elsewhere the browser's find stays.
 - The editor's `spellcheck` follows `prefs.spellcheck`; a fresh editor is a clone, so it keeps it.
@@ -402,4 +412,4 @@ source, the spellcheck switch across a draft switch, and that no page errors wer
 check there for any new browser-only behavior.
 
 Still by eye: zoom and editor-size controls, dark-mode colors, the layout below 920 px width, the
-left pane with several panels open (the editor keeps at least a third of it).
+left pane with several panels open (the smoke test checks the hazards at 1280 x 640).

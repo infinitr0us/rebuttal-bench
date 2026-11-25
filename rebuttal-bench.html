@@ -414,7 +414,10 @@ window.MathJax = {
   .dclose:hover { border-color: var(--err); color: var(--err); }
   .dadd { border-style: dashed; }
   /* A box of its own (it was display: contents) so find's highlights can sit over the editor. */
-  .dpanel { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 35%; }
+  .dpanel { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: max(110px, 30%); }
+  /* The source pane scrolls only when the editor's floor, the hazards' and
+     the open panels' minimums do not fit (a short window). */
+  main > .pane:first-child { overflow-y: auto; }
 
   .pane-tools { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--dim); white-space: nowrap; }
   .pane-tools label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
@@ -475,6 +478,7 @@ window.MathJax = {
   .lint {
     flex: 0 1 auto;
     max-height: 42%;
+    min-height: min(7em, 42%); /* its header and a card stay in view */
     overflow-y: auto;
     border-top: 1px solid var(--line);
     background: var(--bg);
@@ -610,6 +614,7 @@ window.MathJax = {
     background: var(--head-bg);
     font-size: 12.5px;
   }
+  .compact[open] { min-height: 8em; } /* an open panel shows some of its content */
   .compact-sum { margin-left: 6px; color: var(--ok); text-transform: none; letter-spacing: 0.02em; }
   .compact-sum.zero { color: var(--dim); }
   .compact-body { max-height: 200px; overflow-y: auto; padding: 0 18px 10px; }
@@ -918,7 +923,7 @@ window.MathJax = {
   }
 
   @media (max-width: 920px) {
-    main { grid-template-columns: 1fr; grid-template-rows: minmax(45vh, 1fr) 1px minmax(45vh, 1fr); }
+    main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(45vh, 1fr) 1px minmax(45vh, 1fr); }
     #mjStatus { margin-left: 0; }
     .lint { max-height: 34%; }
   }
@@ -4768,7 +4773,9 @@ function sectionLabel(s) {
   s = s.replace(/^\s+/, '');
   var bold = /^(\*\*|__)(?=\S)([^\n]*?\S)\1([^\n]*)/.exec(s);
   if (bold && bold[2].length <= 100 &&
-      (/[.:?)\]]$/.test(bold[2]) || /^\s*(?:$|[:.(–—-])/.test(bold[3]))) return true;
+      (/[.:?)\]]$/.test(bold[2]) || /^\s*(?:$|[:.\u2013\u2014-])/.test(bold[3]) ||
+       /* "**W3** (novelty)": a point's name, not "**Our method** (Sec. 3) improves" */
+       (/^\s*\(/.test(bold[3]) && new RegExp('^' + SECTION_NAME + '$', 'i').test(bold[2])))) return true;
   return SECTION_LABEL.test(s);
 }
 
@@ -4778,6 +4785,21 @@ function sectionTitle(s) {
   if (atx) line = line.slice(atx[0].length).replace(/\s+#+\s*$/, ''); /* closing hashes: ATX only */
   line = line.replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim();
   return line.length > 60 ? line.slice(0, 59) + '…' : line;
+}
+
+/* Where `raw` (a top-level token's source) starts at or after `pos`, never
+   inside a link reference definition (`defs`), which Marked consumes without
+   a token and whose title can repeat a later paragraph's words. */
+function locateBlock(text, raw, pos, defs) {
+  var at = text.indexOf(raw, pos);
+  for (var i = 0; at >= 0 && i < defs.length; i++) {
+    if (at >= defs[i].start && at < defs[i].end) { at = text.indexOf(raw, defs[i].end); i = -1; }
+  }
+  return at;
+}
+function definitionRanges(text) {
+  var model = text.indexOf(']:') >= 0 ? collectMarkedRanges(text) : null;
+  return model ? model.definitions : [];
 }
 
 /* {total, sections: [{title, kind, level, start, end, chars}]}, in order;
@@ -4790,11 +4812,11 @@ function commentSections(text) {
   if (typeof text !== 'string' || !api || typeof api.lexer !== 'function') return null;
   var tokens;
   try { tokens = api.lexer(text); } catch (e) { return null; }
-  var starts = [], pos = 0;
+  var starts = [], pos = 0, defs = definitionRanges(text);
   function add(at, raw, depth, kind) { starts.push({ start: at, title: sectionTitle(raw), depth: depth, kind: kind }); }
   tokens.forEach(function (t) {
     if (!t.raw || t.type === 'space') return;
-    var at = text.indexOf(t.raw, pos);
+    var at = locateBlock(text, t.raw, pos, defs);
     if (at < 0) return;
     pos = at + t.raw.length;
     if (t.type === 'heading') add(at, t.raw, t.depth, 'heading');
@@ -4814,7 +4836,15 @@ function commentSections(text) {
     }
   });
   if (!starts.length) return null;
+  /* An opening is visible text before the first part: not a link definition. */
   var first = text.search(/\S/);
+  for (var d = 0; first >= 0 && d < defs.length; d++) {
+    if (first >= defs[d].start && first < defs[d].end) {
+      var rest = text.slice(defs[d].end).search(/\S/);
+      first = rest < 0 ? -1 : defs[d].end + rest;
+      d = -1;
+    }
+  }
   if (first >= 0 && first < starts[0].start) starts.unshift({ start: first, title: '', depth: 0, kind: 'opening' });
   var out = [], open = [];
   starts.forEach(function (s, i) {
@@ -4839,9 +4869,10 @@ function blockSources(text) {
   var api = typeof window !== 'undefined' ? window.marked : null, tokens, out = [], pos = 0;
   if (typeof text !== 'string' || !api || typeof api.lexer !== 'function') return out;
   try { tokens = api.lexer(text); } catch (e) { return out; }
+  var defs = definitionRanges(text);
   tokens.forEach(function (t) {
     if (!t.raw) return;
-    var at = text.indexOf(t.raw, pos);
+    var at = locateBlock(text, t.raw, pos, defs);
     if (at < 0) return;
     pos = at + t.raw.length;
     var tag = t.type === 'heading' ? 'H' + t.depth : t.type === 'list' ? (t.ordered ? 'OL' : 'UL') : BLOCK_TAGS[t.type];
@@ -4857,7 +4888,10 @@ function blockSources(text) {
    image syntax, or a quote (the reviewer's words). `say` is the shorter
    form ('' to drop the phrase). */
 var FILLERS = [
-  { re: /\bwould like to (?=[a-z])/gi, say: '', note: 'We thank the reviewer says the same as We would like to thank the reviewer.' },
+  /* Only before a courtesy verb: "we would like to release the data" is an
+     intention, and dropping the phrase would say it was done. */
+  { re: /\bwould like to (?=(?:thank|express|acknowledge|clarify|emphasi[sz]e|point out|note|stress|highlight|reiterate|mention)\b)/gi,
+    say: '', note: 'We thank the reviewer says the same as We would like to thank the reviewer.' },
   { re: /\bin order to\b/gi, say: 'to' },
   { re: /\b(?:due|owing) to the fact that\b/gi, say: 'because' },
   { re: /\b(?:despite|in spite of) the fact that\b/gi, say: 'although' },
@@ -4874,19 +4908,37 @@ var FILLERS = [
   { re: /\b(?:has|have) the (?:ability|capability) to\b/gi, say: 'can' },
   { re: /\bin the event that\b/gi, say: 'if' },
   { re: /\bwith regards? to\b/gi, say: 'on' },
-  { re: /\bwhether or not\b/gi, say: 'whether' },
+  /* not "whether or not": "whether or not labels are available" means regardless */
   { re: /\beach and every\b/gi, say: 'every' },
   { re: /\bfirst and foremost\b/gi, say: 'first' },
   { re: /\bso as to\b/gi, say: 'to' },
   { re: /\bthank you very much for\b/gi, say: 'thank you for' }
 ];
 
-/* What a reader never sees as the author's prose, as a mask over `text`. */
+/* What a reader never sees as the author's prose, as a mask over `text`.
+   Code Marked's tokens could not be located in the source (tabs that a list
+   expands) is caught by a looser scan: fences however indented, and the
+   fallback scanner's code; masking too much only drops a hint. */
 function proseMask(text, spans, model) {
   var skip = model.ranges.filter(function (r) {
     return /^(?:code|codespan|html|image|blockquote)$/.test(r.type);
-  }).concat(model.hidden, model.definitions, model.dropped, (spans || []).filter(function (sp) { return !sp.recovered; }));
+  }).concat(model.hidden, model.definitions, model.dropped, model.unlocated, fallbackCodeRanges(text),
+    looseFenceRanges(text), (spans || []).filter(function (sp) { return !sp.recovered; }));
   return makeMask(text.length, skip);
+}
+function looseFenceRanges(text) {
+  var out = [], fence = null, re = /^[^\S\n]*(?:[-*+]\s+|\d{1,9}[.)]\s+|>\s*)*(`{3,}|~{3,})/, pos = 0;
+  text.split('\n').forEach(function (line) {
+    var m = re.exec(line), end = pos + line.length + 1;
+    if (!fence && m) fence = { mark: m[1], start: pos };
+    else if (fence && m && m[1][0] === fence.mark[0] && m[1].length >= fence.mark.length) {
+      out.push({ start: fence.start, end: Math.min(end, text.length) });
+      fence = null;
+    }
+    pos = end;
+  });
+  if (fence) out.push({ start: fence.start, end: text.length });
+  return out;
 }
 
 /* {hints, saves}: one hint per phrase, {kind: 'filler' | 'name', text, say,
@@ -4944,7 +4996,12 @@ function wordingHints(text, spans) {
       if (visible(k, from)) at.push({ start: k, end: from });
     }
     if (at.length < 3) continue;
-    var defined = new RegExp('(^|[^\\w-])' + abbr + '(?![\\w-])').test(text);
+    /* Defined only where a reader sees it (not in a link's address). */
+    var defRe = new RegExp('(^|[^\\w-])' + abbr + '(?![\\w-])', 'g'), dm, defined = false;
+    while (!defined && (dm = defRe.exec(text))) {
+      var ds = dm.index + dm[1].length;
+      defined = visible(ds, ds + abbr.length);
+    }
     var saves = (at.length - 1) * (name.length - abbr.length) - (defined ? 0 : abbr.length + 3);
     if (saves >= 20) names.push({ kind: 'name', text: name, say: abbr, defined: defined, at: at, saves: saves });
   }
@@ -5368,6 +5425,7 @@ function applyPrefs() {
   sectionsBox.open = !!prefs.sectionsOpen;
   spellBox.checked = !!prefs.spellcheck;
   ta.spellcheck = !!prefs.spellcheck;
+  refreshFind(); /* the editor's font size moves the text under find's boxes */
   Array.prototype.forEach.call(compactList.querySelectorAll('input[data-trick]'), function (box) {
     box.checked = !!prefs.compact[box.getAttribute('data-trick')];
   });
@@ -5918,8 +5976,16 @@ function updateAll() {
 /* One row per phrase (wordingHints), biggest saving first; a click selects
    its next use after the caret. Drawn for the text of the last analysis. */
 var wordingShown = null, wordingHintsShown = [];
+/* Both panels read the comment as posted (trimmed, as the preview shows
+   it: an indented first line is no code block there), and point into the
+   editor's text. */
+function leadOf(text) { return text.length - text.replace(/^\s+/, '').length; }
 function renderWording(text, spans) {
-  var r = wordingHints(text, spans), html = '';
+  var lead = leadOf(text);
+  var r = wordingHints(text.trim(), spans.map(function (sp) { return { start: sp.start - lead, end: sp.end - lead, recovered: sp.recovered }; })), html = '';
+  r.hints.forEach(function (h) {
+    h.at = h.at.map(function (x) { return { start: x.start + lead, end: x.end + lead }; });
+  });
   wordingShown = text;
   wordingHintsShown = r.hints;
   wordingSum.textContent = r.hints.length ? 'about ' + fmt(r.saves) + ' to save' : '';
@@ -5945,7 +6011,8 @@ function renderWording(text, spans) {
    last analysis, so a click on a row older than the editor redraws first. */
 var sectionsShown = null; /* the text the rows were drawn for */
 function renderSections(text, total) {
-  var r = commentSections(text), html = '';
+  var lead = leadOf(text), r = commentSections(text.trim()), html = '';
+  if (r) r.sections.forEach(function (s) { s.start += lead; s.end += lead; });
   sectionsShown = text;
   sectionsSum.textContent = r ? r.sections.length + ' parts' : '';
   if (!r) {
@@ -7095,8 +7162,14 @@ function currentMatch(ms) {
   for (var i = 0; i < ms.length; i++) if (ms[i].start === ta.selectionStart && ms[i].end === ta.selectionEnd) return i;
   return -1;
 }
+/* The boxes follow the editor's size (a panel opened, the window resized);
+   a font change, which keeps the size, redraws from applyPrefs. A fresh
+   editor (a draft switch) is observed in its turn. */
+var findResize = typeof ResizeObserver === 'function' ? new ResizeObserver(function () { refreshFind(); }) : null;
+var findObserved = null;
 function refreshFind() {
   if (!findBar || findBar.hidden) return; /* also before this part of the script has run */
+  if (findResize && findObserved !== ta) { findResize.disconnect(); findResize.observe(ta); findObserved = ta; }
   var ms = findMatches(), i = currentMatch(ms);
   findCount.textContent = !findInput.value ? '' : !ms.length ? 'No matches'
     : i >= 0 ? (i + 1) + ' of ' + fmt(ms.length) : fmt(ms.length) + ' found';
@@ -7197,6 +7270,8 @@ function replaceAll() {
   var text = ta.value, repl = replaceInput.value, out = '', last = 0;
   ms.forEach(function (m) { out += text.slice(last, m.start) + repl; last = m.end; });
   out += text.slice(last);
+  /* Nothing to undo then: an undo would take back the edit before. */
+  if (out === text) { refreshFind(); showToast('No changes: every match already reads “' + repl + '”.'); return; }
   keepVersion('before Replace all');
   setSourceText(out, ms[0].start, ms[0].start + repl.length);
   afterSourceChange();
@@ -7260,26 +7335,45 @@ preview.addEventListener('dblclick', function (e) {
   }
   if (!src) return;
   var start = src.start + lead, end = src.end + lead, at = start, to = start;
+  /* What the preview shows of the source: not formulas (counted apart), an
+     image's syntax and alt text, link destinations, definitions, a fence's
+     info string. Editor offsets throughout. */
+  var posted = text.trim(), model = collectMarkedRanges(posted), hidden = [], images = [];
+  var spans = (lastAnalysis && analyzedText === text ? lastAnalysis.spans : analyze(text).spans)
+    .filter(function (sp) { return !sp.recovered; });
+  function moved(r) { return { start: r.start + lead, end: r.end + lead }; }
+  if (model) {
+    model.ranges.forEach(function (r) {
+      if (r.type === 'image') images.push(moved(r));
+      var fence = r.type === 'code' ? /^[ \t]*(?:`{3,}|~{3,})/.exec(posted.slice(r.start, r.end)) : null;
+      if (fence) {
+        var nl = posted.indexOf('\n', r.start);
+        hidden.push(moved({ start: r.start, end: nl < 0 || nl > r.end ? r.end : nl }));
+      }
+    });
+    hidden = hidden.concat(model.hidden.map(moved), model.definitions.map(moved));
+  }
+  spans = spans.filter(function (sp) {
+    return sp.start >= start && sp.end <= end && !images.some(function (im) { return sp.start >= im.start && sp.end <= im.end; });
+  });
   var formula = e.target.closest && e.target.closest('mjx-container');
   var sel = window.getSelection();
   if (formula) {
     /* The n-th formula of the block is the n-th one in its source. */
     var nth = Array.prototype.indexOf.call(block.querySelectorAll('mjx-container'), formula);
-    var spans = (lastAnalysis && analyzedText === text ? lastAnalysis.spans : analyze(text).spans)
-      .filter(function (sp) { return !sp.recovered && sp.start >= start && sp.end <= end; });
     if (spans[nth]) { at = spans[nth].start; to = spans[nth].end; }
   } else if (sel && sel.rangeCount && block.contains(sel.anchorNode)) {
     var word = sel.toString().trim();
     if (word && word.length <= 80 && !/\s/.test(word)) {
       /* The n-th use of the word in the block's text before the click (not
-         counting formulas) is its n-th use in the block's source. */
+         counting formulas) is its n-th visible use in the block's source. */
       var range = sel.getRangeAt(0), pre = document.createRange();
       pre.setStart(block, 0);
       pre.setEnd(range.startContainer, range.startOffset);
       var frag = pre.cloneContents();
       Array.prototype.forEach.call(frag.querySelectorAll('mjx-container'), function (m) { m.parentNode.removeChild(m); });
-      var before = frag.textContent;
-      var hits = wordUses(text, word, start, end), n = wordUses(before, word, 0, before.length).length;
+      var before = frag.textContent, mask = makeMask(text.length, hidden.concat(images, spans));
+      var hits = wordUses(text, word, start, end, mask), n = wordUses(before, word, 0, before.length).length;
       if (hits.length) { at = hits[Math.min(n, hits.length - 1)]; to = at + word.length; }
     }
   }
@@ -7288,13 +7382,16 @@ preview.addEventListener('dblclick', function (e) {
   ta.setSelectionRange(at, to);
   revealOffset(at);
 });
-/* Where `word` starts in text[from, to), as a whole word. */
-function wordUses(text, word, from, to) {
-  var out = [], k = from;
+/* Letters and digits of the common scripts: a word's boundary. Not "_" (a
+   Markdown emphasis delimiter) or punctuation such as curly quotes. */
+var WORD_CHAR = new RegExp('[0-9A-Za-z\u00aa\u00b5\u00ba\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02af\u0370-\u03ff\u0400-\u052f\u0590-\u06ff\u0900-\u0dff\u0e00-\u0eff\u1e00-\u1fff\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]');
+/* Where `word` starts in text[from, to), as a whole word, outside `mask`. */
+function wordUses(text, word, from, to, mask) {
+  var out = [], k = from, w0 = WORD_CHAR.test(word.charAt(0)), w1 = WORD_CHAR.test(word.charAt(word.length - 1));
   while ((k = text.indexOf(word, k)) >= 0 && k + word.length <= to) {
-    var a = text[k - 1], b = text[k + word.length];
-    if (!(a && /[\wÀ-￿]/.test(a) && /^[\wÀ-￿]/.test(word)) &&
-        !(b && /[\wÀ-￿]/.test(b) && /[\wÀ-￿]$/.test(word))) out.push(k);
+    var a = text.charAt(k - 1), b = text.charAt(k + word.length);
+    if (!(w0 && a && WORD_CHAR.test(a)) && !(w1 && b && WORD_CHAR.test(b)) &&
+        !(mask && maskHits(mask, k, k + word.length))) out.push(k);
     k += word.length;
   }
   return out;

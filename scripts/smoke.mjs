@@ -1092,6 +1092,83 @@ try {
     return word[0] === want && word[1] === want + 4 && formula === '$y^2$' && document.activeElement === ta ||
       { word, want, formula };`);
 
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 640, deviceScaleFactor: 1, mobile: false }, sessionId);
+  await check('in a short window the hazards and Fix all stay in view, and an open panel shows its content', `
+    const was = ta.value;
+    setSourceText(EXAMPLE, 0); updateAll(); await wait(100);
+    const lint = document.querySelector('.lint').getBoundingClientRect();
+    const fb = fixAllBtn.getBoundingClientRect();
+    const hit = document.elementFromPoint(fb.left + fb.width / 2, fb.top + fb.height / 2);
+    compactBox.open = true; await wait(100);
+    const body = compactBox.querySelector('.compact-body').getBoundingClientRect(), box = compactBox.getBoundingClientRect();
+    const shown = Math.min(body.bottom, box.bottom) - body.top;
+    compactBox.open = false;
+    setSourceText(was, 0); saveDraftNow(); updateAll();
+    return lint.height >= 60 && hit === fixAllBtn && shown >= 40 || { lint: lint.height, hit: hit && hit.outerHTML.slice(0, 60), shown };`);
+  await send('Emulation.clearDeviceMetricsOverride', {}, sessionId);
+
+  await check('Replace all that changes nothing says so and offers no undo', `
+    const was = ta.value;
+    setSourceText('Our method works.', 0); updateAll();
+    openFind(false); findInput.value = 'method'; findInput.dispatchEvent(new Event('input')); replaceInput.value = 'method';
+    document.getElementById('replaceAll').click(); await wait(30);
+    const msg = toast.textContent, same = ta.value === 'Our method works.';
+    closeFind(); findInput.value = ''; replaceInput.value = '';
+    setSourceText(was, 0); saveDraftNow(); updateAll();
+    return same && /^No changes/.test(msg) && !/undo/i.test(msg) || { msg, value: ta.value };`);
+
+  await check('find boxes follow the text when the editor font size changes', `
+    const was = ta.value;
+    setSourceText('Calibration took place before the final experiment. NEEDLE then more.', 0); updateAll();
+    openFind(false); findInput.value = 'NEEDLE'; findInput.dispatchEvent(new Event('input')); await wait(50);
+    const at = () => { const b = findMarks.querySelector('span'); return b && b.style.left + ',' + b.style.top; };
+    const plus = document.querySelector('.fs-ctl button[data-fs="fsEditor"][data-dir="1"]');
+    const minus = document.querySelector('.fs-ctl button[data-fs="fsEditor"][data-dir="-1"]');
+    const before = at(); plus.click(); plus.click(); await wait(50);
+    const after = at(); refreshFind(); const fresh = at();
+    minus.click(); minus.click(); closeFind(); findInput.value = '';
+    setSourceText(was, 0); saveDraftNow(); updateAll();
+    return before !== after && after === fresh || { before, after, fresh };`);
+
+  await check('a double-click selects the visible word, not one in a formula, a link address, or one Markdown emphasizes', `
+    const was = ta.value, out = [];
+    for (const [src, word, nth, want] of [
+      ['Given $loss$, we report loss again.', 'loss', 0, 24],
+      ['See [the logs](https://example.org/logs). The logs agree.', 'logs', 1, 46],
+      ['The _ablated_ model was ablated again.', 'ablated', 0, 5],
+      ['We report \\u201caccuracy\\u201d here.', 'accuracy', 0, 11],
+    ]) {
+      setSourceText(src, 0); updateAll(); renderPreview();
+      for (let i = 0; i < 40 && previewText !== ta.value; i++) await wait(50);
+      await wait(300);
+      const p = preview.children[0], walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT), nodes = [];
+      let node, seen = 0, done = false;
+      while (!done && (node = walker.nextNode())) {
+        if (node.parentNode.closest('mjx-container')) continue;
+        let k = -1;
+        while ((k = node.nodeValue.indexOf(word, k + 1)) >= 0) {
+          if (seen++ === nth) {
+            const r = document.createRange(); r.setStart(node, k); r.setEnd(node, k + word.length);
+            getSelection().removeAllRanges(); getSelection().addRange(r); done = true; break;
+          }
+        }
+      }
+      p.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      out.push([ta.selectionStart, ta.selectionEnd, want]);
+    }
+    setSourceText(was, 0); saveDraftNow(); updateAll(); renderPreview();
+    return out.every(([s, e, want]) => s === want && e > s) || out;`);
+
+  await check('Sections and Wording read the comment as posted, with an indented first line', `
+    const was = ta.value;
+    setSourceText('    ## Reviewer A\\n\\nW1: First\\n\\n## Reviewer B\\n\\nW1: Next', 0); updateAll();
+    const rows = [...sectionsList.querySelectorAll('.section')].map((b) => b.querySelector('.name').textContent + ':' + b.style.getPropertyValue('--level').trim());
+    const first = sectionsList.querySelector('.section');
+    first.click(); await wait(30);
+    const at = ta.selectionStart;
+    setSourceText(was, 0); saveDraftNow(); updateAll();
+    return rows.join('|') === 'Reviewer A:0|W1: First:1|Reviewer B:0|W1: Next:1' && at === 4 || { rows, at };`);
+
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).

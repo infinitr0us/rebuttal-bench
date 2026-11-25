@@ -32,12 +32,21 @@
 - Double-click a word or a formula in the preview to select it in the source.
 - *Spellcheck* (beside *Find*) turns on the browser's spellchecker in the editor. It is off by
   default, since TeX and Markdown are full of words it does not know.
-- With several panels open under the editor, the editor keeps at least a third of the pane, and
-  the panels share the rest, each scrolling on its own.
+- With several panels open under the editor, the editor keeps at least 30% of the pane, the
+  hazards their header and a card, and an open panel some of its content; the panels share the
+  rest, each scrolling on its own, and only a window too short for all of that scrolls the pane.
+- A Codex review of these features found eight problems before release, all fixed: the layout
+  could hide the hazards in a short window, a *Replace all* that changed nothing offered an undo,
+  a double-click could select a word inside a formula or a link's address, find's highlights
+  stayed put after a font-size change, an indented first line made *Sections* and *Wording*
+  read the comment differently from the preview, *Wording* could flag code in a list indented
+  with tabs, *Sections* took a bold sentence subject for a point, and two filler rules could
+  change the meaning (*would like to* is now only suggested before *thank*, *clarify* and the
+  like, and *whether or not* is no longer flagged).
 
 ### Project
 - `tests/sections.test.js`, `tests/wording.test.js` and `tests/editing.test.js`, and HTML tables
-  in `tests/table-import.test.js` (Codex). Nine new smoke checks.
+  in `tests/table-import.test.js` (Codex). Fourteen new smoke checks.
 
 ## 3.6.0 (unreleased)
 
