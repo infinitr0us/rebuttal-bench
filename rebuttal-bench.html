@@ -1005,8 +1005,9 @@ window.MathJax = {
 
 <dialog id="tableDialog" aria-labelledby="tableDialogTitle">
   <h2 id="tableDialogTitle">Import table</h2>
-  <label for="tableInput">Paste LaTeX, spreadsheet cells, or CSV</label>
+  <label for="tableInput">Paste a copied table, LaTeX, or CSV</label>
   <textarea id="tableInput" rows="5" spellcheck="false" autofocus></textarea>
+  <small id="tableHtmlNote" hidden>From the copied table's HTML (keeps bold, italics and merged cells)</small>
   <h3>OpenReview preview</h3>
   <div id="tablePreview" class="paper"></div>
   <ul id="tableWarnings" aria-live="polite"></ul>
@@ -3356,11 +3357,17 @@ function htmlTableCell(cell, warn) {
   for (var el = cell.parentElement; el; el = el.parentElement) ancestors.push(el);
   while (ancestors.length) style = htmlTableStyle(ancestors.pop(), style);
   walkTableCell(cell, style, false, function (value, fmt, kind) {
+    if (!value) return;
     var prev = runs[runs.length - 1];
     if (!kind && prev && !prev.kind && prev.style === fmt) prev.value += value;
     else runs.push({ value: value, style: fmt, kind: kind });
   }, warn);
   var out = '', plain = '', space = false, open = [];
+  var touchingStyles = runs.some(function (run, i) {
+    var prev = runs[i - 1];
+    return prev && prev.style && run.style && prev.style !== run.style &&
+      /\S$/.test(prev.value) && /^\S/.test(run.value);
+  });
   function entity(ch) { return '&#' + ch.charCodeAt(0) + ';'; }
   runs.forEach(function (run, index) {
     var raw = run.value.replace(/\s+/g, ' '), text = raw.trim();
@@ -3384,12 +3391,12 @@ function htmlTableCell(cell, warn) {
     while (open.length && (!(open[0].bit & run.style) || !(open[open.length - 1].bit & run.style))) {
       closed += open.pop().mark;
     }
-    /* Alternate delimiter characters when fences meet or nest. Five
-       adjacent stars can otherwise pair across several differently styled words. */
+    /* When styled text touches, five adjacent stars can pair across several
+       runs. Alternate fences there, keeping ordinary nested emphasis in stars. */
     var previous = open.length ? open[0].mark[0] : !gap && closed.slice(-1);
     for (var bit = 1; bit <= 2; bit++) {
       if (!(run.style & bit) || open.some(function (entry) { return entry.bit === bit; })) continue;
-      previous = previous === '*' ? '_' : '*';
+      previous = touchingStyles && previous === '*' ? '_' : '*';
       var mark = bit === 1 ? previous + previous : previous;
       opened += mark;
       open.push({ bit: bit, mark: mark });
@@ -6933,19 +6940,30 @@ function showToast(msg) {
 /* ---- import table ---- */
 var tableDialog = document.getElementById('tableDialog');
 var tableInput = document.getElementById('tableInput');
+var tableHtmlNote = document.getElementById('tableHtmlNote');
 var tablePreview = document.getElementById('tablePreview');
 var tableWarnings = document.getElementById('tableWarnings');
 var tablePad = document.getElementById('tablePad');
 var insertTableBtn = document.getElementById('insertTable');
 var tableOffer = document.getElementById('tableOffer');
-var tableResult = null, tableTarget = null, pastedTable = null;
+var tableResult = null, tableTarget = null, pastedTable = null, dialogHtmlTable = null;
+
+function clipboardHtmlTable(data, text) {
+  var html = data && data.getData('text/html');
+  if (!html || !/<table[\s/>]/i.test(html)) return null;
+  var grid = readHtmlTable(new DOMParser().parseFromString(html, 'text/html'));
+  return grid ? { grid: grid, text: text } : null;
+}
 
 function refreshTableImport() {
-  tableResult = importTable(tableInput.value, { pad: tablePad.checked });
+  if (dialogHtmlTable && dialogHtmlTable.text !== tableInput.value) dialogHtmlTable = null;
+  tableHtmlNote.hidden = !dialogHtmlTable;
+  var options = { pad: tablePad.checked };
+  tableResult = dialogHtmlTable ? tableMarkdown(dialogHtmlTable.grid, options) : importTable(tableInput.value, options);
   tableWarnings.textContent = '';
   if (tableResult) tableResult.warnings.forEach(function (warning) {
     var li = document.createElement('li');
-    li.textContent = 'Line ' + warning.line + ': ' + warning.message;
+    li.textContent = (warning.row ? 'Row ' + warning.row : 'Line ' + warning.line) + ': ' + warning.message;
     tableWarnings.appendChild(li);
   });
   insertTableBtn.disabled = !tableResult;
@@ -6954,6 +6972,7 @@ function refreshTableImport() {
 
 function openTableImport(target, input) {
   tableTarget = target;
+  dialogHtmlTable = target.htmlTable || null;
   tableInput.value = input;
   tableDialog.showModal();
   refreshTableImport();
@@ -6962,12 +6981,19 @@ function openTableImport(target, input) {
 document.getElementById('importTableBtn').addEventListener('click', function () {
   openTableImport({ draft: draftMeta.active, source: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, '');
 });
+tableInput.addEventListener('paste', function (e) {
+  var text = e.clipboardData && e.clipboardData.getData('text/plain').replace(/\r\n?/g, '\n');
+  dialogHtmlTable = clipboardHtmlTable(e.clipboardData, text);
+  /* The native input event checks the resulting textarea. A partial paste
+     leaves other text there, so it follows the regular text import path. */
+  if (!text) refreshTableImport();
+});
 tableInput.addEventListener('input', refreshTableImport);
 tablePad.addEventListener('change', refreshTableImport);
 document.getElementById('cancelTable').addEventListener('click', function () { tableDialog.close(); });
 tableDialog.addEventListener('close', function () {
   if (tableDialog.open) return;
-  tableTarget = tableResult = null;
+  tableTarget = tableResult = dialogHtmlTable = null;
   renderPreview();
 });
 
@@ -7007,13 +7033,16 @@ onEditor('paste', function (e) {
   var text = e.clipboardData && e.clipboardData.getData('text/plain').replace(/\r\n?/g, '\n');
   pastedTable = null;
   tableOffer.hidden = true;
-  if (!text || !looksLikeTablePaste(text)) return;
+  if (ta.readOnly) return;
+  var htmlTable = clipboardHtmlTable(e.clipboardData, text);
+  if (!htmlTable && (!text || !looksLikeTablePaste(text))) return;
   var start = ta.selectionStart;
   pastedTable = {
-    draft: draftMeta.active,
-    source: ta.value.slice(0, start) + text + ta.value.slice(ta.selectionEnd),
+    draft: draftMeta.active, htmlTable: htmlTable,
+    source: ta.value.slice(0, start) + text + ta.value.slice(text ? ta.selectionEnd : start),
     start: start, end: start + text.length
   };
+  if (!text) tableOffer.hidden = false; /* HTML alone has no native text insertion to trigger input. */
 });
 onEditor('input', function () {
   if (pastedTable && pastedTable.source !== ta.value) pastedTable = null;

@@ -20,11 +20,13 @@ leave the browser: they autosave on this device only.
   a link): their cards say "Not part of Fix all", and only a click on the card applies them.
   Fix all's message says how many characters the pass added.
 - **Import table.** Place the cursor where the results belong, or select text to replace.
-  Click *Import table* next to *Load example* and paste a LaTeX table, cells copied from a
-  spreadsheet, or CSV. Check the OpenReview preview and any line-numbered warnings. Spanning
-  cells and multiple header rows are flattened. *Pad columns* aligns the Markdown in the
-  editor. *Insert at cursor* inserts the table in one undoable edit. Pasting a recognizable
-  LaTeX or tab-separated table directly into the editor also offers to convert that paste.
+  Click *Import table* and paste a table copied from Word, Google Docs, Sheets, Excel, or a web
+  page. You can also paste LaTeX, tab-separated cells, or CSV. When the clipboard includes HTML,
+  the preview keeps inline bold and italics and leaves empty cells where a merged cell spanned
+  the grid. Editing the pasted text switches to plain-text conversion. Check the OpenReview
+  preview and any row or line warnings. *Pad columns* aligns the Markdown in the editor.
+  *Insert at cursor* inserts the table in one undoable edit. Pasting a copied table, LaTeX
+  table, or tab-separated grid into the editor also offers to convert it in place.
 - **Compaction.** *Copy compact* copies a shorter form of your source that OpenReview renders
   exactly the same: table padding and long delimiter rows (`| --- |` becomes `|-|`), links
   that repeat their URL, closing `#`s, extra blank lines and spaces, character references.

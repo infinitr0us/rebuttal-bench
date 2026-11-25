@@ -313,6 +313,8 @@ test('adjacent and nested emphasis and significance stars stay with the characte
   assert.deepEqual(Array.from(a.querySelectorAll('em'), el => el.textContent), ['B', 'C']);
   assert.equal(b.textContent, 'a!b 95%*');
   assert.deepEqual(Array.from(b.querySelectorAll('strong'), el => el.textContent), ['!', '95%*']);
+  doc.querySelectorAll('td')[2].innerHTML = '<strong><em>both</em></strong>';
+  assert.match(importHtmlTable(doc, { pad: false }).markdown, /\|\*\*\*both\*\*\*\|/);
 });
 
 test('long, punctuated and nested scripts keep their text with a warning', () => {
