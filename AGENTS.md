@@ -212,12 +212,18 @@ cases, Chrome probes); keep their rules:
   handler, merged with this window's list), so its open draft deleted meanwhile is re-created like
   in a live window, not saved under a deleted key. Chrome may still deliver the queued events
   afterwards, so `takeInList` merges every event's list with the one stored now.
-- **Re-creating the open draft** (`adoptDraftMeta` → `recreateOpenDraft`) happens only when the
-  deletion is newer than this window's entry, and never writes over a different text stored under
-  the key since this window last saved or loaded it: here (`storedValue`) or, with the asynchronous
-  store, there (read first; another device may have written it). That text is kept, and this
-  window's stays in its editor. The store's merge in `saveDraftMeta` can revive the open draft
-  too (deleted on another device): it reports that, and the text goes back the same way.
+- **Re-creating the open draft** (`adoptDraftMeta` → `recreateOpenDraft` → `recreateBody`)
+  happens only when the deletion is newer than this window's entry, and never writes over a
+  different text stored under the key since this window last saved or loaded it (`storedValue`):
+  that text is kept, and this window's stays in its editor. This browser's copy is written at
+  once, as in 3.5.0, so a switch right after finds it. With the asynchronous store that copy is
+  pending, and the store gets the text only after a **successful** read shows it holds no newer
+  text from another device and, just before the write, the local copy is still this one (a window
+  that saved meanwhile wins). Keep both steps: an asynchronous write alone lost the text when the
+  author switched drafts during the read, and a write without the second check sent an old text
+  over a newer one (`reviews/2026-11-25/codex-recheck-storage36`). The store's merge in
+  `saveDraftMeta` can revive a draft too (deleted on another device, or renamed here since): it
+  reports which one, and `recreateBody` sends its text the same way, even after a switch.
 - **History** (earlier versions) is a safety net that must never cost a draft, and is best effort.
   Each draft's versions live under `HISTORY_PREFIX + id` in localStorage only (never the
   asynchronous store), newest first, capped per draft by `capHistory` and for all drafts together
@@ -282,10 +288,11 @@ cases, Chrome probes); keep their rules:
   before its draft is listed (`newDraft(name, text, true)`), without making room: a draft that
   does not fit is left out and named, and no version is given up for its text, since the file
   still holds it (the list written afterwards, and the pending marks, follow the ordinary rules).
-  With the asynchronous store, the list goes there only once the imported texts' writes have
-  settled (`saveDraftMeta(true)` first: this browser's list, pending), so another device never
-  reads a new entry before its text; a text the store did not confirm is named, and without
-  localStorage the first message says to keep the file. The 3.5.0 design made a multi-draft import all-or-nothing, with
+  The list is saved at once, as for Split. Without localStorage the store is the only copy: the
+  first message says to keep the file, and a second one reports what the store confirmed, from
+  each write's own answer (the texts' and the list's). Holding the list back until the texts were
+  stored was tried in 3.6 and reverted: any other list save published it anyway, the late save
+  could undo another window's choice of open draft, and its message misjudged edited drafts. The 3.5.0 design made a multi-draft import all-or-nothing, with
   the open draft secured first, a commit and a rollback, and a switch to the first new draft; three
   reviews kept finding ways for it to lose text (`reviews/2026-11-21/codex-final-history`). Do not
   bring back a rollback or a switch.
@@ -301,10 +308,14 @@ cases, Chrome probes); keep their rules:
   comes back because another window still has it open comes back without its versions (the
   deletion removed them; `codex-final2-history`). A window or device that has not yet seen
   another's import of the same file (at the same moment, or with an older list) adds its drafts
-  again. Split's *Open the parts as drafts* still sends the list with the parts' texts, so for a
-  moment another device can see a part without its text (since 3.3.0). Re-creating the open
-  draft reads the asynchronous store first, so only a text another device writes there during
-  that read can still be overwritten (`reviews/2026-11-25/codex-review-storage36`).
+  again. A list that names new or revived drafts (Import, Split's *Open the parts as drafts*, a
+  draft brought back) is sent beside their texts, so a device that reads the store in the moment
+  a text is still on its way, or after its write failed, sees that tab blank (since 3.3.0); typing
+  there can then replace the text when it lands. Each text is queued before its list, so with a
+  store that answers in order this needs a text write slower than the list's. The importing
+  browser keeps its copies, and the file still holds them. Re-creating reads the store first, so
+  only a text another device writes there during that read can still be overwritten (reviews:
+  `reviews/2026-11-25/codex-review-storage36`, `codex-recheck-storage36`).
 
 ## Splitting
 

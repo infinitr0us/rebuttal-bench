@@ -8,10 +8,9 @@
   tab, under its name in the file (numbered when a tab already has that name), and the open draft
   stays open. A draft this browser has no room for is left out and named. No draft is replaced or
   changed and no earlier version is given up to make room for an imported text, so an import
-  cannot cost any text, and the file is still there to import again. Where drafts are kept in a
-  hosted page's storage, other devices see an imported draft only once its text is stored there.
-  This replaces the all-or-nothing design that three reviews before 3.5.0 kept finding ways to
-  break.
+  cannot cost any text, and the file is still there to import again. Where a hosted page keeps
+  drafts only in its own storage, a second message says what that storage confirmed. This
+  replaces the all-or-nothing design that three reviews before 3.5.0 kept finding ways to break.
 
 ### History
 - The versions of all drafts now share one budget of about a million characters, and the oldest
@@ -37,9 +36,9 @@
   them.
 
 ### Project
-- `tests/history.test.js` covers the budget, reading import files and the import plan. Twelve new
-  smoke checks; two retired with the code they tested. A Codex review of the first version found
-  the fixes above (`reviews/2026-11-25`).
+- `tests/history.test.js` covers the budget, reading import files and the import plan. Thirteen
+  new smoke checks; two retired with the code they tested. A Codex review of the first version and
+  a re-check of its fixes found the fixes above (`reviews/2026-11-25`).
 
 ## 3.5.0 (2026-11-21)
 

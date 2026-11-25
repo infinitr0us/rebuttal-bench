@@ -946,12 +946,10 @@ try {
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).
   await send('Page.addScriptToEvaluateOnNewDocument', { source: `
-    const later = (f, ms) => new Promise((r) => setTimeout(() => r(f()), ms || +(localStorage.getItem('stub:delay') || 50)));
-    /* 'stub:slow': the texts of drafts other than the first take 1.5 s to write. */
-    const slow = (k) => localStorage.getItem('stub:slow') && /^rebuttal-bench-draft-(?!pending)/.test(k) && !/-pending$/.test(k) ? 1500 : 0;
+    const later = (f) => new Promise((r) => setTimeout(() => r(f()), +(localStorage.getItem('stub:delay') || 50)));
     window.storage = {
       get: (k) => later(() => { const v = localStorage.getItem('stub:' + k); return v === null ? null : { value: v }; }),
-      set: (k, v) => later(() => { localStorage.setItem('stub:' + k, v); }, slow(k)),
+      set: (k, v) => later(() => { localStorage.setItem('stub:' + k, v); }),
       delete: (k) => later(() => { localStorage.removeItem('stub:' + k); }),
     };` }, sessionId);
   await load();
@@ -1015,19 +1013,6 @@ try {
     if (d) { window.confirm = () => true; deleteDraft(d.id); await wait(300); }
     return ok || { found: !!d, inStore, list: draftMeta.list.map((x) => x.name), value: ta.value };`);
 
-  await check('with an asynchronous store, an import’s list reaches it only once the text has', `
-    localStorage.setItem('stub:slow', '1');
-    importDrafts(JSON.stringify({ format: 'rebuttal-bench-drafts', drafts: [{ name: 'Slow one', text: 'Slow $s$.' }] }), 'x.json');
-    const d = draftMeta.list.find((x) => x.name === 'Slow one');
-    const inStore = () => JSON.parse(localStorage.getItem('stub:' + DRAFTS_KEY) || '{"list":[]}').list.some((x) => x.id === d.id);
-    await wait(700); /* the list alone would be there by now */
-    const early = inStore(), here = JSON.parse(localStorage.getItem(DRAFTS_KEY)).list.some((x) => x.id === d.id);
-    for (let i = 0; i < 40 && !inStore(); i++) await wait(100);
-    const late = inStore(), body = localStorage.getItem('stub:' + keyOfDraft(d.id));
-    localStorage.removeItem('stub:slow');
-    window.confirm = () => true; deleteDraft(d.id); await wait(300);
-    return !early && here && late && body === 'Slow $s$.' || { early, here, late, body };`);
-
   await check('with an asynchronous store, a merge that brings back the open draft deleted on another device brings back its text', `
     const id = createDraft('Deleted on another device', 'Still here $r$.'); switchDraft(id); await wait(500);
     const s = JSON.parse(localStorage.getItem('stub:' + DRAFTS_KEY)); /* that device deleted it */
@@ -1038,6 +1023,36 @@ try {
     const body = localStorage.getItem('stub:' + keyOfDraft(id));
     window.confirm = () => true; deleteDraft(id); await wait(300);
     return listed && body === 'Still here $r$.' || { listed, body };`);
+
+  await check('with an asynchronous store, a draft re-created after a deletion elsewhere keeps its text through a switch right after', `
+    const origId = draftMeta.active;
+    const id = createDraft('Deleted in another window', 'Keep me $k$.'); switchDraft(id); await wait(500);
+    const theirs = JSON.parse(localStorage.getItem(DRAFTS_KEY)); /* another window deletes it, here and in the store */
+    theirs.list = theirs.list.filter((d) => d.id !== id); theirs.gone[id] = Date.now() + 1000; theirs.saved = Date.now();
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(theirs)); localStorage.removeItem(keyOfDraft(id));
+    localStorage.removeItem('stub:' + keyOfDraft(id));
+    window.dispatchEvent(new StorageEvent('storage', { key: DRAFTS_KEY, newValue: JSON.stringify(theirs) }));
+    switchDraft(origId); /* before the store has answered */
+    const localAtOnce = localStorage.getItem(keyOfDraft(id));
+    await wait(600);
+    const stored = localStorage.getItem('stub:' + keyOfDraft(id));
+    const listed = JSON.parse(localStorage.getItem(DRAFTS_KEY)).list.some((d) => d.id === id);
+    window.confirm = () => true; deleteDraft(id); await wait(300);
+    return localAtOnce === 'Keep me $k$.' && stored === 'Keep me $k$.' && listed || { localAtOnce, stored, listed };`);
+
+  await check('with an asynchronous store, re-creating never sends this window’s text over one another window saved meanwhile', `
+    const origId = draftMeta.active;
+    const id = createDraft('Saved meanwhile', 'Old text $o$.'); switchDraft(id); await wait(500);
+    const theirs = JSON.parse(localStorage.getItem(DRAFTS_KEY));
+    theirs.list = theirs.list.filter((d) => d.id !== id); theirs.gone[id] = Date.now() + 1000; theirs.saved = Date.now();
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(theirs)); localStorage.removeItem(keyOfDraft(id));
+    localStorage.removeItem('stub:' + keyOfDraft(id));
+    window.dispatchEvent(new StorageEvent('storage', { key: DRAFTS_KEY, newValue: JSON.stringify(theirs) }));
+    localStorage.setItem(keyOfDraft(id), 'Newer, from a third window.'); /* while the store is read */
+    await wait(600);
+    const stored = localStorage.getItem('stub:' + keyOfDraft(id)), local = localStorage.getItem(keyOfDraft(id));
+    window.confirm = () => true; switchDraft(origId); deleteDraft(id); await wait(300);
+    return stored !== 'Old text $o$.' && local === 'Newer, from a third window.' || { stored, local };`);
 
   results.push([errors.length === 0, 'no uncaught page errors', errors.join(' | ')]);
 } catch (e) {
