@@ -233,7 +233,7 @@ cases, Chrome probes); keep their rules:
   asynchronous store), newest first, capped per draft by `capHistory` and for all drafts together
   by `HISTORY_BUDGET`, characters of stored JSON, well under any browser's quota (pure:
   `parseHistory`, `historyAdd`, `historyDue`, `historySize`, `fitHistory`, `tests/history.test.js`).
-  `keepVersion` runs before every bulk change of the editor (Fix all, Apply to source, Clear, Load
+  `keepVersion` runs before every bulk change of the editor (Fix all, Apply to source, Replace all, Clear, Load
   example, a restore; none on a read-only draft) and `saveDraftNow`, every `HISTORY_EVERY`, keeps
   the text its save replaces (`savedText`; not the startup example, stored nowhere).
   The storage rules are Fable's model A (`reviews/2026-11-21/fable-history-advice.md`), which in
@@ -326,6 +326,31 @@ or reorders content (`tests/split.test.js` checks the text round-trips), appends
 reference definition to the parts that use it, and reports macros and labels used across parts,
 because OpenReview typesets each comment from a fresh TeX state.
 
+## Sections, wording and editing aids
+
+- `commentSections(text)` (pure, `tests/sections.test.js`) finds the parts of a draft for the
+  *Sections* panel from Marked's top-level tokens only: a heading runs to the next heading of its
+  level or higher, a labelled point (`sectionLabel`: bold that ends in punctuation or stands
+  alone, or a point name such as `W1:`) to the next part of any kind. Counts are trimmed UTF-16
+  lengths, as the limit counts. Bold that starts a sentence is no label; keep it that way.
+- `wordingHints(text, spans)` (pure, `tests/wording.test.js`) is advice and is **never applied**,
+  not even as a manual fix: a phrase can be the author's choice. It reads only the author's
+  visible prose (`proseMask`: not code, math, HTML, quotes, link or image syntax, definitions).
+  Add a filler to `FILLERS` only with a shorter form that keeps the meaning in every context
+  (no *with respect to*, which a derivative needs) and a near-miss case in the tests.
+- `blockSources(text)` (pure, `tests/editing.test.js`, which checks it against the rendered
+  elements) lists each top-level block that renders an element, with its tag. A double-click in
+  the preview lines it up with the preview's children by tag, then finds the n-th use of the
+  word (formulas left out) or the n-th formula in that block's source. OpenReview renders an HTML
+  block as text, so it has no entry.
+- Find works on the source as typed. A textarea shows no selection while the focus is elsewhere,
+  so `drawFindMarks` lays the text out in `caretTop`'s twin (`prepareMirror`) and draws boxes in
+  `#findMarks` over the editor; it is redrawn on scroll, input, selection, resize and after every
+  analysis (a draft switch). *Replace* goes through `execCommand('insertText')` and *Replace
+  all* through `setSourceText`, so each is one undo; *Replace all* keeps a version in History.
+  Ctrl+F is taken only in the editor and the find bar; elsewhere the browser's find stays.
+- The editor's `spellcheck` follows `prefs.spellcheck`; a fresh editor is a clone, so it keeps it.
+
 ## Venue presets
 
 `VENUES` holds each venue's limit, link rule, whether several comments are allowed (`parts`) and official source, checked on `VENUES_CHECKED`.
@@ -360,7 +385,10 @@ all, Fix all's added-character count, the selection count, venue presets, Copy c
 source (with undo), the compact chip state, compaction switches across a reload, jumping to a hazard on a
 long soft-wrapped line, refusing a stale one-click fix, draft persistence across a reload (also
 with a stubbed asynchronous `window.storage`: keystrokes before a reload, a draft saved elsewhere,
-leaving before the restore), `/images/` attributes, the theme toggle, and that no page errors
-were thrown. Add a check there for any new browser-only behavior.
+leaving before the restore), `/images/` attributes, the theme toggle, the Sections and Wording
+panels, find and replace (with its boxes and one undo), a double-click from the preview to the
+source, the spellcheck switch across a draft switch, and that no page errors were thrown. Add a
+check there for any new browser-only behavior.
 
-Still by eye: zoom and editor-size controls, dark-mode colors, the layout below 920 px width.
+Still by eye: zoom and editor-size controls, dark-mode colors, the layout below 920 px width, the
+left pane with several panels open (the editor keeps at least a third of it).

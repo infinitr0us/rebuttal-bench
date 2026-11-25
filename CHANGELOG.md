@@ -11,6 +11,34 @@
 - You can also paste directly into *Import table*. Editing the text there switches the preview
   to your edited version. One undo after insertion brings back the original editor text.
 
+### Sections and wording
+- *Sections* (under the hazards) lists the parts of a draft with the length of each, counted
+  like the limit, and its share of the comment: a heading starts a part, and so does a
+  paragraph, list item or quote that opens with a label such as `**W1.**`, `**Q2:**` or `W3:`.
+  Points are listed under their heading, so a combined answer to several reviewers shows each
+  reviewer's total and each point's. Click a part to go to it.
+- *Wording* suggests shorter ways to say the same, with what each would save: filler phrases
+  (*in order to* for *to*, *due to the fact that* for *because*, *We would like to thank* for
+  *We thank*) and long names used three times or more, which an abbreviation would shorten
+  (*Contrastive Language-Image Pre-training*, four times, as *CLIP*). It is advice only and
+  never changes the text; code, math, quotes and link addresses are left out. Click a phrase to
+  go to it, and again for its next use.
+
+### Editing
+- *Find* (or Ctrl+F, ⌘F in the editor) searches the source, with a match-case switch, and
+  replaces one match at a time or all of them; one undo takes back *Replace all*, which also
+  keeps a version in History. The matches are highlighted in the editor while you type in the
+  find field.
+- Double-click a word or a formula in the preview to select it in the source.
+- *Spellcheck* (beside *Find*) turns on the browser's spellchecker in the editor. It is off by
+  default, since TeX and Markdown are full of words it does not know.
+- With several panels open under the editor, the editor keeps at least a third of the pane, and
+  the panels share the rest, each scrolling on its own.
+
+### Project
+- `tests/sections.test.js`, `tests/wording.test.js` and `tests/editing.test.js`, and HTML tables
+  in `tests/table-import.test.js` (Codex). Nine new smoke checks.
+
 ## 3.6.0 (unreleased)
 
 ### Import

@@ -1037,6 +1037,61 @@ try {
     return rows.length === 2 && /×2 · −18$/.test(row.textContent) && first[0] === 0 && first[1] === 11 &&
       second[0] === 22 && third === 0 && /^about \\d+ to save$/.test(sum) && unchanged || { rows, first, second, third, sum };`);
 
+  await check('the spellcheck switch reaches the editor and survives a draft switch', `
+    const was = ta.spellcheck;
+    spellBox.click(); await wait(30);
+    const on = ta.spellcheck === true && prefs.spellcheck === true;
+    const origId = draftMeta.active;
+    document.querySelector('#draftTools .dadd').click(); await wait(50); /* a fresh editor */
+    const kept = ta.spellcheck === true;
+    window.confirm = () => true; deleteDraft(draftMeta.active); switchDraft(origId); await wait(50);
+    spellBox.click(); await wait(30);
+    return !was && on && kept && ta.spellcheck === false || { was, on, kept, now: ta.spellcheck };`);
+
+  await check('find and replace: Ctrl+F from a selection, Enter to step, boxes over the matches, one undo for Replace all', `
+    const was = ta.value;
+    setSourceText('alpha beta alpha gamma Alpha', 0, 5); updateAll();
+    ta.focus(); ta.setSelectionRange(0, 5);
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }));
+    const opened = !findBar.hidden && findInput.value === 'alpha' && document.activeElement === findInput;
+    const first = findCount.textContent; /* the selection is a match: 1 of 3 */
+    findInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    const second = [ta.selectionStart, ta.selectionEnd, findCount.textContent];
+    const boxes = findMarks.querySelectorAll('span').length, cur = findMarks.querySelectorAll('span.cur').length;
+    findCase.click(); const caseCount = findCount.textContent; findCase.click();
+    replaceInput.value = 'omega';
+    document.getElementById('replaceOne').click(); await wait(30);
+    const one = ta.value;
+    document.getElementById('replaceAll').click(); await wait(30);
+    const all = ta.value;
+    ta.focus(); document.execCommand('undo'); await wait(30);
+    const undone = ta.value;
+    findInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    const closed = findBar.hidden && document.activeElement === ta && !findMarks.children.length;
+    findInput.value = ''; replaceInput.value = '';
+    setSourceText(was, 0); saveDraftNow(); updateAll();
+    return opened && first === '1 of 3' && second[0] === 11 && second[1] === 16 && second[2] === '2 of 3' &&
+      boxes === 3 && cur === 1 && caseCount === '2 of 2' && one === 'alpha beta omega gamma Alpha' &&
+      all === 'omega beta omega gamma omega' && undone === one && closed ||
+      { opened, first, second, boxes, cur, caseCount, one, all, undone, closed };`);
+
+  await check('a double-click in the preview selects the same word, or the same formula, in the source', `
+    const was = ta.value;
+    setSourceText('Here is one.\\n\\nThen here and here, with $x$ and $y^2$.', 0); updateAll(); renderPreview();
+    for (let i = 0; i < 50 && preview.querySelectorAll('mjx-container').length < 2; i++) await wait(100);
+    const p = preview.children[1], text = [...p.childNodes].find((n) => n.nodeType === 3 && /and here/.test(n.nodeValue));
+    const at = text.nodeValue.indexOf('here', text.nodeValue.indexOf('here') + 1);
+    const r = document.createRange(); r.setStart(text, at); r.setEnd(text, at + 4);
+    getSelection().removeAllRanges(); getSelection().addRange(r);
+    p.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    const word = [ta.selectionStart, ta.selectionEnd], want = ta.value.lastIndexOf('here');
+    const math = p.querySelectorAll('mjx-container')[1];
+    math.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    const formula = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+    setSourceText(was, 0); saveDraftNow(); updateAll(); renderPreview();
+    return word[0] === want && word[1] === want + 4 && formula === '$y^2$' && document.activeElement === ta ||
+      { word, want, formula };`);
+
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).

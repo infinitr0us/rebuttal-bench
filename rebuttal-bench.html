@@ -413,7 +413,44 @@ window.MathJax = {
   .dtab:focus-visible, .dtool:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .dclose:hover { border-color: var(--err); color: var(--err); }
   .dadd { border-style: dashed; }
-  .dpanel { display: contents; }
+  /* A box of its own (it was display: contents) so find's highlights can sit over the editor. */
+  .dpanel { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 35%; }
+
+  .pane-tools { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+  .pane-tools label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+  .pane-tools input { margin: 0; accent-color: var(--accent); }
+
+  /* find and replace */
+  .findbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 18px;
+    background: var(--head-bg);
+    border-top: 1px solid var(--line);
+    font-size: 12px;
+  }
+  .findbar[hidden] { display: none; }
+  .findbar button { padding: 2px 8px; font-size: 12px; }
+  .findbar input[type="text"] {
+    flex: 1 1 110px;
+    min-width: 80px;
+    font: inherit;
+    font-family: var(--mono);
+    padding: 3px 6px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--editor-bg);
+    color: var(--text);
+  }
+  .findbar .findcount { min-width: 56px; font-family: var(--mono); font-size: 11px; color: var(--dim); }
+  .findbar .findcount.none { color: var(--err); }
+  .findbar label { display: inline-flex; align-items: center; gap: 3px; color: var(--dim); cursor: pointer; }
+  .findbar .modal-x { padding: 0 4px; }
+  .findmarks { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
+  .findmarks span { position: absolute; border-radius: 2px; background: rgba(255, 200, 0, 0.28); }
+  .findmarks span.cur { background: rgba(255, 140, 0, 0.5); outline: 1px solid rgba(200, 100, 0, 0.8); }
 
   /* editor */
   #src {
@@ -563,8 +600,12 @@ window.MathJax = {
     color: var(--text);
   }
 
-  /* compaction */
+  /* compaction, wording, sections: with several open, they share the room
+     the editor leaves (it keeps a third of the pane) and scroll */
   .compact {
+    flex: 0 2 auto; /* they give way before the hazards do */
+    min-height: 2.4em;
+    overflow-y: auto;
     border-top: 1px solid var(--line);
     background: var(--head-bg);
     font-size: 12.5px;
@@ -928,14 +969,26 @@ window.MathJax = {
 
 <main>
   <section class="pane" aria-label="Source editor">
-    <div class="pane-head"><h2>Source</h2><span class="hint">exactly what you'll paste into OpenReview, or its compact form</span></div>
+    <div class="pane-head"><h2>Source</h2><span class="hint">exactly what you'll paste into OpenReview, or its compact form</span>
+      <span class="pane-tools"><button type="button" id="findBtn" title="Find and replace in the source (Ctrl+F in the editor)">Find</button><label title="Underline misspelled words in the editor, with the browser’s spellchecker"><input type="checkbox" id="spellBox"> Spellcheck</label></span></div>
     <div class="drafts" id="draftBar"><div class="dtabs" id="draftTabs" role="tablist" aria-label="Drafts"></div><div class="dtools" id="draftTools"></div></div>
     <div id="tableOffer" hidden>
       Convert the pasted table to Markdown?
       <button id="convertPaste" type="button" aria-haspopup="dialog" aria-controls="tableDialog">Convert</button>
       <button id="dismissPaste" type="button">Dismiss</button>
     </div>
-    <div id="draftPanel" class="dpanel" role="tabpanel"><textarea id="src" spellcheck="false" placeholder="Type or paste your rebuttal…"></textarea></div>
+    <div id="findBar" class="findbar" hidden role="search" aria-label="Find and replace in the source">
+      <input id="findInput" type="text" placeholder="Find" aria-label="Find" spellcheck="false" autocomplete="off">
+      <span id="findCount" class="findcount" aria-live="polite"></span>
+      <button type="button" id="findPrev" title="Previous match (Shift+Enter)" aria-label="Previous match">↑</button>
+      <button type="button" id="findNext" title="Next match (Enter)" aria-label="Next match">↓</button>
+      <label title="Match upper and lower case exactly"><input type="checkbox" id="findCase"> Aa</label>
+      <input id="replaceInput" type="text" placeholder="Replace with" aria-label="Replace with" spellcheck="false" autocomplete="off">
+      <button type="button" id="replaceOne" title="Replace this match, then go to the next (Enter in the field)">Replace</button>
+      <button type="button" id="replaceAll" title="Replace every match; one undo brings the text back">Replace all</button>
+      <button type="button" id="findClose" class="modal-x" title="Close (Escape)" aria-label="Close find and replace">×</button>
+    </div>
+    <div id="draftPanel" class="dpanel" role="tabpanel"><div id="findMarks" class="findmarks" aria-hidden="true"></div><textarea id="src" spellcheck="false" placeholder="Type or paste your rebuttal…"></textarea></div>
     <div class="lint">
       <div class="lint-head"><span>Hazards</span> <span id="lintCount" class="zero">0</span><button type="button" id="fixAllBtn" hidden title="Rewrite every hazard that has a mechanical fix. One Ctrl+Z undoes the whole pass.">Fix all</button></div>
       <div id="lintList"></div>
@@ -988,7 +1041,7 @@ window.MathJax = {
   <div class="divider" aria-hidden="true"></div>
 
   <section class="pane" aria-label="Rendered preview">
-    <div class="pane-head"><h2>Preview</h2><span class="hint">OpenReview's own note styles — 1:1 at 100%</span></div>
+    <div class="pane-head"><h2>Preview</h2><span class="hint">OpenReview's own note styles, 1:1 at 100%. Double-click to find a spot in the source.</span></div>
     <div class="scroller" id="scroller">
       <article class="paper" id="preview"><p class="empty">Nothing to preview yet.</p></article>
     </div>
@@ -1024,7 +1077,7 @@ window.MathJax = {
       <h3 id="historyTitle">History</h3>
       <button type="button" class="modal-x" data-close aria-label="Close">×</button>
     </div>
-    <p class="modal-note">Earlier versions are kept before <em>Fix all</em>, <em>Apply to source</em>, <em>Clear</em>, <em>Load example</em> and a restore, and every 10 minutes while you edit: up to 20 per draft, in this browser only. When they take up too much room, or a draft needs the space, the oldest go first.</p>
+    <p class="modal-note">Earlier versions are kept before <em>Fix all</em>, <em>Apply to source</em>, <em>Replace all</em>, <em>Clear</em>, <em>Load example</em> and a restore, and every 10 minutes while you edit: up to 20 per draft, in this browser only. When they take up too much room, or a draft needs the space, the oldest go first.</p>
     <div id="historyList" class="split-parts"></div>
     <p class="modal-note">Drafts are kept in this browser only, and the online page and a downloaded copy of it each keep their own. Export them to keep a backup, or to copy them into another browser. Import adds the drafts of an exported file as new tabs, and never replaces or changes a draft.</p>
     <div class="modal-actions">
@@ -4776,6 +4829,27 @@ function commentSections(text) {
   return out.length < 2 ? null : { total: text.trim().length, sections: out };
 }
 
+/* The source of each top-level block Marked renders as an element, in
+   order, with that element's tag name: the preview's children line up with
+   it, so a spot in the preview can be traced back to the source. An HTML
+   block renders as text on OpenReview (no element), a link definition and
+   blank lines as nothing. [] when Marked cannot lex the text. */
+var BLOCK_TAGS = { paragraph: 'P', blockquote: 'BLOCKQUOTE', code: 'PRE', table: 'TABLE', hr: 'HR' };
+function blockSources(text) {
+  var api = typeof window !== 'undefined' ? window.marked : null, tokens, out = [], pos = 0;
+  if (typeof text !== 'string' || !api || typeof api.lexer !== 'function') return out;
+  try { tokens = api.lexer(text); } catch (e) { return out; }
+  tokens.forEach(function (t) {
+    if (!t.raw) return;
+    var at = text.indexOf(t.raw, pos);
+    if (at < 0) return;
+    pos = at + t.raw.length;
+    var tag = t.type === 'heading' ? 'H' + t.depth : t.type === 'list' ? (t.ordered ? 'OL' : 'UL') : BLOCK_TAGS[t.type];
+    if (tag) out.push({ tag: tag, start: at, end: at + t.raw.length });
+  });
+  return out;
+}
+
 /* ---- wording hints (pure): shorter ways to say the same ----
    Advice for a draft over the limit, never applied: a phrase can be the
    author's choice, and its replacement may need the sentence recast. Only
@@ -5273,7 +5347,7 @@ var DRAFT_KEY = 'rebuttal-bench-draft';
 var FS_RANGES = { fsEditor: [11, 20], zoomPreview: [70, 200] };
 var FS_STEPS = { fsEditor: 1, zoomPreview: 10 };
 var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, sync: true, venue: '',
-  compact: compactDefaults(), compactOpen: false, wordingOpen: false, sectionsOpen: false };
+  compact: compactDefaults(), compactOpen: false, wordingOpen: false, sectionsOpen: false, spellcheck: false };
 
 function applyPrefs() {
   document.documentElement.setAttribute('data-theme', prefs.theme === 'dark' ? 'dark' : 'light');
@@ -5292,6 +5366,8 @@ function applyPrefs() {
   compactBox.open = !!prefs.compactOpen;
   wordingBox.open = !!prefs.wordingOpen;
   sectionsBox.open = !!prefs.sectionsOpen;
+  spellBox.checked = !!prefs.spellcheck;
+  ta.spellcheck = !!prefs.spellcheck;
   Array.prototype.forEach.call(compactList.querySelectorAll('input[data-trick]'), function (box) {
     box.checked = !!prefs.compact[box.getAttribute('data-trick')];
   });
@@ -5759,6 +5835,7 @@ function renderPreview() {
     return;
   }
 
+  if (!importing) previewText = source;
   try {
     target.innerHTML = renderOpenReviewMarkdown(text);
   } catch (e) {
@@ -5833,6 +5910,7 @@ function updateAll() {
   renderIssues();
   renderWording(text, res.spans);
   renderSections(text, chars);
+  refreshFind(); /* a draft switch puts in another text */
   scheduleCompaction();
   renderDraftTabs();
 }
@@ -6977,6 +7055,246 @@ sectionsList.addEventListener('click', function (e) {
   revealOffset(at);
 });
 
+/* ---- spellcheck, find and replace, preview to source ---- */
+
+/* The editor's spellcheck is off by default: TeX and Markdown are a sea of
+   red. A fresh editor (a draft switch) is a clone, so it keeps the setting. */
+var spellBox = document.getElementById('spellBox');
+spellBox.addEventListener('change', function () {
+  prefs.spellcheck = spellBox.checked;
+  ta.spellcheck = prefs.spellcheck;
+  savePrefs();
+});
+
+/* Find works on the source as typed (no Markdown or TeX rules). The
+   editor's selection is the current match; since a textarea shows no
+   selection while the focus is in the find field, boxes drawn over the
+   editor (findMarks, laid out in caretTop's hidden twin) show the matches. */
+var findBar = document.getElementById('findBar');
+var findInput = document.getElementById('findInput');
+var findCount = document.getElementById('findCount');
+var findCase = document.getElementById('findCase');
+var replaceInput = document.getElementById('replaceInput');
+var findMarks = document.getElementById('findMarks');
+var FIND_MARKS_MAX = 400; /* beyond this, only the current match gets a box */
+
+function findMatches() {
+  var q = findInput.value, out = [], m;
+  if (!q) return out;
+  var re = new RegExp(escRe(q), findCase.checked ? 'g' : 'gi'), text = ta.value;
+  while ((m = re.exec(text))) out.push({ start: m.index, end: m.index + m[0].length });
+  return out;
+}
+/* The match the editor's selection is on, or -1. */
+function currentMatch(ms) {
+  for (var i = 0; i < ms.length; i++) if (ms[i].start === ta.selectionStart && ms[i].end === ta.selectionEnd) return i;
+  return -1;
+}
+function refreshFind() {
+  if (!findBar || findBar.hidden) return; /* also before this part of the script has run */
+  var ms = findMatches(), i = currentMatch(ms);
+  findCount.textContent = !findInput.value ? '' : !ms.length ? 'No matches'
+    : i >= 0 ? (i + 1) + ' of ' + fmt(ms.length) : fmt(ms.length) + ' found';
+  findCount.classList.toggle('none', !!findInput.value && !ms.length);
+  drawFindMarks(ms, i);
+}
+function drawFindMarks(ms, cur) {
+  findMarks.textContent = '';
+  if (findBar.hidden || !ms.length) return;
+  var shown = ms.length > FIND_MARKS_MAX ? (cur >= 0 ? [ms[cur]] : []) : ms;
+  if (!shown.length) return;
+  var mirror = prepareMirror(), text = ta.value, pos = 0, spans = [];
+  mirror.textContent = '';
+  shown.forEach(function (x) {
+    mirror.appendChild(document.createTextNode(text.slice(pos, x.start)));
+    var s = document.createElement('span');
+    s.textContent = text.slice(x.start, x.end);
+    mirror.appendChild(s);
+    spans.push(s);
+    pos = x.end;
+  });
+  mirror.appendChild(document.createTextNode(text.slice(pos)));
+  var base = mirror.getBoundingClientRect(), frag = document.createDocumentFragment();
+  var dx = ta.offsetLeft + ta.clientLeft, dy = ta.offsetTop + ta.clientTop - ta.scrollTop;
+  var top0 = ta.offsetTop + ta.clientTop, bottom = top0 + ta.clientHeight;
+  spans.forEach(function (s, k) {
+    var isCur = cur >= 0 && shown[k] === ms[cur];
+    Array.prototype.forEach.call(s.getClientRects(), function (r) {
+      var top = r.top - base.top + dy;
+      if (top + r.height <= top0 || top >= bottom) return; /* scrolled out of view */
+      var box = document.createElement('span');
+      if (isCur) box.className = 'cur';
+      box.style.left = (r.left - base.left + dx) + 'px';
+      box.style.top = top + 'px';
+      box.style.width = Math.max(2, r.width) + 'px';
+      box.style.height = r.height + 'px';
+      frag.appendChild(box);
+    });
+  });
+  findMarks.appendChild(frag);
+}
+/* Select match `i` and bring it into view. */
+function showMatch(m) {
+  ta.setSelectionRange(m.start, m.end);
+  revealOffset(m.start);
+  refreshFind();
+}
+/* The next match after the selection (dir 1) or the one before it (-1). */
+function findStep(dir) {
+  var ms = findMatches();
+  if (!ms.length) { refreshFind(); return; }
+  var i = currentMatch(ms), pick = dir > 0 ? 0 : ms.length - 1, k;
+  if (i >= 0) pick = (i + dir + ms.length) % ms.length;
+  else if (dir > 0) { for (k = 0; k < ms.length; k++) if (ms[k].start >= ta.selectionStart) { pick = k; break; } }
+  else { for (k = ms.length - 1; k >= 0; k--) if (ms[k].end <= ta.selectionStart) { pick = k; break; } }
+  showMatch(ms[pick]);
+}
+var findFrom = 0; /* where the caret was when the search started: typing searches from there */
+function openFind(toReplace) {
+  var sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+  findFrom = ta.selectionStart;
+  findBar.hidden = false;
+  if (sel && sel.length <= 200 && sel.indexOf('\n') < 0) findInput.value = sel;
+  var field = toReplace ? replaceInput : findInput;
+  field.focus();
+  field.select();
+  refreshFind();
+}
+function closeFind() {
+  if (findBar.hidden) return;
+  findBar.hidden = true;
+  findMarks.textContent = '';
+  ta.focus(); /* the current match stays selected */
+}
+function replaceOne() {
+  if (!draftReady || ta.readOnly) return;
+  var ms = findMatches(), i = currentMatch(ms);
+  if (i < 0) { findStep(1); return; }
+  var m = ms[i], repl = replaceInput.value, ok = false;
+  /* Through the browser's own editing, so one undo takes it back. */
+  ta.focus();
+  ta.setSelectionRange(m.start, m.end);
+  try { ok = document.execCommand('insertText', false, repl); } catch (e) { ok = false; }
+  if (!ok) {
+    ta.setRangeText(repl, m.start, m.end, 'end');
+    editSeq++;
+    afterSourceChange();
+  }
+  var after = m.start + repl.length;
+  ta.setSelectionRange(after, after);
+  replaceInput.focus();
+  findStep(1);
+}
+function replaceAll() {
+  if (!draftReady || ta.readOnly) return;
+  var ms = findMatches();
+  if (!ms.length) { refreshFind(); return; }
+  var text = ta.value, repl = replaceInput.value, out = '', last = 0;
+  ms.forEach(function (m) { out += text.slice(last, m.start) + repl; last = m.end; });
+  out += text.slice(last);
+  keepVersion('before Replace all');
+  setSourceText(out, ms[0].start, ms[0].start + repl.length);
+  afterSourceChange();
+  replaceInput.focus();
+  refreshFind();
+  showToast('Replaced ' + fmt(ms.length) + ' match' + (ms.length === 1 ? '' : 'es') + '. ' + UNDO_HINT + ' in the editor undoes it.');
+}
+
+document.getElementById('findBtn').addEventListener('click', function () { openFind(false); });
+document.getElementById('findNext').addEventListener('click', function () { findStep(1); });
+document.getElementById('findPrev').addEventListener('click', function () { findStep(-1); });
+document.getElementById('replaceOne').addEventListener('click', replaceOne);
+document.getElementById('replaceAll').addEventListener('click', replaceAll);
+document.getElementById('findClose').addEventListener('click', closeFind);
+findCase.addEventListener('change', refreshFind);
+findInput.addEventListener('input', function () {
+  /* Typing searches from where the caret was, like a browser's find. */
+  var ms = findMatches(), pick = null;
+  for (var k = 0; k < ms.length && !pick; k++) if (ms[k].start >= findFrom) pick = ms[k];
+  if (pick || ms.length) showMatch(pick || ms[0]);
+  else refreshFind();
+});
+findBar.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') { e.preventDefault(); closeFind(); return; }
+  if (e.key !== 'Enter') return;
+  if (e.target === findInput) { e.preventDefault(); findStep(e.shiftKey ? -1 : 1); }
+  else if (e.target === replaceInput) { e.preventDefault(); replaceOne(); }
+});
+/* Ctrl+F (⌘F) in the editor or the bar opens it; elsewhere the browser's own
+   find stays. Ctrl+H goes to the replace field, except on a Mac, where ⌘H
+   hides the browser. */
+var IS_MAC = /Mac|iPod|iPhone|iPad/.test((navigator.platform || '') + ' ' + (navigator.userAgent || ''));
+document.addEventListener('keydown', function (e) {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || !(e.target === ta || findBar.contains(e.target))) return;
+  var key = (e.key || '').toLowerCase();
+  if (key === 'f' || (key === 'h' && !IS_MAC && e.ctrlKey)) {
+    e.preventDefault();
+    openFind(key === 'h');
+  }
+});
+onEditor('scroll', function () { if (!findBar.hidden) refreshFind(); });
+onEditor('input', function () { if (!findBar.hidden) refreshFind(); });
+onEditor('select', function () { if (!findBar.hidden) refreshFind(); });
+window.addEventListener('resize', function () { if (!findBar.hidden) refreshFind(); });
+
+/* Double-click in the preview to find the spot in the source, as a PDF
+   viewer does with SyncTeX: the block (blockSources, lined up with the
+   preview's children by tag), then the double-clicked word or formula in
+   it. The preview shows the trimmed comment, hence `lead`. */
+var previewText = null; /* the editor text the preview shows */
+preview.addEventListener('dblclick', function (e) {
+  if (!draftReady || previewText !== ta.value) return;
+  var block = e.target;
+  while (block && block.parentNode !== preview) block = block.parentNode;
+  if (!block || block.nodeType !== 1 || block.classList.contains('empty')) return;
+  var text = ta.value, lead = text.length - text.replace(/^\s+/, '').length;
+  var blocks = blockSources(text.trim()), kids = preview.children, src = null, k = 0;
+  for (var i = 0; i < kids.length && k < blocks.length; i++, k++) {
+    while (k < blocks.length && blocks[k].tag !== kids[i].tagName) k++;
+    if (kids[i] === block) { src = blocks[k] || null; break; }
+  }
+  if (!src) return;
+  var start = src.start + lead, end = src.end + lead, at = start, to = start;
+  var formula = e.target.closest && e.target.closest('mjx-container');
+  var sel = window.getSelection();
+  if (formula) {
+    /* The n-th formula of the block is the n-th one in its source. */
+    var nth = Array.prototype.indexOf.call(block.querySelectorAll('mjx-container'), formula);
+    var spans = (lastAnalysis && analyzedText === text ? lastAnalysis.spans : analyze(text).spans)
+      .filter(function (sp) { return !sp.recovered && sp.start >= start && sp.end <= end; });
+    if (spans[nth]) { at = spans[nth].start; to = spans[nth].end; }
+  } else if (sel && sel.rangeCount && block.contains(sel.anchorNode)) {
+    var word = sel.toString().trim();
+    if (word && word.length <= 80 && !/\s/.test(word)) {
+      /* The n-th use of the word in the block's text before the click (not
+         counting formulas) is its n-th use in the block's source. */
+      var range = sel.getRangeAt(0), pre = document.createRange();
+      pre.setStart(block, 0);
+      pre.setEnd(range.startContainer, range.startOffset);
+      var frag = pre.cloneContents();
+      Array.prototype.forEach.call(frag.querySelectorAll('mjx-container'), function (m) { m.parentNode.removeChild(m); });
+      var before = frag.textContent;
+      var hits = wordUses(text, word, start, end), n = wordUses(before, word, 0, before.length).length;
+      if (hits.length) { at = hits[Math.min(n, hits.length - 1)]; to = at + word.length; }
+    }
+  }
+  if (sel) sel.removeAllRanges();
+  ta.focus();
+  ta.setSelectionRange(at, to);
+  revealOffset(at);
+});
+/* Where `word` starts in text[from, to), as a whole word. */
+function wordUses(text, word, from, to) {
+  var out = [], k = from;
+  while ((k = text.indexOf(word, k)) >= 0 && k + word.length <= to) {
+    var a = text[k - 1], b = text[k + word.length];
+    if (!(a && /[\wÀ-￿]/.test(a) && /^[\wÀ-￿]/.test(word)) &&
+        !(b && /[\wÀ-￿]/.test(b) && /[\wÀ-￿]$/.test(word))) out.push(k);
+    k += word.length;
+  }
+  return out;
+}
+
 applyCompactBtn.addEventListener('click', function () {
   if (!draftReady || ta.readOnly) return;
   var r = compactResult(true);
@@ -7021,6 +7339,15 @@ function setSourceText(next, selStart, selEnd) {
    sits. Lay the text out in a hidden twin of the textarea and measure it. */
 var caretMirror = null;
 function caretTop(offset) {
+  prepareMirror();
+  caretMirror.textContent = ta.value.slice(0, offset);
+  var mark = document.createElement('span');
+  mark.textContent = '\u200b';
+  caretMirror.appendChild(mark);
+  return mark.offsetTop;
+}
+/* The twin, styled and sized like the editor now (fonts and widths change). */
+function prepareMirror() {
   if (!caretMirror) {
     caretMirror = document.createElement('div');
     caretMirror.setAttribute('aria-hidden', 'true');
@@ -7037,11 +7364,7 @@ function caretTop(offset) {
   st.border = '0';
   st.boxSizing = 'border-box';
   st.width = ta.clientWidth + 'px';
-  caretMirror.textContent = ta.value.slice(0, offset);
-  var mark = document.createElement('span');
-  mark.textContent = '\u200b';
-  caretMirror.appendChild(mark);
-  return mark.offsetTop;
+  return caretMirror;
 }
 
 function revealOffset(offset) {
@@ -7458,6 +7781,7 @@ storeGet(PREFS_KEY).then(function (v) {
       if (typeof p.compactOpen === 'boolean') restore('compactOpen', p.compactOpen);
       if (typeof p.wordingOpen === 'boolean') restore('wordingOpen', p.wordingOpen);
       if (typeof p.sectionsOpen === 'boolean') restore('sectionsOpen', p.sectionsOpen);
+      if (typeof p.spellcheck === 'boolean') restore('spellcheck', p.spellcheck);
     } catch (e) {}
   }
   prefsRestored = true;
