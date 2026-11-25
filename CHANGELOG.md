@@ -1,5 +1,35 @@
 # Changelog
 
+## 3.6.0 (unreleased)
+
+### Import
+- *Import…* in the History dialog reads back a file that *Export all drafts* wrote, or a `.md` or
+  `.txt` file as one draft. It only adds: each draft whose text you do not have yet becomes a new
+  tab, under its name in the file (numbered when a tab already has that name), and the open draft
+  stays open. A draft this browser has no room for is left out and named. No draft is replaced or
+  changed and no earlier version is given up to make room for an imported text, so an import
+  cannot cost any text, and the file is still there to import again. This replaces the all-or-nothing design that three reviews before 3.5.0 kept
+  finding ways to break.
+
+### History
+- The versions of all drafts now share one budget of about a million characters, and the oldest
+  go first, whichever draft they belong to: a draft left alone for weeks gives way before the one
+  you are editing. When the browser's storage is full, a new version or a draft makes room the
+  same way, oldest first, where before a draft that needed space removed every stored version at
+  once.
+- Versions are no longer held in memory to be written later. That code is what nine reviews of
+  3.5.0 kept finding new ways to break; now a version that finds no room is simply not kept, and
+  undo still has the text.
+
+### Fixes
+- A page you come back to with the browser's Back button takes in the list of drafts as other
+  windows left it. Before, if its open draft had been deleted in another window meanwhile, what
+  you typed afterwards was saved under the deleted draft, where no tab showed it.
+
+### Project
+- `tests/history.test.js` covers the budget, reading import files and the import plan. Seven new
+  smoke checks; two retired with the code they tested.
+
 ## 3.5.0 (2026-11-21)
 
 ### History and export
