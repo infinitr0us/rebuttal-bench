@@ -888,6 +888,36 @@ try {
     limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
     return parts.length === 1 && parts[0] === src.trim() || { parts };`);
 
+  await check('Sections lists the parts of a draft with their counts, and a click goes to one', `
+    const was = ta.value;
+    setSourceText('Thanks.\\n\\n## Reviewer A\\n\\n**W1.** One.\\n\\n**W2.** Two.\\n\\n## Reviewer B\\n\\nB.', 0); updateAll();
+    sectionsBox.open = true; await wait(50);
+    const rows = [...sectionsList.querySelectorAll('.section')];
+    const names = rows.map((b) => b.querySelector('.name').textContent), levels = rows.map((b) => b.style.getPropertyValue('--level').trim());
+    rows[3].click(); await wait(50);
+    const at = ta.selectionStart, want = ta.value.indexOf('**W2.**'), sum = sectionsSum.textContent;
+    const gain = rows[1].querySelector('.gain').textContent;
+    sectionsBox.open = false;
+    setSourceText(was, 0); saveDraftNow(); updateAll();
+    return names.join('|') === 'Opening|Reviewer A|W1. One.|W2. Two.|Reviewer B' && levels.join('') === '00110' &&
+      sum === '5 parts' && at === want && /^\\d+ · \\d+%$/.test(gain) || { names, levels, sum, at, want, gain };`);
+
+  await check('Wording lists filler phrases with their savings, and clicks go to each use in turn', `
+    const was = ta.value;
+    setSourceText('In order to be brief: in order to fit. We would like to thank you.\\n\\n\`in order to\`', 0); updateAll();
+    wordingBox.open = true; await wait(50);
+    const rows = [...wordingList.querySelectorAll('[data-hint]')].map((b) => b.textContent);
+    const row = [...wordingList.querySelectorAll('[data-hint]')].find((b) => /in order to/i.test(b.textContent));
+    ta.setSelectionRange(0, 0);
+    row.click(); await wait(30); const first = [ta.selectionStart, ta.selectionEnd];
+    row.click(); await wait(30); const second = [ta.selectionStart, ta.selectionEnd];
+    row.click(); await wait(30); const third = ta.selectionStart; /* back to the first: code is not prose */
+    const sum = wordingSum.textContent, unchanged = ta.value.indexOf('In order to be brief') === 0;
+    wordingBox.open = false;
+    setSourceText(was, 0); saveDraftNow(); updateAll();
+    return rows.length === 2 && /×2 · −18$/.test(row.textContent) && first[0] === 0 && first[1] === 11 &&
+      second[0] === 22 && third === 0 && /^about \\d+ to save$/.test(sum) && unchanged || { rows, first, second, third, sum };`);
+
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).

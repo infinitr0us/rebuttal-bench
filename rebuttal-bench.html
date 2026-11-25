@@ -590,6 +590,27 @@ window.MathJax = {
   .compact-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
   #compactFoot { font-size: 11.5px; color: var(--dim); }
 
+  /* sections: one row per part, indented under its heading */
+  .section {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 1px 0 1px calc(var(--level, 0) * 14px);
+    border: none;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .section:hover .name, .section:focus-visible .name { text-decoration: underline; }
+  .section .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .section .name.opening { color: var(--dim); font-style: italic; }
+  .section .bar { flex: none; width: 56px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .section .bar span { display: block; height: 100%; background: var(--accent); }
+  .section .gain { font-family: var(--mono); font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+
   /* dialogs */
   .modal {
     position: fixed;
@@ -928,6 +949,20 @@ window.MathJax = {
           <button type="button" id="splitBtn" title="Cut this draft into several comments under the limit, where the venue allows several">Split into comments…</button>
           <span id="compactFoot"></span>
         </div>
+      </div>
+    </details>
+    <details class="compact" id="wordingBox">
+      <summary>Wording <span id="wordingSum" class="compact-sum zero"></span></summary>
+      <div class="compact-body">
+        <p class="compact-note">Shorter ways to say the same, for a draft over the limit. Advice only: nothing here changes your text, and some phrases are worth their length. Click a phrase to go to it, and again for its next use.</p>
+        <div id="wordingList"></div>
+      </div>
+    </details>
+    <details class="compact" id="sectionsBox">
+      <summary>Sections <span id="sectionsSum" class="compact-sum zero"></span></summary>
+      <div class="compact-body">
+        <p class="compact-note">The length of each part of this draft, counted like the limit. A heading starts a part, and so does a paragraph, list item or quote that opens with a label such as <b>**W1.**</b>, <b>**Q2:**</b> or <b>W3:</b>. Click a part to go to it.</p>
+        <div id="sectionsList"></div>
       </div>
     </details>
     <details class="cheat">
@@ -4470,6 +4505,190 @@ function importPlan(existing, incoming) {
   return { add: add, same: same };
 }
 
+/* ---- sections of a comment (pure) ----
+   A combined response (one comment for every reviewer, or a long answer
+   point by point) is balanced part by part. A heading starts a section that
+   runs to the next heading of its level or higher; a paragraph, list item
+   or quote that opens with a label starts a point, which runs to the next
+   section of any kind. Labels are what authors use for points: bold that
+   ends in punctuation or stands alone (**W1.**, **Q2:**, **Reviewer aBcD**),
+   or a point's name (W1:, Q2., Weakness 3:, [W4]). Bold that starts a
+   sentence (**We thank** the reviewer) is no label. */
+var SECTION_NAME = '(?:[WQ]\\d{1,2}|(?:weakness|question|comment|concern|point|issue|limitation)s?\\s*#?\\d{1,2})';
+var SECTION_LABEL = new RegExp('^(?:\\[' + SECTION_NAME + '\\]|' + SECTION_NAME + '\\s*[.:)])', 'i');
+
+function sectionLabel(s) {
+  s = s.replace(/^\s+/, '');
+  var bold = /^(\*\*|__)(?=\S)([^\n]*?\S)\1([^\n]*)/.exec(s);
+  if (bold && bold[2].length <= 100 &&
+      (/[.:?)\]]$/.test(bold[2]) || /^\s*(?:$|[:.(–—-])/.test(bold[3]))) return true;
+  return SECTION_LABEL.test(s);
+}
+
+/* The first line of a block as a short plain title. */
+function sectionTitle(s) {
+  var line = s.split('\n', 1)[0], atx = /^ {0,3}#{1,6}(?=\s|$)/.exec(line);
+  if (atx) line = line.slice(atx[0].length).replace(/\s+#+\s*$/, ''); /* closing hashes: ATX only */
+  line = line.replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim();
+  return line.length > 60 ? line.slice(0, 59) + '…' : line;
+}
+
+/* {total, sections: [{title, kind, level, start, end, chars}]}, in order;
+   `kind` is 'heading', 'point' or 'opening' (the text before the first),
+   `level` how many headings enclose it, `chars` its trimmed length in UTF-16
+   units, as the limit counts. Only top-level blocks count: a heading in a
+   code block or a quote is not one. null with fewer than two sections. */
+function commentSections(text) {
+  var api = typeof window !== 'undefined' ? window.marked : null;
+  if (typeof text !== 'string' || !api || typeof api.lexer !== 'function') return null;
+  var tokens;
+  try { tokens = api.lexer(text); } catch (e) { return null; }
+  var starts = [], pos = 0;
+  function add(at, raw, depth, kind) { starts.push({ start: at, title: sectionTitle(raw), depth: depth, kind: kind }); }
+  tokens.forEach(function (t) {
+    if (!t.raw || t.type === 'space') return;
+    var at = text.indexOf(t.raw, pos);
+    if (at < 0) return;
+    pos = at + t.raw.length;
+    if (t.type === 'heading') add(at, t.raw, t.depth, 'heading');
+    else if (t.type === 'paragraph' && sectionLabel(t.raw)) add(at, t.raw, 0, 'point');
+    else if (t.type === 'blockquote') {
+      var inner = t.raw.replace(/^ {0,3}>[ \t]?/, '');
+      if (sectionLabel(inner)) add(at, inner, 0, 'point');
+    } else if (t.type === 'list') {
+      var p = at;
+      (t.items || []).forEach(function (item) {
+        var ia = item.raw ? text.indexOf(item.raw, p) : -1;
+        if (ia < 0) return;
+        p = ia + item.raw.length;
+        var body = item.raw.replace(/^ {0,3}(?:[*+-]|\d{1,9}[.)])[ \t]*(?:\[[ xX]\][ \t]+)?/, '');
+        if (sectionLabel(body)) add(ia, body, 0, 'point');
+      });
+    }
+  });
+  if (!starts.length) return null;
+  var first = text.search(/\S/);
+  if (first >= 0 && first < starts[0].start) starts.unshift({ start: first, title: '', depth: 0, kind: 'opening' });
+  var out = [], open = [];
+  starts.forEach(function (s, i) {
+    var end = text.length;
+    for (var j = i + 1; j < starts.length; j++) {
+      if (!s.depth || (starts[j].depth && starts[j].depth <= s.depth)) { end = starts[j].start; break; }
+    }
+    while (s.depth && open.length && open[open.length - 1] >= s.depth) open.pop();
+    out.push({ title: s.title, kind: s.kind, level: open.length, start: s.start, end: end, chars: text.slice(s.start, end).trim().length });
+    if (s.depth) open.push(s.depth);
+  });
+  return out.length < 2 ? null : { total: text.trim().length, sections: out };
+}
+
+/* ---- wording hints (pure): shorter ways to say the same ----
+   Advice for a draft over the limit, never applied: a phrase can be the
+   author's choice, and its replacement may need the sentence recast. Only
+   the author's own visible prose counts: not code, math, HTML, link syntax,
+   image syntax, or a quote (the reviewer's words). `say` is the shorter
+   form ('' to drop the phrase). */
+var FILLERS = [
+  { re: /\bwould like to (?=[a-z])/gi, say: '', note: 'We thank the reviewer says the same as We would like to thank the reviewer.' },
+  { re: /\bin order to\b/gi, say: 'to' },
+  { re: /\b(?:due|owing) to the fact that\b/gi, say: 'because' },
+  { re: /\b(?:despite|in spite of) the fact that\b/gi, say: 'although' },
+  { re: /\bit (?:is|should be) (?:worth noting|worth mentioning|important to note|noted) that /gi, say: '' },
+  { re: /\bplease note that /gi, say: '' },
+  { re: /\bas (?:mentioned|stated|noted) (?:above|before|earlier|previously), /gi, say: '' },
+  { re: /\bit can be (?:seen|observed) that /gi, say: '' },
+  { re: /\bas a matter of fact,? /gi, say: '' },
+  { re: /\ba (?:large|significant|considerable) number of\b/gi, say: 'many' },
+  { re: /\bthe (?:vast )?majority of\b/gi, say: 'most' },
+  { re: /\bat this point in time\b/gi, say: 'now' },
+  { re: /\bfor the purpose of\b/gi, say: 'for' },
+  { re: /\b(?:is|are) able to\b/gi, say: 'can' },
+  { re: /\b(?:has|have) the (?:ability|capability) to\b/gi, say: 'can' },
+  { re: /\bin the event that\b/gi, say: 'if' },
+  { re: /\bwith regards? to\b/gi, say: 'on' },
+  { re: /\bwhether or not\b/gi, say: 'whether' },
+  { re: /\beach and every\b/gi, say: 'every' },
+  { re: /\bfirst and foremost\b/gi, say: 'first' },
+  { re: /\bso as to\b/gi, say: 'to' },
+  { re: /\bthank you very much for\b/gi, say: 'thank you for' }
+];
+
+/* What a reader never sees as the author's prose, as a mask over `text`. */
+function proseMask(text, spans, model) {
+  var skip = model.ranges.filter(function (r) {
+    return /^(?:code|codespan|html|image|blockquote)$/.test(r.type);
+  }).concat(model.hidden, model.definitions, model.dropped, (spans || []).filter(function (sp) { return !sp.recovered; }));
+  return makeMask(text.length, skip);
+}
+
+/* {hints, saves}: one hint per phrase, {kind: 'filler' | 'name', text, say,
+   at: [{start, end}], saves}; `saves` in total, an estimate. `spans`: the
+   formulas analyze found (computed here when not given). A name is a run of
+   two to six capitalized words (connectors such as "of" allowed inside) of
+   at least 16 characters, used three times or more, that an abbreviation of
+   its capitals would shorten by 20 characters or more, counting a
+   definition at its first use unless the text already has the abbreviation. */
+function wordingHints(text, spans) {
+  var none = { hints: [], saves: 0 };
+  if (typeof text !== 'string' || !text.trim()) return none;
+  var model = collectMarkedRanges(text);
+  if (!model) return none;
+  if (!spans) spans = analyze(text).spans;
+  var mask = proseMask(text, spans, model), hints = [];
+  function visible(a, b) { return !maskHits(mask, a, b); }
+
+  FILLERS.forEach(function (f) {
+    var groups = {}, m;
+    f.re.lastIndex = 0;
+    while ((m = f.re.exec(text))) {
+      if (!m[0]) { f.re.lastIndex++; continue; }
+      var a = m.index, b = a + m[0].length;
+      if (!visible(a, b)) continue;
+      var key = m[0].toLowerCase().replace(/\s+/g, ' ').trim();
+      (groups[key] || (groups[key] = { text: m[0].trim(), at: [] })).at.push({ start: a, end: b });
+    }
+    Object.keys(groups).forEach(function (key) {
+      var g = groups[key], each = g.at[0].end - g.at[0].start - f.say.length;
+      if (each >= 3) hints.push({ kind: 'filler', text: g.text, say: f.say, note: f.note || '', at: g.at, saves: each * g.at.length });
+    });
+  });
+
+  /* Long names: candidates from runs of capitalized words, then every
+     visible, whole-word use of each candidate counted. */
+  var CONNECT = '(?:of|for|and|the|in|on|with|to|via|a|an)';
+  var run = new RegExp('[A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*(?:[ \\t]+(?:' + CONNECT + '[ \\t]+)?[A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*){1,5}', 'g');
+  var seen = Object.create(null), names = [], rm;
+  while ((rm = run.exec(text))) {
+    if (!visible(rm.index, rm.index + rm[0].length)) continue;
+    /* A sentence can start with a capitalized word that is no part of it. */
+    var name = rm[0].replace(/^(?:The|A|An|Our|We|This|These|In|For|Both|Each|Unlike|With)[ \t]+(?=[A-Z])/, '');
+    if (name.length < 16 || !/[ \t]/.test(name) || seen['n' + name]) continue;
+    seen['n' + name] = true;
+    var abbr = name.split(/[ \t]+/).map(function (w) {
+      return new RegExp('^' + CONNECT + '$').test(w) ? '' : w.split('-').map(function (p) { return /^[A-Z]/.test(p) ? p[0] : ''; }).join('');
+    }).join('');
+    if (abbr.length < 2) continue;
+    var at = [], from = 0, k;
+    while ((k = text.indexOf(name, from)) >= 0) {
+      from = k + name.length;
+      var before = text[k - 1], after = text[from];
+      if ((before && /[\w-]/.test(before)) || (after && /[\w-]/.test(after))) continue;
+      if (visible(k, from)) at.push({ start: k, end: from });
+    }
+    if (at.length < 3) continue;
+    var defined = new RegExp('(^|[^\\w-])' + abbr + '(?![\\w-])').test(text);
+    var saves = (at.length - 1) * (name.length - abbr.length) - (defined ? 0 : abbr.length + 3);
+    if (saves >= 20) names.push({ kind: 'name', text: name, say: abbr, defined: defined, at: at, saves: saves });
+  }
+  /* A shorter name inside a longer one used as often is the same advice. */
+  names.forEach(function (n) {
+    if (!names.some(function (o) { return o !== n && o.text.length > n.text.length && o.text.indexOf(n.text) >= 0 && o.at.length >= n.at.length; })) hints.push(n);
+  });
+
+  hints.sort(function (a, b) { return b.saves - a.saves || a.at[0].start - b.at[0].start; });
+  return { hints: hints, saves: hints.reduce(function (n, h) { return n + h.saves; }, 0) };
+}
+
 /* ---- splitting a long comment into several (pure) ----
    Where a venue allows several comments (NeurIPS since 2026, ICLR), a draft
    over the limit can be posted in parts. Parts are cut only between blocks;
@@ -4749,6 +4968,12 @@ var compactList = document.getElementById('compactList');
 var compactFoot = document.getElementById('compactFoot');
 var applyCompactBtn = document.getElementById('applyCompactBtn');
 var selStat = document.getElementById('selStat');
+var wordingBox = document.getElementById('wordingBox');
+var wordingSum = document.getElementById('wordingSum');
+var wordingList = document.getElementById('wordingList');
+var sectionsBox = document.getElementById('sectionsBox');
+var sectionsSum = document.getElementById('sectionsSum');
+var sectionsList = document.getElementById('sectionsList');
 
 /* Listeners on the editor go through onEditor, so that a fresh textarea (a
    draft switch puts one in, see openDraft) gets every one of them. */
@@ -4854,7 +5079,7 @@ var DRAFT_KEY = 'rebuttal-bench-draft';
 var FS_RANGES = { fsEditor: [11, 20], zoomPreview: [70, 200] };
 var FS_STEPS = { fsEditor: 1, zoomPreview: 10 };
 var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, sync: true, venue: '',
-  compact: compactDefaults(), compactOpen: false };
+  compact: compactDefaults(), compactOpen: false, wordingOpen: false, sectionsOpen: false };
 
 function applyPrefs() {
   document.documentElement.setAttribute('data-theme', prefs.theme === 'dark' ? 'dark' : 'light');
@@ -4871,6 +5096,8 @@ function applyPrefs() {
     ? venue.name + ': ' + venue.rule + '. Source: ' + venue.source + ' (checked ' + VENUES_CHECKED + '; rules change every year)'
     : 'Choose a venue to set its character limit and check links against its rebuttal rules';
   compactBox.open = !!prefs.compactOpen;
+  wordingBox.open = !!prefs.wordingOpen;
+  sectionsBox.open = !!prefs.sectionsOpen;
   Array.prototype.forEach.call(compactList.querySelectorAll('input[data-trick]'), function (box) {
     box.checked = !!prefs.compact[box.getAttribute('data-trick')];
   });
@@ -5410,8 +5637,58 @@ function updateAll() {
   mathStat.textContent = fmt(res.mathCount) + ' math span' + (res.mathCount === 1 ? '' : 's');
 
   renderIssues();
+  renderWording(text, res.spans);
+  renderSections(text, chars);
   scheduleCompaction();
   renderDraftTabs();
+}
+
+/* One row per phrase (wordingHints), biggest saving first; a click selects
+   its next use after the caret. Drawn for the text of the last analysis. */
+var wordingShown = null, wordingHintsShown = [];
+function renderWording(text, spans) {
+  var r = wordingHints(text, spans), html = '';
+  wordingShown = text;
+  wordingHintsShown = r.hints;
+  wordingSum.textContent = r.hints.length ? 'about ' + fmt(r.saves) + ' to save' : '';
+  wordingSum.classList.toggle('zero', !r.hints.length);
+  if (!r.hints.length) {
+    wordingList.innerHTML = '<div class="lint-empty">No filler phrases or long repeated names found.</div>';
+    return;
+  }
+  r.hints.forEach(function (h, i) {
+    var say = h.kind === 'name'
+      ? (h.defined ? 'use ' + h.say + ', defined already' : 'define ' + h.say + ' once')
+      : h.say ? '“' + h.say + '”' : 'drop it';
+    html += '<button type="button" class="section" data-hint="' + i + '" title="' +
+      escAttr((h.note ? h.note + ' ' : '') + (h.kind === 'name' ? 'Used ' + h.at.length + ' times.' : 'Found ' + h.at.length + ' time' + (h.at.length === 1 ? '' : 's') + '.')) + '">' +
+      '<span class="name">“' + escHtml(h.text) + '” → ' + escHtml(say) + '</span>' +
+      '<span class="gain">' + (h.at.length > 1 ? '×' + h.at.length + ' · ' : '') + '−' + fmt(h.saves) + '</span></button>';
+  });
+  wordingList.innerHTML = html;
+}
+
+/* One row per section of the draft (commentSections), with its share of the
+   comment; a click puts the caret at its start. Drawn for the text of the
+   last analysis, so a click on a row older than the editor redraws first. */
+var sectionsShown = null; /* the text the rows were drawn for */
+function renderSections(text, total) {
+  var r = commentSections(text), html = '';
+  sectionsShown = text;
+  sectionsSum.textContent = r ? r.sections.length + ' parts' : '';
+  if (!r) {
+    sectionsList.innerHTML = '<div class="lint-empty">No parts yet: start them with headings (<code>## Reviewer aBcD</code>) or labels (<code>**W1.**</code>).</div>';
+    return;
+  }
+  r.sections.forEach(function (s) {
+    var share = total ? s.chars / total : 0;
+    html += '<button type="button" class="section" data-start="' + s.start + '" style="--level: ' + s.level + '"' +
+      ' title="' + escAttr((s.title || 'Opening') + ': ' + fmt(s.chars) + ' characters') + '">' +
+      '<span class="name' + (s.kind === 'opening' ? ' opening' : '') + '">' + escHtml(s.title || 'Opening') + '</span>' +
+      '<span class="bar"><span style="width: ' + Math.round(share * 100) + '%"></span></span>' +
+      '<span class="gain">' + fmt(s.chars) + ' · ' + Math.round(share * 100) + '%</span></button>';
+  });
+  sectionsList.innerHTML = html;
 }
 
 /* The analyzer's hazards for analyzedText plus what MathJax reported in the
@@ -6416,6 +6693,37 @@ compactBox.addEventListener('toggle', function () {
   savePrefs();
 });
 
+wordingBox.addEventListener('toggle', function () {
+  prefs.wordingOpen = wordingBox.open;
+  savePrefs();
+});
+wordingList.addEventListener('click', function (e) {
+  var row = e.target.closest('[data-hint]');
+  if (!row) return;
+  if (wordingShown !== ta.value) { updateAll(); return; } /* drawn for an older text: redraw first */
+  var h = wordingHintsShown[parseInt(row.getAttribute('data-hint'), 10)];
+  if (!h) return;
+  /* The next use after the selection, from the top again after the last. */
+  var from = ta.selectionEnd, next = h.at[0];
+  for (var i = 0; i < h.at.length; i++) if (h.at[i].start >= from) { next = h.at[i]; break; }
+  ta.focus();
+  ta.setSelectionRange(next.start, next.end);
+  revealOffset(next.start);
+});
+sectionsBox.addEventListener('toggle', function () {
+  prefs.sectionsOpen = sectionsBox.open;
+  savePrefs();
+});
+sectionsList.addEventListener('click', function (e) {
+  var row = e.target.closest('.section');
+  if (!row) return;
+  if (sectionsShown !== ta.value) { updateAll(); return; } /* drawn for an older text: redraw first */
+  var at = parseInt(row.getAttribute('data-start'), 10);
+  ta.focus();
+  ta.setSelectionRange(at, at);
+  revealOffset(at);
+});
+
 applyCompactBtn.addEventListener('click', function () {
   if (!draftReady || ta.readOnly) return;
   var r = compactResult(true);
@@ -6873,6 +7181,8 @@ storeGet(PREFS_KEY).then(function (v) {
         });
       }
       if (typeof p.compactOpen === 'boolean') restore('compactOpen', p.compactOpen);
+      if (typeof p.wordingOpen === 'boolean') restore('wordingOpen', p.wordingOpen);
+      if (typeof p.sectionsOpen === 'boolean') restore('sectionsOpen', p.sectionsOpen);
     } catch (e) {}
   }
   prefsRestored = true;
