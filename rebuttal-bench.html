@@ -3065,6 +3065,9 @@ function tableCode(text) {
   }).join('\\|');
 }
 
+var TABLE_NUMBER = '[+\\-−]?(?:(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d*)?|\\.\\d+)(?:e[+\\-]?\\d+)?';
+var TABLE_NUMERIC = new RegExp('^(?:±\\s*)?' + TABLE_NUMBER + '\\s*%?(?:\\s*±\\s*' + TABLE_NUMBER + '\\s*%?)?\\**$', 'i');
+
 function readSpreadsheet(text, sep) {
   var rows = [], cells = [], field = '', quoted = false, closed = false, line = 1, first = 1;
   for (var i = 0; i <= text.length; i++) {
@@ -3087,10 +3090,8 @@ function readSpreadsheet(text, sep) {
   }
   if (rows.length < 2 || rows[0].cells.length < 2 ||
       !rows.slice(1).some(function (row) { return row.cells.length > 1; })) return null;
-  var number = '[+\\-−]?(?:(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d*)?|\\.\\d+)(?:e[+\\-]?\\d+)?';
-  var numeric = new RegExp('^(?:±\\s*)?' + number + '\\s*%?(?:\\s*±\\s*' + number + '\\s*%?)?\\**$', 'i');
   var align = rows[0].cells.map(function (_, col) {
-    return rows.slice(1).every(function (row) { return numeric.test(row.cells[col] || ''); }) ? '-:' : ':-';
+    return rows.slice(1).every(function (row) { return TABLE_NUMERIC.test(row.cells[col] || ''); }) ? '-:' : ':-';
   });
   rows.forEach(function (row) { row.cells = row.cells.map(spreadsheetCell); });
   return { rows: rows, align: align, headers: 1, format: sep === '\t' ? 'tsv' : 'csv', warnings: [] };
@@ -3297,6 +3298,183 @@ function latexCellText(raw, at, span, warn, inArray, depth) {
   return out;
 }
 
+/* Only use tags, attributes and inline styles. Excel's class definitions can
+   live outside the clipboard fragment, and importing it must never load CSS. */
+function htmlTableStyle(el, inherited) {
+  var css = el.style || {}, weight = (css.fontWeight || '').toLowerCase();
+  var italic = (css.fontStyle || '').toLowerCase();
+  var bold = /^(b|strong)$/.test(el.localName) || (inherited & 1);
+  var em = /^(i|em)$/.test(el.localName) || (inherited & 2);
+  /* Docs puts a normal-weight style on its enclosing b, including when a
+     child span turns bold back on. Word often puts a plain span inside b. */
+  if (weight === 'normal' || /^\d+(?:\.\d+)?$/.test(weight)) bold = Number(weight) >= 600;
+  if (weight === 'bold') bold = true;
+  if (italic === 'normal' || italic === 'italic') em = italic === 'italic';
+  return (bold ? 1 : 0) + (em ? 2 : 0);
+}
+
+/* The plain pass inside code, subscripts and superscripts follows the same rules for
+   whitespace and ignored elements. The explicit stack also handles deeply
+   nested wrappers in a malformed clipboard fragment. */
+function walkTableCell(root, inherited, plain, emit, warn) {
+  var stack = [{ node: root, style: inherited }], plainText = true;
+  while (stack.length) {
+    var item = stack.pop(), node = item.node, style = item.style;
+    if (!node) { emit(' ', style); continue; }
+    if (node.nodeType === 3) { emit(node.nodeValue, style); continue; }
+    var tag = node.localName;
+    if (node.nodeType !== 1 || /^(img|script|style|colgroup|table|template)$/.test(tag)) continue;
+    if (plain && node !== root && (tag !== 'span' || htmlTableStyle(node, 0))) plainText = false;
+    if (tag === 'br') { emit(' ', style); continue; }
+    if (tag === 'a') warn('link', 'Kept link text only (venues often forbid links).');
+    style = plain ? 0 : htmlTableStyle(node, style);
+    if (!plain && /^(code|sub|sup)$/.test(tag)) {
+      var parts = [];
+      var simple = walkTableCell(node, 0, true, function (v) { parts.push(v); }, warn);
+      var value = parts.join('').replace(/\s+/g, ' ');
+      if (tag === 'code') emit(value, style, 'code');
+      else if (simple && /^[A-Za-z0-9+*-]{1,32}$/.test(value.trim())) emit(value, style, tag);
+      else if (value.trim()) {
+        warn(tag, 'Kept complex ' + (tag === 'sub' ? 'subscript' : 'superscript') + ' as text.');
+        emit(value, style);
+      } else emit(value, style);
+      continue;
+    }
+    if (/^(p|div|li)$/.test(tag)) {
+      emit(' ', style);
+      stack.push({ node: null, style: style });
+    }
+    for (var child = node.lastChild; child; child = child.previousSibling) {
+      stack.push({ node: child, style: style });
+    }
+  }
+  return plainText;
+}
+
+function htmlTableCell(cell, warn) {
+  var ancestors = [], style = 0, runs = [];
+  for (var el = cell.parentElement; el; el = el.parentElement) ancestors.push(el);
+  while (ancestors.length) style = htmlTableStyle(ancestors.pop(), style);
+  walkTableCell(cell, style, false, function (value, fmt, kind) {
+    var prev = runs[runs.length - 1];
+    if (!kind && prev && !prev.kind && prev.style === fmt) prev.value += value;
+    else runs.push({ value: value, style: fmt, kind: kind });
+  }, warn);
+  var out = '', plain = '', space = false, open = [];
+  function entity(ch) { return '&#' + ch.charCodeAt(0) + ';'; }
+  runs.forEach(function (run, index) {
+    var raw = run.value.replace(/\s+/g, ' '), text = raw.trim();
+    plain += raw;
+    if (!text) { if (raw) space = true; return; }
+    var value, closed = '', opened = '';
+    if (run.kind === 'code') value = tableCode(text);
+    else if (run.kind) value = '$' + (run.kind === 'sup' ? '^' : '_') + '{' + tableMath(text) + '}$';
+    else {
+      /* Clipboard links keep their visible label even when GFM would turn
+         that label back into a URL or email link. */
+      value = spreadsheetCell(text).replace(/(https?|ftp):\/\//gi, '$1&#58;//')
+        .replace(/(www)\./gi, '$1&#46;').replace(/@(?=[\w-]+\.)/g, '&#64;');
+      if (run.style || (runs[index + 1] && runs[index + 1].style)) {
+        value = value.replace(/(\d%?)(\*+)$/, function (_, n, stars) { return n + stars.replace(/\*/g, '\\*'); });
+      }
+    }
+    /* Close only the styles that end here. Spaces at a style boundary
+       belong between its delimiters so Markdown recognizes the emphasis. */
+    var gap = out && (space || raw[0] === ' ') ? ' ' : '';
+    while (open.length && (!(open[0].bit & run.style) || !(open[open.length - 1].bit & run.style))) {
+      closed += open.pop().mark;
+    }
+    /* Alternate delimiter characters when fences meet or nest. Five
+       adjacent stars can otherwise pair across several differently styled words. */
+    var previous = open.length ? open[0].mark[0] : !gap && closed.slice(-1);
+    for (var bit = 1; bit <= 2; bit++) {
+      if (!(run.style & bit) || open.some(function (entry) { return entry.bit === bit; })) continue;
+      previous = previous === '*' ? '_' : '*';
+      var mark = bit === 1 ? previous + previous : previous;
+      opened += mark;
+      open.push({ bit: bit, mark: mark });
+    }
+    if (!gap) {
+      /* In a word, a reference makes a punctuation-only emphasis run legal
+         and keeps Fix all from reading its stars as multiplication signs. */
+      if (opened) out = out.replace(/[a-z0-9]$/i, entity);
+      if (closed) value = value.replace(/^[a-z0-9]/i, entity);
+    }
+    out += closed + gap + opened + value;
+    space = raw[raw.length - 1] === ' ';
+  });
+  while (open.length) out += open.pop().mark;
+  return { markdown: out, numeric: TABLE_NUMERIC.test(plain.trim()) };
+}
+
+function readHtmlTable(doc) {
+  if (!doc || typeof doc.getElementsByTagName !== 'function') return null;
+  var tables = doc.getElementsByTagName('table');
+  for (var i = 0; i < tables.length; i++) {
+    if (!tables[i].rows || tables[i].rows.length < 2) continue;
+    var grid = htmlTableGrid(tables[i].rows);
+    if (grid) return grid;
+  }
+  return null;
+}
+
+function htmlTableGrid(trs) {
+  var rows = [], warnings = [], warned = {}, occupied = [], align = [], numbers = [];
+  var headers = 0, width = 0, group, r;
+  function warn(kind, message) {
+    if (!warned[kind]) warnings.push({ row: r + 1, message: message });
+    warned[kind] = true;
+  }
+  function span(cell, attr) {
+    var n = Number(cell.getAttribute(attr) || 1);
+    if (n === 0 && attr === 'rowspan') n = trs.length - r; /* Through the end of this row group. */
+    if (n > 1) warn(attr, 'Flattened merged cells into ordinary cells.');
+    return n > 1 && n <= 16384 && n === Math.floor(n) ? n : 1;
+  }
+  function alignment(el) {
+    var a = (el.style.textAlign || el.getAttribute('align') || '').toLowerCase();
+    return a === 'left' ? ':-' : a === 'right' ? '-:' : a === 'center' ? ':-:' : '';
+  }
+  while (headers < trs.length && trs[headers].parentNode.localName === 'thead') headers++;
+  if (!headers) {
+    while (headers < trs.length && trs[headers].cells.length &&
+        Array.prototype.every.call(trs[headers].cells, function (cell) { return cell.localName === 'th'; })) headers++;
+  }
+  headers = headers || 1;
+  for (r = 0; r < trs.length; r++) {
+    var tr = trs[r], cells = [], col = 0, rowAlign = alignment(tr);
+    if (tr.parentNode !== group) { group = tr.parentNode; occupied = []; }
+    for (var i = 0; i < tr.cells.length; i++) {
+      var cell = tr.cells[i], cols = span(cell, 'colspan'), height = span(cell, 'rowspan');
+      /* Find a contiguous run, even if an earlier rowspan occupies only
+         the middle of the proposed colspan in a ragged clipboard grid. */
+      for (var j = 0; j < cols; j++) {
+        if (occupied[col + j] > r) { col += j + 1; j = -1; }
+      }
+      var content = htmlTableCell(cell, warn), cellAlign = alignment(cell) || rowAlign;
+      for (j = 0; j < cols; j++, col++) {
+        cells[col] = j ? '' : content.markdown;
+        if (height > 1) occupied[col] = r + height;
+        if (!align[col] && cellAlign) align[col] = cellAlign;
+        if (r >= headers && !j && content.numeric) numbers[col] = (numbers[col] || 0) + 1;
+      }
+    }
+    rows.push({ cells: cells, row: r + 1 });
+    width = Math.max(width, col);
+  }
+  if (width < 2) return null;
+  if (headers > 1) warnings.push({ row: 1, message: 'Joined ' + headers + ' header rows into one.' });
+  /* The HTML grid can have a short first row or end with a rowspan. GFM
+     takes its width from the header, so fill missing positions explicitly. */
+  rows.forEach(function (row) {
+    for (var c = 0; c < width; c++) if (row.cells[c] === undefined) row.cells[c] = '';
+  });
+  for (var c = 0; c < width; c++) {
+    if (!align[c]) align[c] = numbers[c] && numbers[c] === rows.length - headers ? '-:' : ':-';
+  }
+  return { rows: rows, headers: headers, align: align, format: 'html', warnings: warnings };
+}
+
 function importTable(text, options) {
   if (typeof text !== 'string') return null;
   text = text.replace(/\r\n?/g, '\n');
@@ -3307,16 +3485,24 @@ function importTable(text, options) {
   var first = text.replace(/^(?:[ \t]*\n)+/, '').split('\n', 1)[0];
   var latexHeader = /^\s*(?:%|\\(?:begin|toprule|hline|centering)\b|\\\[)/.test(first) ||
     /&.*\\\\\s*(?:%.*)?$/.test(first);
-  var t = (!latexHeader && sheet) || readLatexTable(text) || sheet;
+  return tableMarkdown((!latexHeader && sheet) || readLatexTable(text) || sheet, options);
+}
+
+function importHtmlTable(doc, options) {
+  return tableMarkdown(readHtmlTable(doc), options);
+}
+
+function tableMarkdown(t, options) {
   if (!t) return null;
-  var head = [], body = [];
+  var head = [], body = [], warnings = t.warnings.slice();
   t.rows.forEach(function (row, index) {
     var cells = row.cells;
     if (index < t.headers) {
       cells.forEach(function (v, c) { head[c] = [head[c], v].filter(Boolean).join(' '); });
     } else {
+      cells = cells.slice(); /* The dialog can format the same clipboard grid again with different padding. */
       if (cells.length > head.length) {
-        t.warnings.push({ message: 'Joined extra cells in the last column.', line: row.line });
+        warnings.push({ message: 'Joined extra cells in the last column.', line: row.line });
         cells = cells.slice(0, head.length - 1).concat(cells.slice(head.length - 1).join(' '));
       }
       while (cells.length < head.length) cells.push('');
@@ -3336,8 +3522,8 @@ function importTable(text, options) {
       return '| ' + cells.map(function (v, c) { return v + new Array(widths[c] - v.length + 1).join(' '); }).join(' | ') + ' |';
     }).join('\n');
   }
-  t.warnings.sort(function (a, b) { return a.line - b.line; });
-  return { markdown: markdown, warnings: t.warnings, format: t.format };
+  warnings.sort(function (a, b) { return (a.row || a.line) - (b.row || b.line); });
+  return { markdown: markdown, warnings: warnings, format: t.format };
 }
 
 /* ---- compaction (pure): fewer characters, the same rendering ----
