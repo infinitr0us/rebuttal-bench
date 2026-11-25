@@ -20,11 +20,13 @@ leave the browser: they autosave on this device only.
   a link): their cards say "Not part of Fix all", and only a click on the card applies them.
   Fix all's message says how many characters the pass added.
 - **Import table.** Place the cursor where the results belong, or select text to replace.
-  Click *Import table* next to *Load example* and paste a LaTeX table, cells copied from a
-  spreadsheet, or CSV. Check the OpenReview preview and any line-numbered warnings. Spanning
-  cells and multiple header rows are flattened. *Pad columns* aligns the Markdown in the
-  editor. *Insert at cursor* inserts the table in one undoable edit. Pasting a recognizable
-  LaTeX or tab-separated table directly into the editor also offers to convert that paste.
+  Click *Import table* and paste a table copied from Word, Google Docs, Sheets, Excel, or a web
+  page. You can also paste LaTeX, tab-separated cells, or CSV. When the clipboard includes HTML,
+  the preview keeps inline bold and italics and leaves empty cells where a merged cell spanned
+  the grid. Editing the pasted text switches to plain-text conversion. Check the OpenReview
+  preview and any row or line warnings. *Pad columns* aligns the Markdown in the editor.
+  *Insert at cursor* inserts the table in one undoable edit. Pasting a copied table, LaTeX
+  table, or tab-separated grid into the editor also offers to convert it in place.
 - **Compaction.** *Copy compact* copies a shorter form of your source that OpenReview renders
   exactly the same: table padding and long delimiter rows (`| --- |` becomes `|-|`), links
   that repeat their URL, closing `#`s, extra blank lines and spaces, character references.
@@ -37,6 +39,19 @@ leave the browser: they autosave on this device only.
   pipes of table rows (harder to read as plain text), and writing one-symbol formulas as
   characters (`$\pm$` becomes `±`, `$\uparrow$` `↑`), which sets them in the text font instead
   of MathJax's.
+- **Wording.** For a draft over the limit, the *Wording* panel suggests shorter ways to say the
+  same, each with what it would save: filler phrases (*in order to*, *due to the fact that*,
+  *We would like to thank*) and long names used three times or more that an abbreviation would
+  shorten. Advice only: nothing changes your text. Click a phrase to go to it.
+- **Sections.** The *Sections* panel lists the parts of a draft with the length of each and its
+  share of the comment. A heading starts a part, and so does a paragraph, list item or quote that
+  opens with a label such as `**W1.**`, `**Q2:**` or `W3:`; points are listed under their
+  heading, so one comment answering several reviewers shows each reviewer's total. Click a part
+  to go to it.
+- **Editing.** *Find* (Ctrl+F or ⌘F in the editor) searches and replaces in the source, with the
+  matches highlighted; one undo takes back *Replace all*. Double-click a word or formula in the
+  preview to select it in the source. *Spellcheck* turns on the browser's spellchecker in the
+  editor (off by default, since TeX and Markdown are full of words it does not know).
 - **Venue.** Sets the limit and checks links against the venue's rebuttal rules: NeurIPS
   (10,000 per review), AAAI (2,500 for all reviews) and ACL Rolling Review (5,000 per response)
   allow no links at all, ICML (5,000 per round) no non-anonymized or shortened URLs. ICLR's
@@ -57,7 +72,7 @@ leave the browser: they autosave on this device only.
   into another, and several windows of the page can be open at once without losing a draft (a
   draft deleted in one window comes back if another window still has it open).
 - **History and export.** *History* lists earlier versions of the open draft: one is kept before
-  *Fix all*, *Apply to source*, *Clear*, *Load example* and a restore, and one every 10 minutes
+  *Fix all*, *Apply to source*, *Replace all*, *Clear*, *Load example* and a restore, and one every 10 minutes
   while you edit, of the text the edit replaces (up to 20 per draft, in this browser only). When
   the versions of all drafts together take up too much room (about a million characters), or a
   draft needs the space, the oldest go first, whichever draft they belong to. *Restore* is one more

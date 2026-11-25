@@ -5,18 +5,19 @@ const { JSDOM } = require('jsdom');
 const { loadAnalyzer } = require('./lib/page');
 const { renderHtml, typeset } = require('./lib/pipeline');
 
-const { importTable, analyze } = loadAnalyzer();
+const { importTable, importHtmlTable, readHtmlTable, analyze } = loadAnalyzer();
 const raw = String.raw;
 
 // Check both source layouts and the independent pipeline. Counting formulas
 // alone would miss a dropped backslash or a changed TeX control symbol.
 function check(src, { format, padded, compact, cells, align, math = [], warnings = [], tags = {} }) {
+  const doc = format === 'html' && new JSDOM(src).window.document;
   for (const [options, expected] of [[undefined, padded], [{ pad: false }, compact]]) {
-    const result = importTable(src, options);
+    const result = doc ? importHtmlTable(doc, options) : importTable(src, options);
     assert.ok(result);
     assert.equal(result.format, format);
     assert.equal(result.markdown, expected);
-    assert.deepEqual(Array.from(result.warnings, w => [w.line, w.message]), warnings);
+    assert.deepEqual(Array.from(result.warnings, w => [doc ? w.row : w.line, w.message]), warnings);
     const dom = JSDOM.fragment(renderHtml(result.markdown));
     assert.equal(dom.querySelectorAll('table').length, 1);
     assert.deepEqual(Array.from(dom.querySelectorAll('thead th'), el => el.getAttribute('align')), align);
@@ -200,4 +201,139 @@ test('ordinary prose, a single tab and incomplete quoted CSV are not tables', ()
   for (const text of ['', 'R&D', 'A & B\ncontinued', 'A\tB', '\t', 'a,b', 'A,B\n"unfinished,1']) {
     assert.equal(importTable(text), null, JSON.stringify(text));
   }
+});
+
+test('Google Sheets uses visible cell text, inline alignment and formatted numeric body cells', () => {
+  check(`<google-sheets-html-origin><table><colgroup><col width="90"><col width="75"></colgroup>
+    <tbody><tr><td style="text-align:center" data-sheets-value='{"1":2,"2":"Model"}'>Model</td><td>AP</td></tr>
+    <tr><td style="font-weight:600">Ours</td><td style="font-weight:700" data-sheets-value='{"1":3,"3":0.92}'>92%</td></tr>
+    <tr><td>Base</td><td>81%</td></tr></tbody></table></google-sheets-html-origin>`, {
+    format: 'html',
+    compact: '|Model|AP|\n|:-:|-:|\n|**Ours**|**92%**|\n|Base|81%|',
+    padded: '| Model    | AP      |\n| :-:      | -:      |\n| **Ours** | **92%** |\n| Base     | 81%     |',
+    cells: [['Model', 'AP'], ['Ours', '92%'], ['Base', '81%']],
+    align: ['center', 'right'], tags: { strong: ['Ours', '92%'] },
+  });
+});
+
+test('Google Docs normal weights cancel bold and nested inline styles survive its wrappers', () => {
+  check(`<b style="font-weight:normal;" id="docs-internal-guid-123"><table>
+    <tr><td>Name</td><td>Note</td></tr>
+    <tr><td><span style="font-weight:700">Our<span>s</span> <span style="font-weight:400">only</span></span></td>
+    <td><span style="font-style:italic"> best </span><strong style="font-weight:normal">fit</strong><i></i><b> </b></td></tr>
+    </table></b>`, {
+    format: 'html',
+    compact: '|Name|Note|\n|:-|:-|\n|**Ours** only|*best* fit|',
+    padded: '| Name          | Note       |\n| :-            | :-         |\n| **Ours** only | *best* fit |',
+    cells: [['Name', 'Note'], ['Ours only', 'best fit']], align: ['left', 'left'],
+    tags: { strong: ['Ours'], em: ['best'] },
+  });
+});
+
+test('Word table paragraphs, conditional comments and nested spans keep the visible formatting', () => {
+  check(`<table class="MsoTableGrid"><tr style="text-align:center"><td align="left">Method</td><td>Note</td></tr>
+    <tr><td><p class="MsoNormal"><b><span lang="EN-US">Our</span> net</b></p></td>
+    <td><p class="MsoNormal"><!--[if !supportLists]><span>1.</span><![endif]-->First</p>
+    <div>second</div><ul><li>last <em>one</em></li></ul></td></tr></table>`, {
+    format: 'html',
+    compact: '|Method|Note|\n|:-|:-:|\n|**Our net**|First second last *one*|',
+    padded: '| Method      | Note                    |\n| :-          | :-:                     |\n' +
+      '| **Our net** | First second last *one* |',
+    cells: [['Method', 'Note'], ['Our net', 'First second last one']], align: ['left', 'center'],
+    tags: { strong: ['Our net'], em: ['one'] },
+  });
+});
+
+test('Excel clipboard fragment markers and stylesheet classes contribute no content or formatting', () => {
+  check(`<html><head><style>.xl65 { font-weight:700; text-align:center }</style></head>
+    <body><!--StartFragment--><table><tr><td class="xl65">Model</td><td class="xl65">Score</td></tr>
+    <tr><td class="xl65">Base<img src="/ignored.png" alt="icon"><style>.x{}</style><script>ignore()</script></td>
+    <td class="xl65">9.5</td></tr></table><!--EndFragment--></body></html>`, {
+    format: 'html', compact: '|Model|Score|\n|:-|-:|\n|Base|9.5|',
+    padded: '| Model | Score |\n| :-    | -:    |\n| Base  | 9.5   |',
+    cells: [['Model', 'Score'], ['Base', '9.5']], align: ['left', 'right'], tags: { strong: [], img: [] },
+  });
+});
+
+test('web table spans occupy their grid, merged headers share one row, and literal punctuation stays visible', () => {
+  check(`<table><thead><tr><td rowspan="2">Model</td><td colspan="2">Measures</td></tr>
+    <tr><td>AP</td><td>Note</td></tr></thead><tbody>
+    <tr><td rowspan="2">Base<br>net</td><td>10<sup>2</sup></td><td><a href="/paper">Read</a> | $5 * _</td></tr>
+    <tr><td>8</td><td><a href="/again">Again</a></td></tr></tbody></table>`, {
+    format: 'html',
+    compact: raw`|Model|Measures AP|Note|
+|:-|-:|:-|
+|Base net|10$^{2}$|Read \| \\$5 \* \_|
+||8|Again|`,
+    padded: raw`| Model    | Measures AP | Note               |
+| :-       | -:          | :-                 |
+| Base net | 10$^{2}$    | Read \| \\$5 \* \_ |
+|          | 8           | Again              |`,
+    cells: [['Model', 'Measures AP', 'Note'], ['Base net', '10$^{2}$', raw`Read | \$5 * _`], ['', '8', 'Again']],
+    align: ['left', 'right', 'left'], math: ['I:^{2}'], tags: { a: [] },
+    warnings: [[1, 'Flattened merged cells into ordinary cells.'], [1, 'Flattened merged cells into ordinary cells.'],
+      [1, 'Joined 2 header rows into one.'], [3, 'Kept link text only (venues often forbid links).']],
+  });
+});
+
+test('leading th rows combine, code stays literal and only simple short sub/sup text becomes math', () => {
+  check(`<table><tr><th>Group</th><th>Text</th></tr><tr><th>A</th><th>B</th></tr>
+    <tr><th>x<sub>i+1</sub></th><td><code>*x*</code> <sup>see note</sup></td></tr></table>`, {
+    format: 'html', compact: '|Group A|Text B|\n|:-|:-|\n|x$_{i+1}$|`*x*` see note|',
+    padded: '| Group A   | Text B         |\n| :-        | :-             |\n| x$_{i+1}$ | `*x*` see note |',
+    cells: [['Group A', 'Text B'], ['x$_{i+1}$', '*x* see note']], align: ['left', 'left'],
+    math: ['I:_{i+1}'], tags: { code: ['*x*'] },
+    warnings: [[1, 'Joined 2 header rows into one.'], [3, 'Kept complex superscript as text.']],
+  });
+});
+
+test('the first qualifying table wins, including inside a one-cell layout table', () => {
+  const good = '<table><tr><td>A</td><td>B</td></tr><tr><td>x</td><td>1</td></tr></table>';
+  const doc = new JSDOM('<table><tr><td>' + good + '</td></tr></table>' + good.replace('A', 'C')).window.document;
+  assert.equal(importHtmlTable(doc, { pad: false }).markdown, '|A|B|\n|:-|-:|\n|x|1|');
+});
+
+test('link labels that look like URLs or email addresses stay literal', () => {
+  const doc = new JSDOM('<table><tr><td>A<td>B<tr><td><a href="/x">https://WWW.example.org</a>' +
+    '<td><a href="/y">mail@example.org</a></table>').window.document;
+  const result = importHtmlTable(doc);
+  const fragment = JSDOM.fragment(renderHtml(result.markdown));
+  assert.deepEqual(Array.from(fragment.querySelectorAll('td'), el => el.textContent), ['https://WWW.example.org', 'mail@example.org']);
+  assert.equal(fragment.querySelector('a'), null);
+  assert.deepEqual(Array.from(result.warnings, w => w.row), [2]);
+});
+
+test('adjacent and nested emphasis and significance stars stay with the characters they format', () => {
+  const doc = new JSDOM('<table><tr><td>A<td>B<tr><td><b>A<i>B</i></b><i>C</i>' +
+    '<td>a<b>!</b>b <b>95%*</b></table>').window.document;
+  const result = importHtmlTable(doc);
+  const [a, b] = JSDOM.fragment(renderHtml(result.markdown)).querySelectorAll('td');
+  assert.equal(a.textContent, 'ABC');
+  assert.equal(a.querySelector('strong').textContent, 'AB');
+  assert.deepEqual(Array.from(a.querySelectorAll('em'), el => el.textContent), ['B', 'C']);
+  assert.equal(b.textContent, 'a!b 95%*');
+  assert.deepEqual(Array.from(b.querySelectorAll('strong'), el => el.textContent), ['!', '95%*']);
+  doc.querySelectorAll('td')[2].innerHTML = '<strong><em>both</em></strong>';
+  assert.match(importHtmlTable(doc, { pad: false }).markdown, /\|\*\*\*both\*\*\*\|/);
+});
+
+test('long, punctuated and nested scripts keep their text with a warning', () => {
+  const long = 'x'.repeat(33);
+  const doc = new JSDOM('<table><tr><td>A<td>B<tr><td>n<sub>' + long + '</sub> <sup>x/y</sup>' +
+    '<td>x<sup>H<sub>2</sub></sup> <code>a</code></table>').window.document;
+  const result = importHtmlTable(doc, { pad: false });
+  assert.equal(result.markdown, '|A|B|\n|:-|:-|\n|n' + long + ' x/y|xH2 `a`|');
+  assert.deepEqual(Array.from(result.warnings, w => [w.row, w.message]), [
+    [2, 'Kept complex subscript as text.'], [2, 'Kept complex superscript as text.'],
+  ]);
+});
+
+test('malformed fragments and inputs without a two-dimensional table are safe to ignore', () => {
+  for (const src of ['', '<table', 'no table', '<table><td>a<td>b', '<table><tr><td>A<tr><td>B',
+      '<table><tr><td colspan="999999999">layout</td></tr><tr><td>footer</td></tr>']) {
+    assert.equal(importHtmlTable(new JSDOM(src).window.document), null, src);
+  }
+  for (const input of [null, undefined, 1, '', {}]) assert.equal(readHtmlTable(input), null);
+  const repaired = new JSDOM('<table><td rowspan="oops">A<td>B<tr><td colspan="-7">C<td>D').window.document;
+  assert.equal(importHtmlTable(repaired, { pad: false }).markdown, '|A|B|\n|:-|:-|\n|C|D|');
 });

@@ -361,6 +361,71 @@ try {
     }
     return true;`);
 
+  const htmlPaste = `
+    const plain = 'Models and scores';
+    const html = '<table><tr><td>Model</td><td>Score</td></tr>' +
+      '<tr><td><a href="#base"><b>Base</b></a></td><td>8</td></tr></table>';
+    const note = document.getElementById('tableHtmlNote');
+    const paste = (field, markup = html, text = plain) => {
+      const data = new DataTransfer();
+      data.setData('text/plain', text);
+      data.setData('text/html', markup);
+      if (field.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, cancelable: true }))) {
+        document.execCommand('insertText', false, text);
+      }
+    };`;
+  await check('an HTML clipboard table offers conversion on its exact range with one undo', htmlPaste + `
+    setSourceText('before X after', 7, 8);
+    paste(ta);
+    const original = 'before ' + plain + ' after';
+    if (ta.value !== original || tableOffer.hidden) return 'missing native paste or HTML offer';
+    ta.setSelectionRange(0, 0);
+    document.getElementById('convertPaste').click();
+    try {
+      if (!tableDialog.open || tableInput.value !== plain || !note?.getClientRects().length ||
+          !tableWarnings.textContent.includes('Row 2:')) return 'missing clipboard text, HTML note or row warning';
+      if (tablePad.checked) tablePad.click();
+      insertTableBtn.click(); await wait(100);
+      if (ta.value !== 'before \\n\\n|Model|Score|\\n|:-|-:|\\n|**Base**|8|\\n\\n after' || !tableOffer.hidden) return ta.value;
+      ta.focus(); document.execCommand('undo');
+      return ta.value === original || ta.value;
+    } finally { if (tableDialog.open) tableDialog.close(); }`);
+
+  await check('pasting HTML in Import table uses its formatting until the plain text changes', htmlPaste + `
+    document.getElementById('importTableBtn').click();
+    try {
+      tableInput.focus();
+      paste(tableInput);
+      if (tableInput.value !== plain || !note?.getClientRects().length || insertTableBtn.disabled ||
+          !tableResult.markdown.includes('**Base**')) return 'missing HTML conversion in the dialog';
+      tablePad.click();
+      if (note.hidden || !tableResult.markdown.includes('**Base**')) return 'padding lost the HTML';
+      tableInput.select(); document.execCommand('insertText', false, 'A,B\\nx,1');
+      if (!note.hidden || tableResult?.format !== 'csv' || tableResult.markdown.includes('Base')) return 'stale HTML';
+      tableInput.setSelectionRange(0, 0); paste(tableInput);
+      return note.hidden && tableInput.value === plain + 'A,B\\nx,1' && tableResult?.format === 'csv' ||
+        'partial paste discarded the surrounding text';
+    } finally { tableDialog.close(); }`);
+
+  await check('one-row, one-column and one-cell HTML tables leave the paste alone', htmlPaste + `
+    for (const rows of ['<tr><td>x</td><td>y</td></tr>', '<tr><td>x</td></tr><tr><td>y</td></tr>',
+        '<tr><td>layout</td></tr>']) {
+      setSourceText('Intro', 5); paste(ta, '<table>' + rows + '</table>');
+      if (!tableOffer.hidden || ta.value !== 'Intro' + plain) return rows;
+    }
+    return true;`);
+
+  await check('an HTML-only clipboard can offer a table without replacing selected editor text', htmlPaste + `
+    setSourceText('Keep this', 0, 4);
+    const data = new DataTransfer(); data.setData('text/html', html);
+    ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, cancelable: true }));
+    if (tableOffer.hidden || ta.value !== 'Keep this') return 'missing HTML-only offer';
+    document.getElementById('convertPaste').click();
+    try {
+      return tableDialog.open && tableInput.value === '' && !note.hidden && tableResult?.format === 'html' ||
+        'missing HTML-only preview';
+    } finally { if (tableDialog.open) tableDialog.close(); }`);
+
   await check('math compaction becomes available when MathJax is ready, even for a cached draft', `
     const src = '$ x + \\\\frac{1}{2} $';
     setSourceText(src, 0);
@@ -941,6 +1006,168 @@ try {
     closeSplit(); splitLabelBox.checked = true;
     limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
     return parts.length === 1 && parts[0] === src.trim() || { parts };`);
+
+  await check('Sections lists the parts of a draft with their counts, and a click goes to one', `
+    const was = ta.value;
+    setSourceText('Thanks.\\n\\n## Reviewer A\\n\\n**W1.** One.\\n\\n**W2.** Two.\\n\\n## Reviewer B\\n\\nB.', 0); updateAll();
+    sectionsBox.open = true; await wait(50);
+    const rows = [...sectionsList.querySelectorAll('.section')];
+    const names = rows.map((b) => b.querySelector('.name').textContent), levels = rows.map((b) => b.style.getPropertyValue('--level').trim());
+    rows[3].click(); await wait(50);
+    const at = ta.selectionStart, want = ta.value.indexOf('**W2.**'), sum = sectionsSum.textContent;
+    const gain = rows[1].querySelector('.gain').textContent;
+    sectionsBox.open = false;
+    setSourceText(was, 0); saveDraftNow(); updateAll();
+    return names.join('|') === 'Opening|Reviewer A|W1. One.|W2. Two.|Reviewer B' && levels.join('') === '00110' &&
+      sum === '5 parts' && at === want && /^\\d+ · \\d+%$/.test(gain) || { names, levels, sum, at, want, gain };`);
+
+  await check('Wording lists filler phrases with their savings, and clicks go to each use in turn', `
+    const was = ta.value;
+    setSourceText('In order to be brief: in order to fit. We would like to thank you.\\n\\n\`in order to\`', 0); updateAll();
+    wordingBox.open = true; await wait(50);
+    const rows = [...wordingList.querySelectorAll('[data-hint]')].map((b) => b.textContent);
+    const row = [...wordingList.querySelectorAll('[data-hint]')].find((b) => /in order to/i.test(b.textContent));
+    ta.setSelectionRange(0, 0);
+    row.click(); await wait(30); const first = [ta.selectionStart, ta.selectionEnd];
+    row.click(); await wait(30); const second = [ta.selectionStart, ta.selectionEnd];
+    row.click(); await wait(30); const third = ta.selectionStart; /* back to the first: code is not prose */
+    const sum = wordingSum.textContent, unchanged = ta.value.indexOf('In order to be brief') === 0;
+    wordingBox.open = false;
+    setSourceText(was, 0); saveDraftNow(); updateAll();
+    return rows.length === 2 && /×2 · −18$/.test(row.textContent) && first[0] === 0 && first[1] === 11 &&
+      second[0] === 22 && third === 0 && /^about \\d+ to save$/.test(sum) && unchanged || { rows, first, second, third, sum };`);
+
+  await check('the spellcheck switch reaches the editor and survives a draft switch', `
+    const was = ta.spellcheck;
+    spellBox.click(); await wait(30);
+    const on = ta.spellcheck === true && prefs.spellcheck === true;
+    const origId = draftMeta.active;
+    document.querySelector('#draftTools .dadd').click(); await wait(50); /* a fresh editor */
+    const kept = ta.spellcheck === true;
+    window.confirm = () => true; deleteDraft(draftMeta.active); switchDraft(origId); await wait(50);
+    spellBox.click(); await wait(30);
+    return !was && on && kept && ta.spellcheck === false || { was, on, kept, now: ta.spellcheck };`);
+
+  await check('find and replace: Ctrl+F from a selection, Enter to step, boxes over the matches, one undo for Replace all', `
+    const was = ta.value;
+    setSourceText('alpha beta alpha gamma Alpha', 0, 5); updateAll();
+    ta.focus(); ta.setSelectionRange(0, 5);
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }));
+    const opened = !findBar.hidden && findInput.value === 'alpha' && document.activeElement === findInput;
+    const first = findCount.textContent; /* the selection is a match: 1 of 3 */
+    findInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    const second = [ta.selectionStart, ta.selectionEnd, findCount.textContent];
+    const boxes = findMarks.querySelectorAll('span').length, cur = findMarks.querySelectorAll('span.cur').length;
+    findCase.click(); const caseCount = findCount.textContent; findCase.click();
+    replaceInput.value = 'omega';
+    document.getElementById('replaceOne').click(); await wait(30);
+    const one = ta.value;
+    document.getElementById('replaceAll').click(); await wait(30);
+    const all = ta.value;
+    ta.focus(); document.execCommand('undo'); await wait(30);
+    const undone = ta.value;
+    findInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    const closed = findBar.hidden && document.activeElement === ta && !findMarks.children.length;
+    findInput.value = ''; replaceInput.value = '';
+    setSourceText(was, 0); saveDraftNow(); updateAll();
+    return opened && first === '1 of 3' && second[0] === 11 && second[1] === 16 && second[2] === '2 of 3' &&
+      boxes === 3 && cur === 1 && caseCount === '2 of 2' && one === 'alpha beta omega gamma Alpha' &&
+      all === 'omega beta omega gamma omega' && undone === one && closed ||
+      { opened, first, second, boxes, cur, caseCount, one, all, undone, closed };`);
+
+  await check('a double-click in the preview selects the same word, or the same formula, in the source', `
+    const was = ta.value;
+    setSourceText('Here is one.\\n\\nThen here and here, with $x$ and $y^2$.', 0); updateAll(); renderPreview();
+    for (let i = 0; i < 50 && preview.querySelectorAll('mjx-container').length < 2; i++) await wait(100);
+    const p = preview.children[1], text = [...p.childNodes].find((n) => n.nodeType === 3 && /and here/.test(n.nodeValue));
+    const at = text.nodeValue.indexOf('here', text.nodeValue.indexOf('here') + 1);
+    const r = document.createRange(); r.setStart(text, at); r.setEnd(text, at + 4);
+    getSelection().removeAllRanges(); getSelection().addRange(r);
+    p.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    const word = [ta.selectionStart, ta.selectionEnd], want = ta.value.lastIndexOf('here');
+    const math = p.querySelectorAll('mjx-container')[1];
+    math.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    const formula = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+    setSourceText(was, 0); saveDraftNow(); updateAll(); renderPreview();
+    return word[0] === want && word[1] === want + 4 && formula === '$y^2$' && document.activeElement === ta ||
+      { word, want, formula };`);
+
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 640, deviceScaleFactor: 1, mobile: false }, sessionId);
+  await check('in a short window the hazards and Fix all stay in view, and an open panel shows its content', `
+    const was = ta.value;
+    setSourceText(EXAMPLE, 0); updateAll(); await wait(100);
+    const lint = document.querySelector('.lint').getBoundingClientRect();
+    const fb = fixAllBtn.getBoundingClientRect();
+    const hit = document.elementFromPoint(fb.left + fb.width / 2, fb.top + fb.height / 2);
+    compactBox.open = true; await wait(100);
+    const body = compactBox.querySelector('.compact-body').getBoundingClientRect(), box = compactBox.getBoundingClientRect();
+    const shown = Math.min(body.bottom, box.bottom) - body.top;
+    compactBox.open = false;
+    setSourceText(was, 0); saveDraftNow(); updateAll();
+    return lint.height >= 60 && hit === fixAllBtn && shown >= 40 || { lint: lint.height, hit: hit && hit.outerHTML.slice(0, 60), shown };`);
+  await send('Emulation.clearDeviceMetricsOverride', {}, sessionId);
+
+  await check('Replace all that changes nothing says so and offers no undo', `
+    const was = ta.value;
+    setSourceText('Our method works.', 0); updateAll();
+    openFind(false); findInput.value = 'method'; findInput.dispatchEvent(new Event('input')); replaceInput.value = 'method';
+    document.getElementById('replaceAll').click(); await wait(30);
+    const msg = toast.textContent, same = ta.value === 'Our method works.';
+    closeFind(); findInput.value = ''; replaceInput.value = '';
+    setSourceText(was, 0); saveDraftNow(); updateAll();
+    return same && /^No changes/.test(msg) && !/undo/i.test(msg) || { msg, value: ta.value };`);
+
+  await check('find boxes follow the text when the editor font size changes', `
+    const was = ta.value;
+    setSourceText('Calibration took place before the final experiment. NEEDLE then more.', 0); updateAll();
+    openFind(false); findInput.value = 'NEEDLE'; findInput.dispatchEvent(new Event('input')); await wait(50);
+    const at = () => { const b = findMarks.querySelector('span'); return b && b.style.left + ',' + b.style.top; };
+    const plus = document.querySelector('.fs-ctl button[data-fs="fsEditor"][data-dir="1"]');
+    const minus = document.querySelector('.fs-ctl button[data-fs="fsEditor"][data-dir="-1"]');
+    const before = at(); plus.click(); plus.click(); await wait(50);
+    const after = at(); refreshFind(); const fresh = at();
+    minus.click(); minus.click(); closeFind(); findInput.value = '';
+    setSourceText(was, 0); saveDraftNow(); updateAll();
+    return before !== after && after === fresh || { before, after, fresh };`);
+
+  await check('a double-click selects the visible word, not one in a formula, a link address, or one Markdown emphasizes', `
+    const was = ta.value, out = [];
+    for (const [src, word, nth, want] of [
+      ['Given $loss$, we report loss again.', 'loss', 0, 24],
+      ['See [the logs](https://example.org/logs). The logs agree.', 'logs', 1, 46],
+      ['The _ablated_ model was ablated again.', 'ablated', 0, 5],
+      ['We report \\u201caccuracy\\u201d here.', 'accuracy', 0, 11],
+    ]) {
+      setSourceText(src, 0); updateAll(); renderPreview();
+      for (let i = 0; i < 40 && previewText !== ta.value; i++) await wait(50);
+      await wait(300);
+      const p = preview.children[0], walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT), nodes = [];
+      let node, seen = 0, done = false;
+      while (!done && (node = walker.nextNode())) {
+        if (node.parentNode.closest('mjx-container')) continue;
+        let k = -1;
+        while ((k = node.nodeValue.indexOf(word, k + 1)) >= 0) {
+          if (seen++ === nth) {
+            const r = document.createRange(); r.setStart(node, k); r.setEnd(node, k + word.length);
+            getSelection().removeAllRanges(); getSelection().addRange(r); done = true; break;
+          }
+        }
+      }
+      p.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      out.push([ta.selectionStart, ta.selectionEnd, want]);
+    }
+    setSourceText(was, 0); saveDraftNow(); updateAll(); renderPreview();
+    return out.every(([s, e, want]) => s === want && e > s) || out;`);
+
+  await check('Sections and Wording read the comment as posted, with an indented first line', `
+    const was = ta.value;
+    setSourceText('    ## Reviewer A\\n\\nW1: First\\n\\n## Reviewer B\\n\\nW1: Next', 0); updateAll();
+    const rows = [...sectionsList.querySelectorAll('.section')].map((b) => b.querySelector('.name').textContent + ':' + b.style.getPropertyValue('--level').trim());
+    const first = sectionsList.querySelector('.section');
+    first.click(); await wait(30);
+    const at = ta.selectionStart;
+    setSourceText(was, 0); saveDraftNow(); updateAll();
+    return rows.join('|') === 'Reviewer A:0|W1: First:1|Reviewer B:0|W1: Next:1' && at === 4 || { rows, at };`);
 
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',

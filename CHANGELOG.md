@@ -1,5 +1,53 @@
 # Changelog
 
+## 3.7.0 (unreleased)
+
+### Tables pasted from Word, Google Docs and web pages
+
+- Copy a table from Word, Google Docs, Sheets, Excel, or a web page and paste it into the
+  editor. Choose *Convert* to preview the Markdown. Bold, italics, and alignment carry over
+  when the clipboard includes them as tags or inline styles. Merged cells become ordinary
+  cells, and warnings point to the affected rows.
+- You can also paste directly into *Import table*. Editing the text there switches the preview
+  to your edited version. One undo after insertion brings back the original editor text.
+
+### Sections and wording
+- *Sections* (under the hazards) lists the parts of a draft with the length of each, counted
+  like the limit, and its share of the comment: a heading starts a part, and so does a
+  paragraph, list item or quote that opens with a label such as `**W1.**`, `**Q2:**` or `W3:`.
+  Points are listed under their heading, so a combined answer to several reviewers shows each
+  reviewer's total and each point's. Click a part to go to it.
+- *Wording* suggests shorter ways to say the same, with what each would save: filler phrases
+  (*in order to* for *to*, *due to the fact that* for *because*, *We would like to thank* for
+  *We thank*) and long names used three times or more, which an abbreviation would shorten
+  (*Contrastive Language-Image Pre-training*, four times, as *CLIP*). It is advice only and
+  never changes the text; code, math, quotes and link addresses are left out. Click a phrase to
+  go to it, and again for its next use.
+
+### Editing
+- *Find* (or Ctrl+F, ⌘F in the editor) searches the source, with a match-case switch, and
+  replaces one match at a time or all of them; one undo takes back *Replace all*, which also
+  keeps a version in History. The matches are highlighted in the editor while you type in the
+  find field.
+- Double-click a word or a formula in the preview to select it in the source.
+- *Spellcheck* (beside *Find*) turns on the browser's spellchecker in the editor. It is off by
+  default, since TeX and Markdown are full of words it does not know.
+- With several panels open under the editor, the editor keeps at least 30% of the pane, the
+  hazards their header and a card, and an open panel some of its content; the panels share the
+  rest, each scrolling on its own, and only a window too short for all of that scrolls the pane.
+- A Codex review of these features found eight problems before release, all fixed: the layout
+  could hide the hazards in a short window, a *Replace all* that changed nothing offered an undo,
+  a double-click could select a word inside a formula or a link's address, find's highlights
+  stayed put after a font-size change, an indented first line made *Sections* and *Wording*
+  read the comment differently from the preview, *Wording* could flag code in a list indented
+  with tabs, *Sections* took a bold sentence subject for a point, and two filler rules could
+  change the meaning (*would like to* is now only suggested before *thank*, *clarify* and the
+  like, and *whether or not* is no longer flagged).
+
+### Project
+- `tests/sections.test.js`, `tests/wording.test.js` and `tests/editing.test.js`, and HTML tables
+  in `tests/table-import.test.js` (Codex). Fourteen new smoke checks.
+
 ## 3.6.0 (2026-11-25)
 
 ### Import

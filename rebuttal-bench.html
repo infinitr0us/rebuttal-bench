@@ -413,7 +413,47 @@ window.MathJax = {
   .dtab:focus-visible, .dtool:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .dclose:hover { border-color: var(--err); color: var(--err); }
   .dadd { border-style: dashed; }
-  .dpanel { display: contents; }
+  /* A box of its own (it was display: contents) so find's highlights can sit over the editor. */
+  .dpanel { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: max(110px, 30%); }
+  /* The source pane scrolls only when the editor's floor, the hazards' and
+     the open panels' minimums do not fit (a short window). */
+  main > .pane:first-child { overflow-y: auto; }
+
+  .pane-tools { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+  .pane-tools label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+  .pane-tools input { margin: 0; accent-color: var(--accent); }
+
+  /* find and replace */
+  .findbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 18px;
+    background: var(--head-bg);
+    border-top: 1px solid var(--line);
+    font-size: 12px;
+  }
+  .findbar[hidden] { display: none; }
+  .findbar button { padding: 2px 8px; font-size: 12px; }
+  .findbar input[type="text"] {
+    flex: 1 1 110px;
+    min-width: 80px;
+    font: inherit;
+    font-family: var(--mono);
+    padding: 3px 6px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--editor-bg);
+    color: var(--text);
+  }
+  .findbar .findcount { min-width: 56px; font-family: var(--mono); font-size: 11px; color: var(--dim); }
+  .findbar .findcount.none { color: var(--err); }
+  .findbar label { display: inline-flex; align-items: center; gap: 3px; color: var(--dim); cursor: pointer; }
+  .findbar .modal-x { padding: 0 4px; }
+  .findmarks { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
+  .findmarks span { position: absolute; border-radius: 2px; background: rgba(255, 200, 0, 0.28); }
+  .findmarks span.cur { background: rgba(255, 140, 0, 0.5); outline: 1px solid rgba(200, 100, 0, 0.8); }
 
   /* editor */
   #src {
@@ -438,6 +478,7 @@ window.MathJax = {
   .lint {
     flex: 0 1 auto;
     max-height: 42%;
+    min-height: min(7em, 42%); /* its header and a card stay in view */
     overflow-y: auto;
     border-top: 1px solid var(--line);
     background: var(--bg);
@@ -563,12 +604,17 @@ window.MathJax = {
     color: var(--text);
   }
 
-  /* compaction */
+  /* compaction, wording, sections: with several open, they share the room
+     the editor leaves (it keeps a third of the pane) and scroll */
   .compact {
+    flex: 0 2 auto; /* they give way before the hazards do */
+    min-height: 2.4em;
+    overflow-y: auto;
     border-top: 1px solid var(--line);
     background: var(--head-bg);
     font-size: 12.5px;
   }
+  .compact[open] { min-height: 8em; } /* an open panel shows some of its content */
   .compact-sum { margin-left: 6px; color: var(--ok); text-transform: none; letter-spacing: 0.02em; }
   .compact-sum.zero { color: var(--dim); }
   .compact-body { max-height: 200px; overflow-y: auto; padding: 0 18px 10px; }
@@ -589,6 +635,27 @@ window.MathJax = {
   }
   .compact-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
   #compactFoot { font-size: 11.5px; color: var(--dim); }
+
+  /* sections: one row per part, indented under its heading */
+  .section {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 1px 0 1px calc(var(--level, 0) * 14px);
+    border: none;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .section:hover .name, .section:focus-visible .name { text-decoration: underline; }
+  .section .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .section .name.opening { color: var(--dim); font-style: italic; }
+  .section .bar { flex: none; width: 56px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .section .bar span { display: block; height: 100%; background: var(--accent); }
+  .section .gain { font-family: var(--mono); font-size: 11.5px; color: var(--dim); white-space: nowrap; }
 
   /* dialogs */
   .modal {
@@ -856,7 +923,7 @@ window.MathJax = {
   }
 
   @media (max-width: 920px) {
-    main { grid-template-columns: 1fr; grid-template-rows: minmax(45vh, 1fr) 1px minmax(45vh, 1fr); }
+    main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(45vh, 1fr) 1px minmax(45vh, 1fr); }
     #mjStatus { margin-left: 0; }
     .lint { max-height: 34%; }
   }
@@ -907,14 +974,26 @@ window.MathJax = {
 
 <main>
   <section class="pane" aria-label="Source editor">
-    <div class="pane-head"><h2>Source</h2><span class="hint">exactly what you'll paste into OpenReview, or its compact form</span></div>
+    <div class="pane-head"><h2>Source</h2><span class="hint">exactly what you'll paste into OpenReview, or its compact form</span>
+      <span class="pane-tools"><button type="button" id="findBtn" title="Find and replace in the source (Ctrl+F in the editor)">Find</button><label title="Underline misspelled words in the editor, with the browser’s spellchecker"><input type="checkbox" id="spellBox"> Spellcheck</label></span></div>
     <div class="drafts" id="draftBar"><div class="dtabs" id="draftTabs" role="tablist" aria-label="Drafts"></div><div class="dtools" id="draftTools"></div></div>
     <div id="tableOffer" hidden>
       Convert the pasted table to Markdown?
       <button id="convertPaste" type="button" aria-haspopup="dialog" aria-controls="tableDialog">Convert</button>
       <button id="dismissPaste" type="button">Dismiss</button>
     </div>
-    <div id="draftPanel" class="dpanel" role="tabpanel"><textarea id="src" spellcheck="false" placeholder="Type or paste your rebuttal…"></textarea></div>
+    <div id="findBar" class="findbar" hidden role="search" aria-label="Find and replace in the source">
+      <input id="findInput" type="text" placeholder="Find" aria-label="Find" spellcheck="false" autocomplete="off">
+      <span id="findCount" class="findcount" aria-live="polite"></span>
+      <button type="button" id="findPrev" title="Previous match (Shift+Enter)" aria-label="Previous match">↑</button>
+      <button type="button" id="findNext" title="Next match (Enter)" aria-label="Next match">↓</button>
+      <label title="Match upper and lower case exactly"><input type="checkbox" id="findCase"> Aa</label>
+      <input id="replaceInput" type="text" placeholder="Replace with" aria-label="Replace with" spellcheck="false" autocomplete="off">
+      <button type="button" id="replaceOne" title="Replace this match, then go to the next (Enter in the field)">Replace</button>
+      <button type="button" id="replaceAll" title="Replace every match; one undo brings the text back">Replace all</button>
+      <button type="button" id="findClose" class="modal-x" title="Close (Escape)" aria-label="Close find and replace">×</button>
+    </div>
+    <div id="draftPanel" class="dpanel" role="tabpanel"><div id="findMarks" class="findmarks" aria-hidden="true"></div><textarea id="src" spellcheck="false" placeholder="Type or paste your rebuttal…"></textarea></div>
     <div class="lint">
       <div class="lint-head"><span>Hazards</span> <span id="lintCount" class="zero">0</span><button type="button" id="fixAllBtn" hidden title="Rewrite every hazard that has a mechanical fix. One Ctrl+Z undoes the whole pass.">Fix all</button></div>
       <div id="lintList"></div>
@@ -929,6 +1008,20 @@ window.MathJax = {
           <button type="button" id="splitBtn" title="Cut this draft into several comments under the limit, where the venue allows several">Split into comments…</button>
           <span id="compactFoot"></span>
         </div>
+      </div>
+    </details>
+    <details class="compact" id="wordingBox">
+      <summary>Wording <span id="wordingSum" class="compact-sum zero"></span></summary>
+      <div class="compact-body">
+        <p class="compact-note">Shorter ways to say the same, for a draft over the limit. Advice only: nothing here changes your text, and some phrases are worth their length. Click a phrase to go to it, and again for its next use.</p>
+        <div id="wordingList"></div>
+      </div>
+    </details>
+    <details class="compact" id="sectionsBox">
+      <summary>Sections <span id="sectionsSum" class="compact-sum zero"></span></summary>
+      <div class="compact-body">
+        <p class="compact-note">The length of each part of this draft, counted like the limit. A heading starts a part, and so does a paragraph, list item or quote that opens with a label such as <b>**W1.**</b>, <b>**Q2:**</b> or <b>W3:</b>. Click a part to go to it.</p>
+        <div id="sectionsList"></div>
       </div>
     </details>
     <details class="cheat">
@@ -953,7 +1046,7 @@ window.MathJax = {
   <div class="divider" aria-hidden="true"></div>
 
   <section class="pane" aria-label="Rendered preview">
-    <div class="pane-head"><h2>Preview</h2><span class="hint">OpenReview's own note styles — 1:1 at 100%</span></div>
+    <div class="pane-head"><h2>Preview</h2><span class="hint">OpenReview's own note styles, 1:1 at 100%. Double-click to find a spot in the source.</span></div>
     <div class="scroller" id="scroller">
       <article class="paper" id="preview"><p class="empty">Nothing to preview yet.</p></article>
     </div>
@@ -989,7 +1082,7 @@ window.MathJax = {
       <h3 id="historyTitle">History</h3>
       <button type="button" class="modal-x" data-close aria-label="Close">×</button>
     </div>
-    <p class="modal-note">Earlier versions are kept before <em>Fix all</em>, <em>Apply to source</em>, <em>Clear</em>, <em>Load example</em> and a restore, and every 10 minutes while you edit: up to 20 per draft, in this browser only. When they take up too much room, or a draft needs the space, the oldest go first.</p>
+    <p class="modal-note">Earlier versions are kept before <em>Fix all</em>, <em>Apply to source</em>, <em>Replace all</em>, <em>Clear</em>, <em>Load example</em> and a restore, and every 10 minutes while you edit: up to 20 per draft, in this browser only. When they take up too much room, or a draft needs the space, the oldest go first.</p>
     <div id="historyList" class="split-parts"></div>
     <p class="modal-note">Drafts are kept in this browser only, and the online page and a downloaded copy of it each keep their own. Export them to keep a backup, or to copy them into another browser. Import adds the drafts of an exported file as new tabs, and never replaces or changes a draft.</p>
     <div class="modal-actions">
@@ -1006,8 +1099,9 @@ window.MathJax = {
 
 <dialog id="tableDialog" aria-labelledby="tableDialogTitle">
   <h2 id="tableDialogTitle">Import table</h2>
-  <label for="tableInput">Paste LaTeX, spreadsheet cells, or CSV</label>
+  <label for="tableInput">Paste a copied table, LaTeX, or CSV</label>
   <textarea id="tableInput" rows="5" spellcheck="false" autofocus></textarea>
+  <small id="tableHtmlNote" hidden>From the copied table's HTML (keeps bold, italics and merged cells)</small>
   <h3>OpenReview preview</h3>
   <div id="tablePreview" class="paper"></div>
   <ul id="tableWarnings" aria-live="polite"></ul>
@@ -3066,6 +3160,9 @@ function tableCode(text) {
   }).join('\\|');
 }
 
+var TABLE_NUMBER = '[+\\-−]?(?:(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d*)?|\\.\\d+)(?:e[+\\-]?\\d+)?';
+var TABLE_NUMERIC = new RegExp('^(?:±\\s*)?' + TABLE_NUMBER + '\\s*%?(?:\\s*±\\s*' + TABLE_NUMBER + '\\s*%?)?\\**$', 'i');
+
 function readSpreadsheet(text, sep) {
   var rows = [], cells = [], field = '', quoted = false, closed = false, line = 1, first = 1;
   for (var i = 0; i <= text.length; i++) {
@@ -3088,10 +3185,8 @@ function readSpreadsheet(text, sep) {
   }
   if (rows.length < 2 || rows[0].cells.length < 2 ||
       !rows.slice(1).some(function (row) { return row.cells.length > 1; })) return null;
-  var number = '[+\\-−]?(?:(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d*)?|\\.\\d+)(?:e[+\\-]?\\d+)?';
-  var numeric = new RegExp('^(?:±\\s*)?' + number + '\\s*%?(?:\\s*±\\s*' + number + '\\s*%?)?\\**$', 'i');
   var align = rows[0].cells.map(function (_, col) {
-    return rows.slice(1).every(function (row) { return numeric.test(row.cells[col] || ''); }) ? '-:' : ':-';
+    return rows.slice(1).every(function (row) { return TABLE_NUMERIC.test(row.cells[col] || ''); }) ? '-:' : ':-';
   });
   rows.forEach(function (row) { row.cells = row.cells.map(spreadsheetCell); });
   return { rows: rows, align: align, headers: 1, format: sep === '\t' ? 'tsv' : 'csv', warnings: [] };
@@ -3298,6 +3393,189 @@ function latexCellText(raw, at, span, warn, inArray, depth) {
   return out;
 }
 
+/* Only use tags, attributes and inline styles. Excel's class definitions can
+   live outside the clipboard fragment, and importing it must never load CSS. */
+function htmlTableStyle(el, inherited) {
+  var css = el.style || {}, weight = (css.fontWeight || '').toLowerCase();
+  var italic = (css.fontStyle || '').toLowerCase();
+  var bold = /^(b|strong)$/.test(el.localName) || (inherited & 1);
+  var em = /^(i|em)$/.test(el.localName) || (inherited & 2);
+  /* Docs puts a normal-weight style on its enclosing b, including when a
+     child span turns bold back on. Word often puts a plain span inside b. */
+  if (weight === 'normal' || /^\d+(?:\.\d+)?$/.test(weight)) bold = Number(weight) >= 600;
+  if (weight === 'bold') bold = true;
+  if (italic === 'normal' || italic === 'italic') em = italic === 'italic';
+  return (bold ? 1 : 0) + (em ? 2 : 0);
+}
+
+/* The plain pass inside code, subscripts and superscripts follows the same rules for
+   whitespace and ignored elements. The explicit stack also handles deeply
+   nested wrappers in a malformed clipboard fragment. */
+function walkTableCell(root, inherited, plain, emit, warn) {
+  var stack = [{ node: root, style: inherited }], plainText = true;
+  while (stack.length) {
+    var item = stack.pop(), node = item.node, style = item.style;
+    if (!node) { emit(' ', style); continue; }
+    if (node.nodeType === 3) { emit(node.nodeValue, style); continue; }
+    var tag = node.localName;
+    if (node.nodeType !== 1 || /^(img|script|style|colgroup|table|template)$/.test(tag)) continue;
+    if (plain && node !== root && (tag !== 'span' || htmlTableStyle(node, 0))) plainText = false;
+    if (tag === 'br') { emit(' ', style); continue; }
+    if (tag === 'a') warn('link', 'Kept link text only (venues often forbid links).');
+    style = plain ? 0 : htmlTableStyle(node, style);
+    if (!plain && /^(code|sub|sup)$/.test(tag)) {
+      var parts = [];
+      var simple = walkTableCell(node, 0, true, function (v) { parts.push(v); }, warn);
+      var value = parts.join('').replace(/\s+/g, ' ');
+      if (tag === 'code') emit(value, style, 'code');
+      else if (simple && /^[A-Za-z0-9+*-]{1,32}$/.test(value.trim())) emit(value, style, tag);
+      else if (value.trim()) {
+        warn(tag, 'Kept complex ' + (tag === 'sub' ? 'subscript' : 'superscript') + ' as text.');
+        emit(value, style);
+      } else emit(value, style);
+      continue;
+    }
+    if (/^(p|div|li)$/.test(tag)) {
+      emit(' ', style);
+      stack.push({ node: null, style: style });
+    }
+    for (var child = node.lastChild; child; child = child.previousSibling) {
+      stack.push({ node: child, style: style });
+    }
+  }
+  return plainText;
+}
+
+function htmlTableCell(cell, warn) {
+  var ancestors = [], style = 0, runs = [];
+  for (var el = cell.parentElement; el; el = el.parentElement) ancestors.push(el);
+  while (ancestors.length) style = htmlTableStyle(ancestors.pop(), style);
+  walkTableCell(cell, style, false, function (value, fmt, kind) {
+    if (!value) return;
+    var prev = runs[runs.length - 1];
+    if (!kind && prev && !prev.kind && prev.style === fmt) prev.value += value;
+    else runs.push({ value: value, style: fmt, kind: kind });
+  }, warn);
+  var out = '', plain = '', space = false, open = [];
+  var touchingStyles = runs.some(function (run, i) {
+    var prev = runs[i - 1];
+    return prev && prev.style && run.style && prev.style !== run.style &&
+      /\S$/.test(prev.value) && /^\S/.test(run.value);
+  });
+  function entity(ch) { return '&#' + ch.charCodeAt(0) + ';'; }
+  runs.forEach(function (run, index) {
+    var raw = run.value.replace(/\s+/g, ' '), text = raw.trim();
+    plain += raw;
+    if (!text) { if (raw) space = true; return; }
+    var value, closed = '', opened = '';
+    if (run.kind === 'code') value = tableCode(text);
+    else if (run.kind) value = '$' + (run.kind === 'sup' ? '^' : '_') + '{' + tableMath(text) + '}$';
+    else {
+      /* Clipboard links keep their visible label even when GFM would turn
+         that label back into a URL or email link. */
+      value = spreadsheetCell(text).replace(/(https?|ftp):\/\//gi, '$1&#58;//')
+        .replace(/(www)\./gi, '$1&#46;').replace(/@(?=[\w-]+\.)/g, '&#64;');
+      if (run.style || (runs[index + 1] && runs[index + 1].style)) {
+        value = value.replace(/(\d%?)(\*+)$/, function (_, n, stars) { return n + stars.replace(/\*/g, '\\*'); });
+      }
+    }
+    /* Close only the styles that end here. Spaces at a style boundary
+       belong between its delimiters so Markdown recognizes the emphasis. */
+    var gap = out && (space || raw[0] === ' ') ? ' ' : '';
+    while (open.length && (!(open[0].bit & run.style) || !(open[open.length - 1].bit & run.style))) {
+      closed += open.pop().mark;
+    }
+    /* When styled text touches, five adjacent stars can pair across several
+       runs. Alternate fences there, keeping ordinary nested emphasis in stars. */
+    var previous = open.length ? open[0].mark[0] : !gap && closed.slice(-1);
+    for (var bit = 1; bit <= 2; bit++) {
+      if (!(run.style & bit) || open.some(function (entry) { return entry.bit === bit; })) continue;
+      previous = touchingStyles && previous === '*' ? '_' : '*';
+      var mark = bit === 1 ? previous + previous : previous;
+      opened += mark;
+      open.push({ bit: bit, mark: mark });
+    }
+    if (!gap) {
+      /* In a word, a reference makes a punctuation-only emphasis run legal
+         and keeps Fix all from reading its stars as multiplication signs. */
+      if (opened) out = out.replace(/[a-z0-9]$/i, entity);
+      if (closed) value = value.replace(/^[a-z0-9]/i, entity);
+    }
+    out += closed + gap + opened + value;
+    space = raw[raw.length - 1] === ' ';
+  });
+  while (open.length) out += open.pop().mark;
+  return { markdown: out, numeric: TABLE_NUMERIC.test(plain.trim()) };
+}
+
+function readHtmlTable(doc) {
+  if (!doc || typeof doc.getElementsByTagName !== 'function') return null;
+  var tables = doc.getElementsByTagName('table');
+  for (var i = 0; i < tables.length; i++) {
+    if (!tables[i].rows || tables[i].rows.length < 2) continue;
+    var grid = htmlTableGrid(tables[i].rows);
+    if (grid) return grid;
+  }
+  return null;
+}
+
+function htmlTableGrid(trs) {
+  var rows = [], warnings = [], warned = {}, occupied = [], align = [], numbers = [];
+  var headers = 0, width = 0, group, r;
+  function warn(kind, message) {
+    if (!warned[kind]) warnings.push({ row: r + 1, message: message });
+    warned[kind] = true;
+  }
+  function span(cell, attr) {
+    var n = Number(cell.getAttribute(attr) || 1);
+    if (n === 0 && attr === 'rowspan') n = trs.length - r; /* Through the end of this row group. */
+    if (n > 1) warn(attr, 'Flattened merged cells into ordinary cells.');
+    return n > 1 && n <= 16384 && n === Math.floor(n) ? n : 1;
+  }
+  function alignment(el) {
+    var a = (el.style.textAlign || el.getAttribute('align') || '').toLowerCase();
+    return a === 'left' ? ':-' : a === 'right' ? '-:' : a === 'center' ? ':-:' : '';
+  }
+  while (headers < trs.length && trs[headers].parentNode.localName === 'thead') headers++;
+  if (!headers) {
+    while (headers < trs.length && trs[headers].cells.length &&
+        Array.prototype.every.call(trs[headers].cells, function (cell) { return cell.localName === 'th'; })) headers++;
+  }
+  headers = headers || 1;
+  for (r = 0; r < trs.length; r++) {
+    var tr = trs[r], cells = [], col = 0, rowAlign = alignment(tr);
+    if (tr.parentNode !== group) { group = tr.parentNode; occupied = []; }
+    for (var i = 0; i < tr.cells.length; i++) {
+      var cell = tr.cells[i], cols = span(cell, 'colspan'), height = span(cell, 'rowspan');
+      /* Find a contiguous run, even if an earlier rowspan occupies only
+         the middle of the proposed colspan in a ragged clipboard grid. */
+      for (var j = 0; j < cols; j++) {
+        if (occupied[col + j] > r) { col += j + 1; j = -1; }
+      }
+      var content = htmlTableCell(cell, warn), cellAlign = alignment(cell) || rowAlign;
+      for (j = 0; j < cols; j++, col++) {
+        cells[col] = j ? '' : content.markdown;
+        if (height > 1) occupied[col] = r + height;
+        if (!align[col] && cellAlign) align[col] = cellAlign;
+        if (r >= headers && !j && content.numeric) numbers[col] = (numbers[col] || 0) + 1;
+      }
+    }
+    rows.push({ cells: cells, row: r + 1 });
+    width = Math.max(width, col);
+  }
+  if (width < 2) return null;
+  if (headers > 1) warnings.push({ row: 1, message: 'Joined ' + headers + ' header rows into one.' });
+  /* The HTML grid can have a short first row or end with a rowspan. GFM
+     takes its width from the header, so fill missing positions explicitly. */
+  rows.forEach(function (row) {
+    for (var c = 0; c < width; c++) if (row.cells[c] === undefined) row.cells[c] = '';
+  });
+  for (var c = 0; c < width; c++) {
+    if (!align[c]) align[c] = numbers[c] && numbers[c] === rows.length - headers ? '-:' : ':-';
+  }
+  return { rows: rows, headers: headers, align: align, format: 'html', warnings: warnings };
+}
+
 function importTable(text, options) {
   if (typeof text !== 'string') return null;
   text = text.replace(/\r\n?/g, '\n');
@@ -3308,16 +3586,24 @@ function importTable(text, options) {
   var first = text.replace(/^(?:[ \t]*\n)+/, '').split('\n', 1)[0];
   var latexHeader = /^\s*(?:%|\\(?:begin|toprule|hline|centering)\b|\\\[)/.test(first) ||
     /&.*\\\\\s*(?:%.*)?$/.test(first);
-  var t = (!latexHeader && sheet) || readLatexTable(text) || sheet;
+  return tableMarkdown((!latexHeader && sheet) || readLatexTable(text) || sheet, options);
+}
+
+function importHtmlTable(doc, options) {
+  return tableMarkdown(readHtmlTable(doc), options);
+}
+
+function tableMarkdown(t, options) {
   if (!t) return null;
-  var head = [], body = [];
+  var head = [], body = [], warnings = t.warnings.slice();
   t.rows.forEach(function (row, index) {
     var cells = row.cells;
     if (index < t.headers) {
       cells.forEach(function (v, c) { head[c] = [head[c], v].filter(Boolean).join(' '); });
     } else {
+      cells = cells.slice(); /* The dialog can format the same clipboard grid again with different padding. */
       if (cells.length > head.length) {
-        t.warnings.push({ message: 'Joined extra cells in the last column.', line: row.line });
+        warnings.push({ message: 'Joined extra cells in the last column.', line: row.line });
         cells = cells.slice(0, head.length - 1).concat(cells.slice(head.length - 1).join(' '));
       }
       while (cells.length < head.length) cells.push('');
@@ -3337,8 +3623,8 @@ function importTable(text, options) {
       return '| ' + cells.map(function (v, c) { return v + new Array(widths[c] - v.length + 1).join(' '); }).join(' | ') + ' |';
     }).join('\n');
   }
-  t.warnings.sort(function (a, b) { return a.line - b.line; });
-  return { markdown: markdown, warnings: t.warnings, format: t.format };
+  warnings.sort(function (a, b) { return (a.row || a.line) - (b.row || b.line); });
+  return { markdown: markdown, warnings: warnings, format: t.format };
 }
 
 /* ---- compaction (pure): fewer characters, the same rendering ----
@@ -4471,6 +4757,263 @@ function importPlan(existing, incoming) {
   return { add: add, same: same };
 }
 
+/* ---- sections of a comment (pure) ----
+   A combined response (one comment for every reviewer, or a long answer
+   point by point) is balanced part by part. A heading starts a section that
+   runs to the next heading of its level or higher; a paragraph, list item
+   or quote that opens with a label starts a point, which runs to the next
+   section of any kind. Labels are what authors use for points: bold that
+   ends in punctuation or stands alone (**W1.**, **Q2:**, **Reviewer aBcD**),
+   or a point's name (W1:, Q2., Weakness 3:, [W4]). Bold that starts a
+   sentence (**We thank** the reviewer) is no label. */
+var SECTION_NAME = '(?:[WQ]\\d{1,2}|(?:weakness|question|comment|concern|point|issue|limitation)s?\\s*#?\\d{1,2})';
+var SECTION_LABEL = new RegExp('^(?:\\[' + SECTION_NAME + '\\]|' + SECTION_NAME + '\\s*[.:)])', 'i');
+
+function sectionLabel(s) {
+  s = s.replace(/^\s+/, '');
+  var bold = /^(\*\*|__)(?=\S)([^\n]*?\S)\1([^\n]*)/.exec(s);
+  if (bold && bold[2].length <= 100 &&
+      (/[.:?)\]]$/.test(bold[2]) || /^\s*(?:$|[:.\u2013\u2014-])/.test(bold[3]) ||
+       /* "**W3** (novelty)": a point's name, not "**Our method** (Sec. 3) improves" */
+       (/^\s*\(/.test(bold[3]) && new RegExp('^' + SECTION_NAME + '$', 'i').test(bold[2])))) return true;
+  return SECTION_LABEL.test(s);
+}
+
+/* The first line of a block as a short plain title. */
+function sectionTitle(s) {
+  var line = s.split('\n', 1)[0], atx = /^ {0,3}#{1,6}(?=\s|$)/.exec(line);
+  if (atx) line = line.slice(atx[0].length).replace(/\s+#+\s*$/, ''); /* closing hashes: ATX only */
+  line = line.replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim();
+  return line.length > 60 ? line.slice(0, 59) + '…' : line;
+}
+
+/* Where `raw` (a top-level token's source) starts at or after `pos`, never
+   inside a link reference definition (`defs`), which Marked consumes without
+   a token and whose title can repeat a later paragraph's words. */
+function locateBlock(text, raw, pos, defs) {
+  var at = text.indexOf(raw, pos);
+  for (var i = 0; at >= 0 && i < defs.length; i++) {
+    if (at >= defs[i].start && at < defs[i].end) { at = text.indexOf(raw, defs[i].end); i = -1; }
+  }
+  return at;
+}
+function definitionRanges(text) {
+  var model = text.indexOf(']:') >= 0 ? collectMarkedRanges(text) : null;
+  return model ? model.definitions : [];
+}
+
+/* {total, sections: [{title, kind, level, start, end, chars}]}, in order;
+   `kind` is 'heading', 'point' or 'opening' (the text before the first),
+   `level` how many headings enclose it, `chars` its trimmed length in UTF-16
+   units, as the limit counts. Only top-level blocks count: a heading in a
+   code block or a quote is not one. null with fewer than two sections. */
+function commentSections(text) {
+  var api = typeof window !== 'undefined' ? window.marked : null;
+  if (typeof text !== 'string' || !api || typeof api.lexer !== 'function') return null;
+  var tokens;
+  try { tokens = api.lexer(text); } catch (e) { return null; }
+  var starts = [], pos = 0, defs = definitionRanges(text);
+  function add(at, raw, depth, kind) { starts.push({ start: at, title: sectionTitle(raw), depth: depth, kind: kind }); }
+  tokens.forEach(function (t) {
+    if (!t.raw || t.type === 'space') return;
+    var at = locateBlock(text, t.raw, pos, defs);
+    if (at < 0) return;
+    pos = at + t.raw.length;
+    if (t.type === 'heading') add(at, t.raw, t.depth, 'heading');
+    else if (t.type === 'paragraph' && sectionLabel(t.raw)) add(at, t.raw, 0, 'point');
+    else if (t.type === 'blockquote') {
+      var inner = t.raw.replace(/^ {0,3}>[ \t]?/, '');
+      if (sectionLabel(inner)) add(at, inner, 0, 'point');
+    } else if (t.type === 'list') {
+      var p = at;
+      (t.items || []).forEach(function (item) {
+        var ia = item.raw ? text.indexOf(item.raw, p) : -1;
+        if (ia < 0) return;
+        p = ia + item.raw.length;
+        var body = item.raw.replace(/^ {0,3}(?:[*+-]|\d{1,9}[.)])[ \t]*(?:\[[ xX]\][ \t]+)?/, '');
+        if (sectionLabel(body)) add(ia, body, 0, 'point');
+      });
+    }
+  });
+  if (!starts.length) return null;
+  /* An opening is visible text before the first part: not a link definition. */
+  var first = text.search(/\S/);
+  for (var d = 0; first >= 0 && d < defs.length; d++) {
+    if (first >= defs[d].start && first < defs[d].end) {
+      var rest = text.slice(defs[d].end).search(/\S/);
+      first = rest < 0 ? -1 : defs[d].end + rest;
+      d = -1;
+    }
+  }
+  if (first >= 0 && first < starts[0].start) starts.unshift({ start: first, title: '', depth: 0, kind: 'opening' });
+  var out = [], open = [];
+  starts.forEach(function (s, i) {
+    var end = text.length;
+    for (var j = i + 1; j < starts.length; j++) {
+      if (!s.depth || (starts[j].depth && starts[j].depth <= s.depth)) { end = starts[j].start; break; }
+    }
+    while (s.depth && open.length && open[open.length - 1] >= s.depth) open.pop();
+    out.push({ title: s.title, kind: s.kind, level: open.length, start: s.start, end: end, chars: text.slice(s.start, end).trim().length });
+    if (s.depth) open.push(s.depth);
+  });
+  return out.length < 2 ? null : { total: text.trim().length, sections: out };
+}
+
+/* The source of each top-level block Marked renders as an element, in
+   order, with that element's tag name: the preview's children line up with
+   it, so a spot in the preview can be traced back to the source. An HTML
+   block renders as text on OpenReview (no element), a link definition and
+   blank lines as nothing. [] when Marked cannot lex the text. */
+var BLOCK_TAGS = { paragraph: 'P', blockquote: 'BLOCKQUOTE', code: 'PRE', table: 'TABLE', hr: 'HR' };
+function blockSources(text) {
+  var api = typeof window !== 'undefined' ? window.marked : null, tokens, out = [], pos = 0;
+  if (typeof text !== 'string' || !api || typeof api.lexer !== 'function') return out;
+  try { tokens = api.lexer(text); } catch (e) { return out; }
+  var defs = definitionRanges(text);
+  tokens.forEach(function (t) {
+    if (!t.raw) return;
+    var at = locateBlock(text, t.raw, pos, defs);
+    if (at < 0) return;
+    pos = at + t.raw.length;
+    var tag = t.type === 'heading' ? 'H' + t.depth : t.type === 'list' ? (t.ordered ? 'OL' : 'UL') : BLOCK_TAGS[t.type];
+    if (tag) out.push({ tag: tag, start: at, end: at + t.raw.length });
+  });
+  return out;
+}
+
+/* ---- wording hints (pure): shorter ways to say the same ----
+   Advice for a draft over the limit, never applied: a phrase can be the
+   author's choice, and its replacement may need the sentence recast. Only
+   the author's own visible prose counts: not code, math, HTML, link syntax,
+   image syntax, or a quote (the reviewer's words). `say` is the shorter
+   form ('' to drop the phrase). */
+var FILLERS = [
+  /* Only before a courtesy verb: "we would like to release the data" is an
+     intention, and dropping the phrase would say it was done. */
+  { re: /\bwould like to (?=(?:thank|express|acknowledge|clarify|emphasi[sz]e|point out|note|stress|highlight|reiterate|mention)\b)/gi,
+    say: '', note: 'We thank the reviewer says the same as We would like to thank the reviewer.' },
+  { re: /\bin order to\b/gi, say: 'to' },
+  { re: /\b(?:due|owing) to the fact that\b/gi, say: 'because' },
+  { re: /\b(?:despite|in spite of) the fact that\b/gi, say: 'although' },
+  { re: /\bit (?:is|should be) (?:worth noting|worth mentioning|important to note|noted) that /gi, say: '' },
+  { re: /\bplease note that /gi, say: '' },
+  { re: /\bas (?:mentioned|stated|noted) (?:above|before|earlier|previously), /gi, say: '' },
+  { re: /\bit can be (?:seen|observed) that /gi, say: '' },
+  { re: /\bas a matter of fact,? /gi, say: '' },
+  { re: /\ba (?:large|significant|considerable) number of\b/gi, say: 'many' },
+  { re: /\bthe (?:vast )?majority of\b/gi, say: 'most' },
+  { re: /\bat this point in time\b/gi, say: 'now' },
+  { re: /\bfor the purpose of\b/gi, say: 'for' },
+  { re: /\b(?:is|are) able to\b/gi, say: 'can' },
+  { re: /\b(?:has|have) the (?:ability|capability) to\b/gi, say: 'can' },
+  { re: /\bin the event that\b/gi, say: 'if' },
+  { re: /\bwith regards? to\b/gi, say: 'on' },
+  /* not "whether or not": "whether or not labels are available" means regardless */
+  { re: /\beach and every\b/gi, say: 'every' },
+  { re: /\bfirst and foremost\b/gi, say: 'first' },
+  { re: /\bso as to\b/gi, say: 'to' },
+  { re: /\bthank you very much for\b/gi, say: 'thank you for' }
+];
+
+/* What a reader never sees as the author's prose, as a mask over `text`.
+   Code Marked's tokens could not be located in the source (tabs that a list
+   expands) is caught by a looser scan: fences however indented, and the
+   fallback scanner's code; masking too much only drops a hint. */
+function proseMask(text, spans, model) {
+  var skip = model.ranges.filter(function (r) {
+    return /^(?:code|codespan|html|image|blockquote)$/.test(r.type);
+  }).concat(model.hidden, model.definitions, model.dropped, model.unlocated, fallbackCodeRanges(text),
+    looseFenceRanges(text), (spans || []).filter(function (sp) { return !sp.recovered; }));
+  return makeMask(text.length, skip);
+}
+function looseFenceRanges(text) {
+  var out = [], fence = null, re = /^[^\S\n]*(?:[-*+]\s+|\d{1,9}[.)]\s+|>\s*)*(`{3,}|~{3,})/, pos = 0;
+  text.split('\n').forEach(function (line) {
+    var m = re.exec(line), end = pos + line.length + 1;
+    if (!fence && m) fence = { mark: m[1], start: pos };
+    else if (fence && m && m[1][0] === fence.mark[0] && m[1].length >= fence.mark.length) {
+      out.push({ start: fence.start, end: Math.min(end, text.length) });
+      fence = null;
+    }
+    pos = end;
+  });
+  if (fence) out.push({ start: fence.start, end: text.length });
+  return out;
+}
+
+/* {hints, saves}: one hint per phrase, {kind: 'filler' | 'name', text, say,
+   at: [{start, end}], saves}; `saves` in total, an estimate. `spans`: the
+   formulas analyze found (computed here when not given). A name is a run of
+   two to six capitalized words (connectors such as "of" allowed inside) of
+   at least 16 characters, used three times or more, that an abbreviation of
+   its capitals would shorten by 20 characters or more, counting a
+   definition at its first use unless the text already has the abbreviation. */
+function wordingHints(text, spans) {
+  var none = { hints: [], saves: 0 };
+  if (typeof text !== 'string' || !text.trim()) return none;
+  var model = collectMarkedRanges(text);
+  if (!model) return none;
+  if (!spans) spans = analyze(text).spans;
+  var mask = proseMask(text, spans, model), hints = [];
+  function visible(a, b) { return !maskHits(mask, a, b); }
+
+  FILLERS.forEach(function (f) {
+    var groups = {}, m;
+    f.re.lastIndex = 0;
+    while ((m = f.re.exec(text))) {
+      if (!m[0]) { f.re.lastIndex++; continue; }
+      var a = m.index, b = a + m[0].length;
+      if (!visible(a, b)) continue;
+      var key = m[0].toLowerCase().replace(/\s+/g, ' ').trim();
+      (groups[key] || (groups[key] = { text: m[0].trim(), at: [] })).at.push({ start: a, end: b });
+    }
+    Object.keys(groups).forEach(function (key) {
+      var g = groups[key], each = g.at[0].end - g.at[0].start - f.say.length;
+      if (each >= 3) hints.push({ kind: 'filler', text: g.text, say: f.say, note: f.note || '', at: g.at, saves: each * g.at.length });
+    });
+  });
+
+  /* Long names: candidates from runs of capitalized words, then every
+     visible, whole-word use of each candidate counted. */
+  var CONNECT = '(?:of|for|and|the|in|on|with|to|via|a|an)';
+  var run = new RegExp('[A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*(?:[ \\t]+(?:' + CONNECT + '[ \\t]+)?[A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*){1,5}', 'g');
+  var seen = Object.create(null), names = [], rm;
+  while ((rm = run.exec(text))) {
+    if (!visible(rm.index, rm.index + rm[0].length)) continue;
+    /* A sentence can start with a capitalized word that is no part of it. */
+    var name = rm[0].replace(/^(?:The|A|An|Our|We|This|These|In|For|Both|Each|Unlike|With)[ \t]+(?=[A-Z])/, '');
+    if (name.length < 16 || !/[ \t]/.test(name) || seen['n' + name]) continue;
+    seen['n' + name] = true;
+    var abbr = name.split(/[ \t]+/).map(function (w) {
+      return new RegExp('^' + CONNECT + '$').test(w) ? '' : w.split('-').map(function (p) { return /^[A-Z]/.test(p) ? p[0] : ''; }).join('');
+    }).join('');
+    if (abbr.length < 2) continue;
+    var at = [], from = 0, k;
+    while ((k = text.indexOf(name, from)) >= 0) {
+      from = k + name.length;
+      var before = text[k - 1], after = text[from];
+      if ((before && /[\w-]/.test(before)) || (after && /[\w-]/.test(after))) continue;
+      if (visible(k, from)) at.push({ start: k, end: from });
+    }
+    if (at.length < 3) continue;
+    /* Defined only where a reader sees it (not in a link's address). */
+    var defRe = new RegExp('(^|[^\\w-])' + abbr + '(?![\\w-])', 'g'), dm, defined = false;
+    while (!defined && (dm = defRe.exec(text))) {
+      var ds = dm.index + dm[1].length;
+      defined = visible(ds, ds + abbr.length);
+    }
+    var saves = (at.length - 1) * (name.length - abbr.length) - (defined ? 0 : abbr.length + 3);
+    if (saves >= 20) names.push({ kind: 'name', text: name, say: abbr, defined: defined, at: at, saves: saves });
+  }
+  /* A shorter name inside a longer one used as often is the same advice. */
+  names.forEach(function (n) {
+    if (!names.some(function (o) { return o !== n && o.text.length > n.text.length && o.text.indexOf(n.text) >= 0 && o.at.length >= n.at.length; })) hints.push(n);
+  });
+
+  hints.sort(function (a, b) { return b.saves - a.saves || a.at[0].start - b.at[0].start; });
+  return { hints: hints, saves: hints.reduce(function (n, h) { return n + h.saves; }, 0) };
+}
+
 /* ---- splitting a long comment into several (pure) ----
    Where a venue allows several comments (NeurIPS since 2026, ICLR), a draft
    over the limit can be posted in parts. Parts are cut only between blocks;
@@ -4750,6 +5293,12 @@ var compactList = document.getElementById('compactList');
 var compactFoot = document.getElementById('compactFoot');
 var applyCompactBtn = document.getElementById('applyCompactBtn');
 var selStat = document.getElementById('selStat');
+var wordingBox = document.getElementById('wordingBox');
+var wordingSum = document.getElementById('wordingSum');
+var wordingList = document.getElementById('wordingList');
+var sectionsBox = document.getElementById('sectionsBox');
+var sectionsSum = document.getElementById('sectionsSum');
+var sectionsList = document.getElementById('sectionsList');
 
 /* Listeners on the editor go through onEditor, so that a fresh textarea (a
    draft switch puts one in, see openDraft) gets every one of them. */
@@ -4855,7 +5404,7 @@ var DRAFT_KEY = 'rebuttal-bench-draft';
 var FS_RANGES = { fsEditor: [11, 20], zoomPreview: [70, 200] };
 var FS_STEPS = { fsEditor: 1, zoomPreview: 10 };
 var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, sync: true, venue: '',
-  compact: compactDefaults(), compactOpen: false };
+  compact: compactDefaults(), compactOpen: false, wordingOpen: false, sectionsOpen: false, spellcheck: false };
 
 function applyPrefs() {
   document.documentElement.setAttribute('data-theme', prefs.theme === 'dark' ? 'dark' : 'light');
@@ -4872,6 +5421,11 @@ function applyPrefs() {
     ? venue.name + ': ' + venue.rule + '. Source: ' + venue.source + ' (checked ' + VENUES_CHECKED + '; rules change every year)'
     : 'Choose a venue to set its character limit and check links against its rebuttal rules';
   compactBox.open = !!prefs.compactOpen;
+  wordingBox.open = !!prefs.wordingOpen;
+  sectionsBox.open = !!prefs.sectionsOpen;
+  spellBox.checked = !!prefs.spellcheck;
+  ta.spellcheck = !!prefs.spellcheck;
+  refreshFind(); /* the editor's font size moves the text under find's boxes */
   Array.prototype.forEach.call(compactList.querySelectorAll('input[data-trick]'), function (box) {
     box.checked = !!prefs.compact[box.getAttribute('data-trick')];
   });
@@ -5339,6 +5893,7 @@ function renderPreview() {
     return;
   }
 
+  if (!importing) previewText = source;
   try {
     target.innerHTML = renderOpenReviewMarkdown(text);
   } catch (e) {
@@ -5411,8 +5966,68 @@ function updateAll() {
   mathStat.textContent = fmt(res.mathCount) + ' math span' + (res.mathCount === 1 ? '' : 's');
 
   renderIssues();
+  renderWording(text, res.spans);
+  renderSections(text, chars);
+  refreshFind(); /* a draft switch puts in another text */
   scheduleCompaction();
   renderDraftTabs();
+}
+
+/* One row per phrase (wordingHints), biggest saving first; a click selects
+   its next use after the caret. Drawn for the text of the last analysis. */
+var wordingShown = null, wordingHintsShown = [];
+/* Both panels read the comment as posted (trimmed, as the preview shows
+   it: an indented first line is no code block there), and point into the
+   editor's text. */
+function leadOf(text) { return text.length - text.replace(/^\s+/, '').length; }
+function renderWording(text, spans) {
+  var lead = leadOf(text);
+  var r = wordingHints(text.trim(), spans.map(function (sp) { return { start: sp.start - lead, end: sp.end - lead, recovered: sp.recovered }; })), html = '';
+  r.hints.forEach(function (h) {
+    h.at = h.at.map(function (x) { return { start: x.start + lead, end: x.end + lead }; });
+  });
+  wordingShown = text;
+  wordingHintsShown = r.hints;
+  wordingSum.textContent = r.hints.length ? 'about ' + fmt(r.saves) + ' to save' : '';
+  wordingSum.classList.toggle('zero', !r.hints.length);
+  if (!r.hints.length) {
+    wordingList.innerHTML = '<div class="lint-empty">No filler phrases or long repeated names found.</div>';
+    return;
+  }
+  r.hints.forEach(function (h, i) {
+    var say = h.kind === 'name'
+      ? (h.defined ? 'use ' + h.say + ', defined already' : 'define ' + h.say + ' once')
+      : h.say ? '“' + h.say + '”' : 'drop it';
+    html += '<button type="button" class="section" data-hint="' + i + '" title="' +
+      escAttr((h.note ? h.note + ' ' : '') + (h.kind === 'name' ? 'Used ' + h.at.length + ' times.' : 'Found ' + h.at.length + ' time' + (h.at.length === 1 ? '' : 's') + '.')) + '">' +
+      '<span class="name">“' + escHtml(h.text) + '” → ' + escHtml(say) + '</span>' +
+      '<span class="gain">' + (h.at.length > 1 ? '×' + h.at.length + ' · ' : '') + '−' + fmt(h.saves) + '</span></button>';
+  });
+  wordingList.innerHTML = html;
+}
+
+/* One row per section of the draft (commentSections), with its share of the
+   comment; a click puts the caret at its start. Drawn for the text of the
+   last analysis, so a click on a row older than the editor redraws first. */
+var sectionsShown = null; /* the text the rows were drawn for */
+function renderSections(text, total) {
+  var lead = leadOf(text), r = commentSections(text.trim()), html = '';
+  if (r) r.sections.forEach(function (s) { s.start += lead; s.end += lead; });
+  sectionsShown = text;
+  sectionsSum.textContent = r ? r.sections.length + ' parts' : '';
+  if (!r) {
+    sectionsList.innerHTML = '<div class="lint-empty">No parts yet: start them with headings (<code>## Reviewer aBcD</code>) or labels (<code>**W1.**</code>).</div>';
+    return;
+  }
+  r.sections.forEach(function (s) {
+    var share = total ? s.chars / total : 0;
+    html += '<button type="button" class="section" data-start="' + s.start + '" style="--level: ' + s.level + '"' +
+      ' title="' + escAttr((s.title || 'Opening') + ': ' + fmt(s.chars) + ' characters') + '">' +
+      '<span class="name' + (s.kind === 'opening' ? ' opening' : '') + '">' + escHtml(s.title || 'Opening') + '</span>' +
+      '<span class="bar"><span style="width: ' + Math.round(share * 100) + '%"></span></span>' +
+      '<span class="gain">' + fmt(s.chars) + ' · ' + Math.round(share * 100) + '%</span></button>';
+  });
+  sectionsList.innerHTML = html;
 }
 
 /* The analyzer's hazards for analyzedText plus what MathJax reported in the
@@ -6481,6 +7096,307 @@ compactBox.addEventListener('toggle', function () {
   savePrefs();
 });
 
+wordingBox.addEventListener('toggle', function () {
+  prefs.wordingOpen = wordingBox.open;
+  savePrefs();
+});
+wordingList.addEventListener('click', function (e) {
+  var row = e.target.closest('[data-hint]');
+  if (!row) return;
+  if (wordingShown !== ta.value) { updateAll(); return; } /* drawn for an older text: redraw first */
+  var h = wordingHintsShown[parseInt(row.getAttribute('data-hint'), 10)];
+  if (!h) return;
+  /* The next use after the selection, from the top again after the last. */
+  var from = ta.selectionEnd, next = h.at[0];
+  for (var i = 0; i < h.at.length; i++) if (h.at[i].start >= from) { next = h.at[i]; break; }
+  ta.focus();
+  ta.setSelectionRange(next.start, next.end);
+  revealOffset(next.start);
+});
+sectionsBox.addEventListener('toggle', function () {
+  prefs.sectionsOpen = sectionsBox.open;
+  savePrefs();
+});
+sectionsList.addEventListener('click', function (e) {
+  var row = e.target.closest('.section');
+  if (!row) return;
+  if (sectionsShown !== ta.value) { updateAll(); return; } /* drawn for an older text: redraw first */
+  var at = parseInt(row.getAttribute('data-start'), 10);
+  ta.focus();
+  ta.setSelectionRange(at, at);
+  revealOffset(at);
+});
+
+/* ---- spellcheck, find and replace, preview to source ---- */
+
+/* The editor's spellcheck is off by default: TeX and Markdown are a sea of
+   red. A fresh editor (a draft switch) is a clone, so it keeps the setting. */
+var spellBox = document.getElementById('spellBox');
+spellBox.addEventListener('change', function () {
+  prefs.spellcheck = spellBox.checked;
+  ta.spellcheck = prefs.spellcheck;
+  savePrefs();
+});
+
+/* Find works on the source as typed (no Markdown or TeX rules). The
+   editor's selection is the current match; since a textarea shows no
+   selection while the focus is in the find field, boxes drawn over the
+   editor (findMarks, laid out in caretTop's hidden twin) show the matches. */
+var findBar = document.getElementById('findBar');
+var findInput = document.getElementById('findInput');
+var findCount = document.getElementById('findCount');
+var findCase = document.getElementById('findCase');
+var replaceInput = document.getElementById('replaceInput');
+var findMarks = document.getElementById('findMarks');
+var FIND_MARKS_MAX = 400; /* beyond this, only the current match gets a box */
+
+function findMatches() {
+  var q = findInput.value, out = [], m;
+  if (!q) return out;
+  var re = new RegExp(escRe(q), findCase.checked ? 'g' : 'gi'), text = ta.value;
+  while ((m = re.exec(text))) out.push({ start: m.index, end: m.index + m[0].length });
+  return out;
+}
+/* The match the editor's selection is on, or -1. */
+function currentMatch(ms) {
+  for (var i = 0; i < ms.length; i++) if (ms[i].start === ta.selectionStart && ms[i].end === ta.selectionEnd) return i;
+  return -1;
+}
+/* The boxes follow the editor's size (a panel opened, the window resized);
+   a font change, which keeps the size, redraws from applyPrefs. A fresh
+   editor (a draft switch) is observed in its turn. */
+var findResize = typeof ResizeObserver === 'function' ? new ResizeObserver(function () { refreshFind(); }) : null;
+var findObserved = null;
+function refreshFind() {
+  if (!findBar || findBar.hidden) return; /* also before this part of the script has run */
+  if (findResize && findObserved !== ta) { findResize.disconnect(); findResize.observe(ta); findObserved = ta; }
+  var ms = findMatches(), i = currentMatch(ms);
+  findCount.textContent = !findInput.value ? '' : !ms.length ? 'No matches'
+    : i >= 0 ? (i + 1) + ' of ' + fmt(ms.length) : fmt(ms.length) + ' found';
+  findCount.classList.toggle('none', !!findInput.value && !ms.length);
+  drawFindMarks(ms, i);
+}
+function drawFindMarks(ms, cur) {
+  findMarks.textContent = '';
+  if (findBar.hidden || !ms.length) return;
+  var shown = ms.length > FIND_MARKS_MAX ? (cur >= 0 ? [ms[cur]] : []) : ms;
+  if (!shown.length) return;
+  var mirror = prepareMirror(), text = ta.value, pos = 0, spans = [];
+  mirror.textContent = '';
+  shown.forEach(function (x) {
+    mirror.appendChild(document.createTextNode(text.slice(pos, x.start)));
+    var s = document.createElement('span');
+    s.textContent = text.slice(x.start, x.end);
+    mirror.appendChild(s);
+    spans.push(s);
+    pos = x.end;
+  });
+  mirror.appendChild(document.createTextNode(text.slice(pos)));
+  var base = mirror.getBoundingClientRect(), frag = document.createDocumentFragment();
+  var dx = ta.offsetLeft + ta.clientLeft, dy = ta.offsetTop + ta.clientTop - ta.scrollTop;
+  var top0 = ta.offsetTop + ta.clientTop, bottom = top0 + ta.clientHeight;
+  spans.forEach(function (s, k) {
+    var isCur = cur >= 0 && shown[k] === ms[cur];
+    Array.prototype.forEach.call(s.getClientRects(), function (r) {
+      var top = r.top - base.top + dy;
+      if (top + r.height <= top0 || top >= bottom) return; /* scrolled out of view */
+      var box = document.createElement('span');
+      if (isCur) box.className = 'cur';
+      box.style.left = (r.left - base.left + dx) + 'px';
+      box.style.top = top + 'px';
+      box.style.width = Math.max(2, r.width) + 'px';
+      box.style.height = r.height + 'px';
+      frag.appendChild(box);
+    });
+  });
+  findMarks.appendChild(frag);
+}
+/* Select match `i` and bring it into view. */
+function showMatch(m) {
+  ta.setSelectionRange(m.start, m.end);
+  revealOffset(m.start);
+  refreshFind();
+}
+/* The next match after the selection (dir 1) or the one before it (-1). */
+function findStep(dir) {
+  var ms = findMatches();
+  if (!ms.length) { refreshFind(); return; }
+  var i = currentMatch(ms), pick = dir > 0 ? 0 : ms.length - 1, k;
+  if (i >= 0) pick = (i + dir + ms.length) % ms.length;
+  else if (dir > 0) { for (k = 0; k < ms.length; k++) if (ms[k].start >= ta.selectionStart) { pick = k; break; } }
+  else { for (k = ms.length - 1; k >= 0; k--) if (ms[k].end <= ta.selectionStart) { pick = k; break; } }
+  showMatch(ms[pick]);
+}
+var findFrom = 0; /* where the caret was when the search started: typing searches from there */
+function openFind(toReplace) {
+  var sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+  findFrom = ta.selectionStart;
+  findBar.hidden = false;
+  if (sel && sel.length <= 200 && sel.indexOf('\n') < 0) findInput.value = sel;
+  var field = toReplace ? replaceInput : findInput;
+  field.focus();
+  field.select();
+  refreshFind();
+}
+function closeFind() {
+  if (findBar.hidden) return;
+  findBar.hidden = true;
+  findMarks.textContent = '';
+  ta.focus(); /* the current match stays selected */
+}
+function replaceOne() {
+  if (!draftReady || ta.readOnly) return;
+  var ms = findMatches(), i = currentMatch(ms);
+  if (i < 0) { findStep(1); return; }
+  var m = ms[i], repl = replaceInput.value, ok = false;
+  /* Through the browser's own editing, so one undo takes it back. */
+  ta.focus();
+  ta.setSelectionRange(m.start, m.end);
+  try { ok = document.execCommand('insertText', false, repl); } catch (e) { ok = false; }
+  if (!ok) {
+    ta.setRangeText(repl, m.start, m.end, 'end');
+    editSeq++;
+    afterSourceChange();
+  }
+  var after = m.start + repl.length;
+  ta.setSelectionRange(after, after);
+  replaceInput.focus();
+  findStep(1);
+}
+function replaceAll() {
+  if (!draftReady || ta.readOnly) return;
+  var ms = findMatches();
+  if (!ms.length) { refreshFind(); return; }
+  var text = ta.value, repl = replaceInput.value, out = '', last = 0;
+  ms.forEach(function (m) { out += text.slice(last, m.start) + repl; last = m.end; });
+  out += text.slice(last);
+  /* Nothing to undo then: an undo would take back the edit before. */
+  if (out === text) { refreshFind(); showToast('No changes: every match already reads “' + repl + '”.'); return; }
+  keepVersion('before Replace all');
+  setSourceText(out, ms[0].start, ms[0].start + repl.length);
+  afterSourceChange();
+  replaceInput.focus();
+  refreshFind();
+  showToast('Replaced ' + fmt(ms.length) + ' match' + (ms.length === 1 ? '' : 'es') + '. ' + UNDO_HINT + ' in the editor undoes it.');
+}
+
+document.getElementById('findBtn').addEventListener('click', function () { openFind(false); });
+document.getElementById('findNext').addEventListener('click', function () { findStep(1); });
+document.getElementById('findPrev').addEventListener('click', function () { findStep(-1); });
+document.getElementById('replaceOne').addEventListener('click', replaceOne);
+document.getElementById('replaceAll').addEventListener('click', replaceAll);
+document.getElementById('findClose').addEventListener('click', closeFind);
+findCase.addEventListener('change', refreshFind);
+findInput.addEventListener('input', function () {
+  /* Typing searches from where the caret was, like a browser's find. */
+  var ms = findMatches(), pick = null;
+  for (var k = 0; k < ms.length && !pick; k++) if (ms[k].start >= findFrom) pick = ms[k];
+  if (pick || ms.length) showMatch(pick || ms[0]);
+  else refreshFind();
+});
+findBar.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') { e.preventDefault(); closeFind(); return; }
+  if (e.key !== 'Enter') return;
+  if (e.target === findInput) { e.preventDefault(); findStep(e.shiftKey ? -1 : 1); }
+  else if (e.target === replaceInput) { e.preventDefault(); replaceOne(); }
+});
+/* Ctrl+F (⌘F) in the editor or the bar opens it; elsewhere the browser's own
+   find stays. Ctrl+H goes to the replace field, except on a Mac, where ⌘H
+   hides the browser. */
+var IS_MAC = /Mac|iPod|iPhone|iPad/.test((navigator.platform || '') + ' ' + (navigator.userAgent || ''));
+document.addEventListener('keydown', function (e) {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || !(e.target === ta || findBar.contains(e.target))) return;
+  var key = (e.key || '').toLowerCase();
+  if (key === 'f' || (key === 'h' && !IS_MAC && e.ctrlKey)) {
+    e.preventDefault();
+    openFind(key === 'h');
+  }
+});
+onEditor('scroll', function () { if (!findBar.hidden) refreshFind(); });
+onEditor('input', function () { if (!findBar.hidden) refreshFind(); });
+onEditor('select', function () { if (!findBar.hidden) refreshFind(); });
+window.addEventListener('resize', function () { if (!findBar.hidden) refreshFind(); });
+
+/* Double-click in the preview to find the spot in the source, as a PDF
+   viewer does with SyncTeX: the block (blockSources, lined up with the
+   preview's children by tag), then the double-clicked word or formula in
+   it. The preview shows the trimmed comment, hence `lead`. */
+var previewText = null; /* the editor text the preview shows */
+preview.addEventListener('dblclick', function (e) {
+  if (!draftReady || previewText !== ta.value) return;
+  var block = e.target;
+  while (block && block.parentNode !== preview) block = block.parentNode;
+  if (!block || block.nodeType !== 1 || block.classList.contains('empty')) return;
+  var text = ta.value, lead = text.length - text.replace(/^\s+/, '').length;
+  var blocks = blockSources(text.trim()), kids = preview.children, src = null, k = 0;
+  for (var i = 0; i < kids.length && k < blocks.length; i++, k++) {
+    while (k < blocks.length && blocks[k].tag !== kids[i].tagName) k++;
+    if (kids[i] === block) { src = blocks[k] || null; break; }
+  }
+  if (!src) return;
+  var start = src.start + lead, end = src.end + lead, at = start, to = start;
+  /* What the preview shows of the source: not formulas (counted apart), an
+     image's syntax and alt text, link destinations, definitions, a fence's
+     info string. Editor offsets throughout. */
+  var posted = text.trim(), model = collectMarkedRanges(posted), hidden = [], images = [];
+  var spans = (lastAnalysis && analyzedText === text ? lastAnalysis.spans : analyze(text).spans)
+    .filter(function (sp) { return !sp.recovered; });
+  function moved(r) { return { start: r.start + lead, end: r.end + lead }; }
+  if (model) {
+    model.ranges.forEach(function (r) {
+      if (r.type === 'image') images.push(moved(r));
+      var fence = r.type === 'code' ? /^[ \t]*(?:`{3,}|~{3,})/.exec(posted.slice(r.start, r.end)) : null;
+      if (fence) {
+        var nl = posted.indexOf('\n', r.start);
+        hidden.push(moved({ start: r.start, end: nl < 0 || nl > r.end ? r.end : nl }));
+      }
+    });
+    hidden = hidden.concat(model.hidden.map(moved), model.definitions.map(moved));
+  }
+  spans = spans.filter(function (sp) {
+    return sp.start >= start && sp.end <= end && !images.some(function (im) { return sp.start >= im.start && sp.end <= im.end; });
+  });
+  var formula = e.target.closest && e.target.closest('mjx-container');
+  var sel = window.getSelection();
+  if (formula) {
+    /* The n-th formula of the block is the n-th one in its source. */
+    var nth = Array.prototype.indexOf.call(block.querySelectorAll('mjx-container'), formula);
+    if (spans[nth]) { at = spans[nth].start; to = spans[nth].end; }
+  } else if (sel && sel.rangeCount && block.contains(sel.anchorNode)) {
+    var word = sel.toString().trim();
+    if (word && word.length <= 80 && !/\s/.test(word)) {
+      /* The n-th use of the word in the block's text before the click (not
+         counting formulas) is its n-th visible use in the block's source. */
+      var range = sel.getRangeAt(0), pre = document.createRange();
+      pre.setStart(block, 0);
+      pre.setEnd(range.startContainer, range.startOffset);
+      var frag = pre.cloneContents();
+      Array.prototype.forEach.call(frag.querySelectorAll('mjx-container'), function (m) { m.parentNode.removeChild(m); });
+      var before = frag.textContent, mask = makeMask(text.length, hidden.concat(images, spans));
+      var hits = wordUses(text, word, start, end, mask), n = wordUses(before, word, 0, before.length).length;
+      if (hits.length) { at = hits[Math.min(n, hits.length - 1)]; to = at + word.length; }
+    }
+  }
+  if (sel) sel.removeAllRanges();
+  ta.focus();
+  ta.setSelectionRange(at, to);
+  revealOffset(at);
+});
+/* Letters and digits of the common scripts: a word's boundary. Not "_" (a
+   Markdown emphasis delimiter) or punctuation such as curly quotes. */
+var WORD_CHAR = new RegExp('[0-9A-Za-z\u00aa\u00b5\u00ba\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02af\u0370-\u03ff\u0400-\u052f\u0590-\u06ff\u0900-\u0dff\u0e00-\u0eff\u1e00-\u1fff\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]');
+/* Where `word` starts in text[from, to), as a whole word, outside `mask`. */
+function wordUses(text, word, from, to, mask) {
+  var out = [], k = from, w0 = WORD_CHAR.test(word.charAt(0)), w1 = WORD_CHAR.test(word.charAt(word.length - 1));
+  while ((k = text.indexOf(word, k)) >= 0 && k + word.length <= to) {
+    var a = text.charAt(k - 1), b = text.charAt(k + word.length);
+    if (!(w0 && a && WORD_CHAR.test(a)) && !(w1 && b && WORD_CHAR.test(b)) &&
+        !(mask && maskHits(mask, k, k + word.length))) out.push(k);
+    k += word.length;
+  }
+  return out;
+}
+
 applyCompactBtn.addEventListener('click', function () {
   if (!draftReady || ta.readOnly) return;
   var r = compactResult(true);
@@ -6525,6 +7441,15 @@ function setSourceText(next, selStart, selEnd) {
    sits. Lay the text out in a hidden twin of the textarea and measure it. */
 var caretMirror = null;
 function caretTop(offset) {
+  prepareMirror();
+  caretMirror.textContent = ta.value.slice(0, offset);
+  var mark = document.createElement('span');
+  mark.textContent = '\u200b';
+  caretMirror.appendChild(mark);
+  return mark.offsetTop;
+}
+/* The twin, styled and sized like the editor now (fonts and widths change). */
+function prepareMirror() {
   if (!caretMirror) {
     caretMirror = document.createElement('div');
     caretMirror.setAttribute('aria-hidden', 'true');
@@ -6541,11 +7466,7 @@ function caretTop(offset) {
   st.border = '0';
   st.boxSizing = 'border-box';
   st.width = ta.clientWidth + 'px';
-  caretMirror.textContent = ta.value.slice(0, offset);
-  var mark = document.createElement('span');
-  mark.textContent = '\u200b';
-  caretMirror.appendChild(mark);
-  return mark.offsetTop;
+  return caretMirror;
 }
 
 function revealOffset(offset) {
@@ -6812,19 +7733,30 @@ function showToast(msg) {
 /* ---- import table ---- */
 var tableDialog = document.getElementById('tableDialog');
 var tableInput = document.getElementById('tableInput');
+var tableHtmlNote = document.getElementById('tableHtmlNote');
 var tablePreview = document.getElementById('tablePreview');
 var tableWarnings = document.getElementById('tableWarnings');
 var tablePad = document.getElementById('tablePad');
 var insertTableBtn = document.getElementById('insertTable');
 var tableOffer = document.getElementById('tableOffer');
-var tableResult = null, tableTarget = null, pastedTable = null;
+var tableResult = null, tableTarget = null, pastedTable = null, dialogHtmlTable = null;
+
+function clipboardHtmlTable(data, text) {
+  var html = data && data.getData('text/html');
+  if (!html || !/<table[\s/>]/i.test(html)) return null;
+  var grid = readHtmlTable(new DOMParser().parseFromString(html, 'text/html'));
+  return grid ? { grid: grid, text: text } : null;
+}
 
 function refreshTableImport() {
-  tableResult = importTable(tableInput.value, { pad: tablePad.checked });
+  if (dialogHtmlTable && dialogHtmlTable.text !== tableInput.value) dialogHtmlTable = null;
+  tableHtmlNote.hidden = !dialogHtmlTable;
+  var options = { pad: tablePad.checked };
+  tableResult = dialogHtmlTable ? tableMarkdown(dialogHtmlTable.grid, options) : importTable(tableInput.value, options);
   tableWarnings.textContent = '';
   if (tableResult) tableResult.warnings.forEach(function (warning) {
     var li = document.createElement('li');
-    li.textContent = 'Line ' + warning.line + ': ' + warning.message;
+    li.textContent = (warning.row ? 'Row ' + warning.row : 'Line ' + warning.line) + ': ' + warning.message;
     tableWarnings.appendChild(li);
   });
   insertTableBtn.disabled = !tableResult;
@@ -6833,6 +7765,7 @@ function refreshTableImport() {
 
 function openTableImport(target, input) {
   tableTarget = target;
+  dialogHtmlTable = target.htmlTable || null;
   tableInput.value = input;
   tableDialog.showModal();
   refreshTableImport();
@@ -6841,12 +7774,19 @@ function openTableImport(target, input) {
 document.getElementById('importTableBtn').addEventListener('click', function () {
   openTableImport({ draft: draftMeta.active, source: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, '');
 });
+tableInput.addEventListener('paste', function (e) {
+  var text = e.clipboardData && e.clipboardData.getData('text/plain').replace(/\r\n?/g, '\n');
+  dialogHtmlTable = clipboardHtmlTable(e.clipboardData, text);
+  /* The native input event checks the resulting textarea. A partial paste
+     leaves other text there, so it follows the regular text import path. */
+  if (!text) refreshTableImport();
+});
 tableInput.addEventListener('input', refreshTableImport);
 tablePad.addEventListener('change', refreshTableImport);
 document.getElementById('cancelTable').addEventListener('click', function () { tableDialog.close(); });
 tableDialog.addEventListener('close', function () {
   if (tableDialog.open) return;
-  tableTarget = tableResult = null;
+  tableTarget = tableResult = dialogHtmlTable = null;
   renderPreview();
 });
 
@@ -6886,13 +7826,16 @@ onEditor('paste', function (e) {
   var text = e.clipboardData && e.clipboardData.getData('text/plain').replace(/\r\n?/g, '\n');
   pastedTable = null;
   tableOffer.hidden = true;
-  if (!text || !looksLikeTablePaste(text)) return;
+  if (ta.readOnly) return;
+  var htmlTable = clipboardHtmlTable(e.clipboardData, text);
+  if (!htmlTable && (!text || !looksLikeTablePaste(text))) return;
   var start = ta.selectionStart;
   pastedTable = {
-    draft: draftMeta.active,
-    source: ta.value.slice(0, start) + text + ta.value.slice(ta.selectionEnd),
+    draft: draftMeta.active, htmlTable: htmlTable,
+    source: ta.value.slice(0, start) + text + ta.value.slice(text ? ta.selectionEnd : start),
     start: start, end: start + text.length
   };
+  if (!text) tableOffer.hidden = false; /* HTML alone has no native text insertion to trigger input. */
 });
 onEditor('input', function () {
   if (pastedTable && pastedTable.source !== ta.value) pastedTable = null;
@@ -6938,6 +7881,9 @@ storeGet(PREFS_KEY).then(function (v) {
         });
       }
       if (typeof p.compactOpen === 'boolean') restore('compactOpen', p.compactOpen);
+      if (typeof p.wordingOpen === 'boolean') restore('wordingOpen', p.wordingOpen);
+      if (typeof p.sectionsOpen === 'boolean') restore('sectionsOpen', p.sectionsOpen);
+      if (typeof p.spellcheck === 'boolean') restore('spellcheck', p.spellcheck);
     } catch (e) {}
   }
   prefsRestored = true;
