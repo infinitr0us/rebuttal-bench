@@ -361,6 +361,71 @@ try {
     }
     return true;`);
 
+  const htmlPaste = `
+    const plain = 'Models and scores';
+    const html = '<table><tr><td>Model</td><td>Score</td></tr>' +
+      '<tr><td><a href="#base"><b>Base</b></a></td><td>8</td></tr></table>';
+    const note = document.getElementById('tableHtmlNote');
+    const paste = (field, markup = html, text = plain) => {
+      const data = new DataTransfer();
+      data.setData('text/plain', text);
+      data.setData('text/html', markup);
+      if (field.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, cancelable: true }))) {
+        document.execCommand('insertText', false, text);
+      }
+    };`;
+  await check('an HTML clipboard table offers conversion on its exact range with one undo', htmlPaste + `
+    setSourceText('before X after', 7, 8);
+    paste(ta);
+    const original = 'before ' + plain + ' after';
+    if (ta.value !== original || tableOffer.hidden) return 'missing native paste or HTML offer';
+    ta.setSelectionRange(0, 0);
+    document.getElementById('convertPaste').click();
+    try {
+      if (!tableDialog.open || tableInput.value !== plain || !note?.getClientRects().length ||
+          !tableWarnings.textContent.includes('Row 2:')) return 'missing clipboard text, HTML note or row warning';
+      if (tablePad.checked) tablePad.click();
+      insertTableBtn.click(); await wait(100);
+      if (ta.value !== 'before \\n\\n|Model|Score|\\n|:-|-:|\\n|**Base**|8|\\n\\n after' || !tableOffer.hidden) return ta.value;
+      ta.focus(); document.execCommand('undo');
+      return ta.value === original || ta.value;
+    } finally { if (tableDialog.open) tableDialog.close(); }`);
+
+  await check('pasting HTML in Import table uses its formatting until the plain text changes', htmlPaste + `
+    document.getElementById('importTableBtn').click();
+    try {
+      tableInput.focus();
+      paste(tableInput);
+      if (tableInput.value !== plain || !note?.getClientRects().length || insertTableBtn.disabled ||
+          !tableResult.markdown.includes('**Base**')) return 'missing HTML conversion in the dialog';
+      tablePad.click();
+      if (note.hidden || !tableResult.markdown.includes('**Base**')) return 'padding lost the HTML';
+      tableInput.select(); document.execCommand('insertText', false, 'A,B\\nx,1');
+      if (!note.hidden || tableResult?.format !== 'csv' || tableResult.markdown.includes('Base')) return 'stale HTML';
+      tableInput.setSelectionRange(0, 0); paste(tableInput);
+      return note.hidden && tableInput.value === plain + 'A,B\\nx,1' && tableResult?.format === 'csv' ||
+        'partial paste discarded the surrounding text';
+    } finally { tableDialog.close(); }`);
+
+  await check('one-row, one-column and one-cell HTML tables leave the paste alone', htmlPaste + `
+    for (const rows of ['<tr><td>x</td><td>y</td></tr>', '<tr><td>x</td></tr><tr><td>y</td></tr>',
+        '<tr><td>layout</td></tr>']) {
+      setSourceText('Intro', 5); paste(ta, '<table>' + rows + '</table>');
+      if (!tableOffer.hidden || ta.value !== 'Intro' + plain) return rows;
+    }
+    return true;`);
+
+  await check('an HTML-only clipboard can offer a table without replacing selected editor text', htmlPaste + `
+    setSourceText('Keep this', 0, 4);
+    const data = new DataTransfer(); data.setData('text/html', html);
+    ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, cancelable: true }));
+    if (tableOffer.hidden || ta.value !== 'Keep this') return 'missing HTML-only offer';
+    document.getElementById('convertPaste').click();
+    try {
+      return tableDialog.open && tableInput.value === '' && !note.hidden && tableResult?.format === 'html' ||
+        'missing HTML-only preview';
+    } finally { if (tableDialog.open) tableDialog.close(); }`);
+
   await check('math compaction becomes available when MathJax is ready, even for a cached draft', `
     const src = '$ x + \\\\frac{1}{2} $';
     setSourceText(src, 0);

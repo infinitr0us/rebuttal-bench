@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.7.0 (unreleased)
+
+### Tables pasted from Word, Google Docs and web pages
+
+- Copy a table from Word, Google Docs, Sheets, Excel, or a web page and paste it into the
+  editor. Choose *Convert* to preview the Markdown. Bold, italics, and alignment carry over
+  when the clipboard includes them as tags or inline styles. Merged cells become ordinary
+  cells, and warnings point to the affected rows.
+- You can also paste directly into *Import table*. Editing the text there switches the preview
+  to your edited version. One undo after insertion brings back the original editor text.
+
 ## 3.6.0 (unreleased)
 
 ### Import

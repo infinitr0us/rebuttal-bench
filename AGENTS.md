@@ -39,9 +39,19 @@ with a warning. Preserve the cell contents through both GFM pipe splitting and i
 Run Fix all before measuring column padding. `tests/table-import.test.js` checks the exact
 source in both layouts, sanitized cell contents and the TeX that reaches MathJax.
 
+`readHtmlTable(doc)` takes a parsed document (DOMParser on the page, jsdom in tests) and
+reads the first table with at least two rows and columns. `importHtmlTable(doc, options)` and
+the text importer share `tableMarkdown`. HTML warnings use one-based table rows. Place each
+merged cell's text at its top left. Read inline styles and attributes only. Google Docs wraps
+the fragment in a normal-weight `b` and turns bold on again in spans. Word nests unstyled
+spans inside bold tags. Excel can supply styles through classes in a separate stylesheet,
+so its class-only cells use plain formatting and the usual numeric-column alignment.
+
 The dialog shares the source preview's renderer and MathJax queue. Capture the original
 selection for insertion. A direct paste stays native and its conversion offer refers to the
 exact pasted range and draft. Use `setSourceText` so one undo restores the text.
+Keep the clipboard grid with its plain text. Once the dialog textarea differs from that
+text, discard the grid and use the regular text importer.
 
 ## The analyzer's model
 
