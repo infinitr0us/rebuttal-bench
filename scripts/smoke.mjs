@@ -612,20 +612,169 @@ try {
     bodyState[id] = 'ready'; window.confirm = () => true; deleteDraft(id); switchDraft('d1');
     return /“Loading one” has not loaded/.test(asked) && !downloaded || { asked, downloaded };`);
 
-  await check('A version that does not fit waits in memory and is written once there is space', `
-    dropHistory('d1');
-    const setItem = Storage.prototype.setItem;
+  await check('with storage full, a new version and a draft each make room from the oldest versions of any draft', `
+    historyKeys().forEach((k) => localStorage.removeItem(k)); historyNewest = {};
+    const id = createDraft('Old one', 'Old text.'); saveDraftMeta();
+    const old = [];
+    for (let i = 0; i < 6; i++) old.unshift({ at: 1000 + i, why: 'test', text: 'old version ' + i + ' ' + 'o'.repeat(400) });
+    localStorage.setItem(HISTORY_PREFIX + id, JSON.stringify(old));
+    /* A quota a few hundred characters above what is stored now. */
+    const used = () => Object.keys(localStorage).reduce((n, k) => n + k.length + localStorage.getItem(k).length, 0);
+    const cap = used() + 300, setItem = Storage.prototype.setItem;
     Storage.prototype.setItem = function (k, v) {
-      if (k.indexOf(HISTORY_PREFIX) === 0) throw new DOMException('full', 'QuotaExceededError');
+      const was = localStorage.getItem(k);
+      if (used() - (was === null ? 0 : k.length + was.length) + k.length + String(v).length > cap) throw new DOMException('full', 'QuotaExceededError');
       return setItem.call(this, k, v);
     };
-    try { keepVersion('test', 'A version kept for later.'); } finally { Storage.prototype.setItem = setItem; }
-    const waiting = !!historyUnsaved.d1 && localStorage.getItem(HISTORY_PREFIX + 'd1') === null &&
-      readHistory('d1').some((v) => v.text === 'A version kept for later.');
-    retryHistory();
-    const written = !historyUnsaved.d1 && (localStorage.getItem(HISTORY_PREFIX + 'd1') || '').indexOf('A version kept for later.') >= 0;
-    dropHistory('d1');
-    return waiting && written || { waiting, written };`);
+    const ats = () => parseHistory(localStorage.getItem(HISTORY_PREFIX + id)).map((v) => v.at);
+    let mine, afterVersion, afterDraft, saved;
+    try {
+      keepVersion('test', 'A new version ' + 'n'.repeat(1000));
+      mine = readHistory('d1').map((v) => v.text.slice(0, 13)); afterVersion = ats();
+      saved = fallbackSet(keyOfDraft(id), 'Old text, now longer: ' + 'd'.repeat(600)); afterDraft = ats();
+    } finally { Storage.prototype.setItem = setItem; }
+    const mineAfter = readHistory('d1').length;
+    window.confirm = () => true; deleteDraft(id); switchDraft('d1'); dropHistory('d1');
+    /* The old draft's oldest versions went first, its newest stayed; nothing waits in memory. */
+    return mine.length === 1 && mine[0] === 'A new version' && afterVersion.length > 0 && afterVersion.length < 6 &&
+      afterVersion[0] === 1005 && saved === true && afterDraft.length < afterVersion.length &&
+      (afterDraft.length === 0 || afterDraft[0] === 1005) && mineAfter === 1 && !window.historyUnsaved ||
+      { mine, afterVersion, afterDraft, saved, mineAfter };`);
+
+  await check('all drafts’ versions together stay within the budget, the oldest going first', `
+    const budget = HISTORY_BUDGET;
+    const id = createDraft('Idle one', 'Idle text.'); saveDraftMeta();
+    localStorage.setItem(HISTORY_PREFIX + id, JSON.stringify([
+      { at: 2000, why: 'test', text: 'idle newer ' + 'i'.repeat(300) },
+      { at: 1000, why: 'test', text: 'idle older ' + 'i'.repeat(300) }]));
+    historyKeys().filter((k) => k !== HISTORY_PREFIX + id).forEach((k) => localStorage.removeItem(k)); historyNewest = {};
+    HISTORY_BUDGET = 1000;
+    try { keepVersion('test', 'Open draft version ' + 'v'.repeat(300)); } finally { HISTORY_BUDGET = budget; }
+    const idle = parseHistory(localStorage.getItem(HISTORY_PREFIX + id)).map((v) => v.at);
+    const mine = readHistory('d1').length, total = historySize(storedHistory());
+    window.confirm = () => true; deleteDraft(id); switchDraft('d1'); dropHistory('d1');
+    return mine === 1 && idle.length === 1 && idle[0] === 2000 && total <= 1000 || { mine, idle, total };`);
+
+  await check('a page back from the back/forward cache takes in a deletion it missed and keeps its open draft', `
+    const id = createDraft('Deleted while away', 'Its text.'); switchDraft(id); await wait(50);
+    const theirs = JSON.parse(localStorage.getItem(DRAFTS_KEY)); /* another window deleted it meanwhile */
+    theirs.list = theirs.list.filter((d) => d.id !== id); theirs.gone[id] = Date.now(); theirs.saved = Date.now();
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(theirs)); localStorage.removeItem(keyOfDraft(id));
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); await wait(50);
+    const stored = JSON.parse(localStorage.getItem(DRAFTS_KEY));
+    const listed = stored.list.some((d) => d.id === id) && !!draftById(id) && draftMeta.active === id;
+    setSourceText('Typed after coming back.', 0); saveDraftNow();
+    const saved = localStorage.getItem(keyOfDraft(id)) === 'Typed after coming back.';
+    window.confirm = () => true; deleteDraft(id); switchDraft('d1'); await wait(50);
+    return listed && saved || { listed, saved, stored: stored.list.map((d) => d.id) };`);
+
+  await check('a late storage event never writes the open draft over a newer text another window saved', `
+    const id = createDraft('Re-created elsewhere', 'Mine.'); switchDraft(id); await wait(50);
+    const base = JSON.parse(localStorage.getItem(DRAFTS_KEY));
+    const deleted = JSON.parse(JSON.stringify(base)); /* another window deletes it */
+    deleted.list = deleted.list.filter((d) => d.id !== id); deleted.gone[id] = Date.now(); deleted.saved = Date.now();
+    await wait(5);
+    const later = JSON.parse(JSON.stringify(base)); /* a third re-creates it and saves a newer text */
+    later.list.forEach((d) => { if (d.id === id) d.at = Date.now(); }); later.gone[id] = deleted.gone[id]; later.saved = Date.now();
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(later));
+    localStorage.setItem(keyOfDraft(id), 'Newer, saved by another window.');
+    window.dispatchEvent(new StorageEvent('storage', { key: DRAFTS_KEY, newValue: JSON.stringify(deleted) })); await wait(50);
+    const kept = localStorage.getItem(keyOfDraft(id)) === 'Newer, saved by another window.';
+    /* A newer deletion stored, but a text written after it under the key: kept too, and listed again. */
+    const again = JSON.stringify({ ...deleted, gone: { ...deleted.gone, [id]: Date.now() + 500 } });
+    localStorage.setItem(DRAFTS_KEY, again); localStorage.setItem(keyOfDraft(id), 'Written after the deletion.');
+    window.dispatchEvent(new StorageEvent('storage', { key: DRAFTS_KEY, newValue: again })); await wait(50);
+    const guarded = localStorage.getItem(keyOfDraft(id)) === 'Written after the deletion.' &&
+      JSON.parse(localStorage.getItem(DRAFTS_KEY)).list.some((d) => d.id === id);
+    /* A deletion nobody answered still brings the draft back with this window's text. */
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify({ ...deleted, gone: { ...deleted.gone, [id]: Date.now() + 2000 } }));
+    localStorage.removeItem(keyOfDraft(id));
+    window.dispatchEvent(new StorageEvent('storage', { key: DRAFTS_KEY, newValue: localStorage.getItem(DRAFTS_KEY) })); await wait(50);
+    const recreated = localStorage.getItem(keyOfDraft(id)) === ta.value && !!draftById(id);
+    window.confirm = () => true; deleteDraft(id); switchDraft('d1'); await wait(50);
+    return kept && guarded && recreated || { kept, guarded, recreated, stored: localStorage.getItem(keyOfDraft(id)), value: ta.value };`);
+
+  await check('a draft that needs the space gets it even from History keys that cannot be read or shortened', `
+    historyKeys().forEach((k) => localStorage.removeItem(k)); historyNewest = {};
+    localStorage.setItem(HISTORY_PREFIX + 'dbroken01', 'broken'); localStorage.setItem(HISTORY_PREFIX + 'dempty001', '[]');
+    let setItem = Storage.prototype.setItem, ok, left;
+    Storage.prototype.setItem = function (k, v) {
+      if (k.indexOf(HISTORY_PREFIX) !== 0 && Object.keys(localStorage).some((x) => x.indexOf(HISTORY_PREFIX) === 0)) throw new DOMException('full', 'QuotaExceededError');
+      return setItem.call(this, k, v);
+    };
+    try { ok = fallbackSet(DRAFT_KEY + '-smokeroom', 'needed'); } finally { Storage.prototype.setItem = setItem; }
+    left = historyKeys().length; fallbackDel(DRAFT_KEY + '-smokeroom');
+    /* Over its quota, a browser refuses even a shorter History list, but not a removal. */
+    localStorage.setItem(HISTORY_PREFIX + 'd1', JSON.stringify([{ at: 2, why: 'test', text: 'b'.repeat(300) }, { at: 1, why: 'test', text: 'a'.repeat(300) }]));
+    const used = () => Object.keys(localStorage).reduce((n, k) => n + k.length + localStorage.getItem(k).length, 0);
+    const cap = used() - 100;
+    Storage.prototype.setItem = function (k, v) {
+      const was = localStorage.getItem(k);
+      if (used() - (was === null ? 0 : k.length + was.length) + k.length + String(v).length > cap) throw new DOMException('full', 'QuotaExceededError');
+      return setItem.call(this, k, v);
+    };
+    let over;
+    try { over = fallbackSet(DRAFT_KEY + '-smokeroom', 'needed'); } finally { Storage.prototype.setItem = setItem; }
+    fallbackDel(DRAFT_KEY + '-smokeroom'); dropHistory('d1');
+    return ok === true && left === 0 && over === true || { ok, left, over };`);
+
+  await check('messages show above History and Split', `
+    const z = (el) => +getComputedStyle(el).zIndex;
+    return z(toast) > z(historyDialog) && z(toast) > z(splitDialog) || [z(toast), z(historyDialog), z(splitDialog)];`);
+
+  await check('Import adds an exported file’s new drafts as tabs, skips those already here, and changes nothing else', `
+    const files = [], realDownload = downloadFile;
+    downloadFile = function (name, content) { files.push(content); return true; };
+    exportAllDrafts();
+    downloadFile = realDownload;
+    const file = JSON.parse(files[0]);
+    file.drafts.push({ name: file.drafts[0].name, text: 'An answer from another browser.' });
+    const active = draftMeta.active, text = ta.value, n = draftMeta.list.length;
+    const bodies = () => Object.keys(localStorage).filter((k) => k.indexOf(DRAFT_KEY) === 0 && k !== DRAFTS_KEY).sort();
+    const before = bodies().map((k) => [k, localStorage.getItem(k)]);
+    importDrafts(JSON.stringify(file), 'backup.json');
+    const msg = toast.textContent;
+    const added = draftMeta.list.filter((d) => draftText(d.id) === 'An answer from another browser.');
+    const unchanged = before.every(([k, v]) => localStorage.getItem(k) === v) && bodies().length === before.length + 1;
+    const listed = !!added[0] && JSON.parse(localStorage.getItem(DRAFTS_KEY)).list.some((d) => d.id === added[0].id);
+    const count = draftMeta.list.length, stayed = draftMeta.active === active && ta.value === text;
+    importDrafts(JSON.stringify(file), 'backup.json');
+    const again = toast.textContent, countAgain = draftMeta.list.length;
+    window.confirm = () => true; added.forEach((d) => deleteDraft(d.id));
+    return count === n + 1 && added.length === 1 && added[0].name === file.drafts[0].name + ' (2)' && stayed && unchanged &&
+      listed && /^Imported 1 draft as new tabs/.test(msg) && new RegExp('Already here: ' + n).test(msg) &&
+      /are already here/.test(again) && countAgain === count ||
+      { count, n, added: added.map((d) => d.name), stayed, unchanged, listed, msg, again };`);
+
+  await check('Import leaves out a draft this browser has no room for, names it, and gives up no earlier version', `
+    historyKeys().forEach((k) => localStorage.removeItem(k)); historyNewest = {};
+    keepVersion('test', 'A version to keep.');
+    const known = new Set(Object.keys(localStorage)), setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      if (k.indexOf(DRAFT_KEY + '-') === 0 && !known.has(k)) throw new DOMException('full', 'QuotaExceededError');
+      return setItem.call(this, k, v);
+    };
+    const n = draftMeta.list.length;
+    let msg;
+    try {
+      importDrafts(JSON.stringify({ format: 'rebuttal-bench-drafts', drafts: [{ name: 'Too big', text: 'No room for this one.' }] }), 'x.json');
+      msg = toast.textContent;
+    } finally { Storage.prototype.setItem = setItem; }
+    const kept = readHistory(draftMeta.active).some((v) => v.text === 'A version to keep.');
+    dropHistory(draftMeta.active);
+    return draftMeta.list.length === n && /^Nothing was imported/.test(msg) && /No room in this browser for “Too big”/.test(msg) &&
+      kept && !Object.keys(memNewer).length || { n: draftMeta.list.length, msg, kept, memNewer: Object.keys(memNewer) };`);
+
+  await check('Import reads a chosen file: a Markdown file is one draft named after it, and the open draft stays open', `
+    const active = draftMeta.active, dt = new DataTransfer();
+    dt.items.add(new File(['\\ufeff# Reviewer Q7\\r\\n\\r\\nThanks.'], 'Reviewer Q7.md', { type: 'text/markdown' }));
+    importFile.files = dt.files;
+    importFile.dispatchEvent(new Event('change'));
+    await wait(300);
+    const d = draftMeta.list.find((x) => x.name === 'Reviewer Q7'), text = d && draftText(d.id);
+    const tab = d && !!draftTabs.querySelector('.dtab[data-id="' + d.id + '"]');
+    if (d) { window.confirm = () => true; deleteDraft(d.id); }
+    return text === '# Reviewer Q7\\n\\nThanks.' && tab && draftMeta.active === active || { text, tab, msg: toast.textContent };`);
 
   await check('Restore does not replace text another window saved since this one loaded it', `
     keepVersion('test', 'An older version.');
@@ -707,14 +856,6 @@ try {
     deleteDraft(id); switchDraft('d1'); await wait(50);
     return restored && draftMeta.active === 'd1' && !draftById(id) || { value: ta.value, msg };`);
 
-  await check('versions waiting in memory survive when stored versions give way to a draft', `
-    keepVersion('test', 'Stored version.');
-    historyUnsaved.d1 = [{ at: Date.now(), why: 'test', text: 'Waiting in memory.' }]; /* did not fit */
-    dropAllHistory();
-    const kept = readHistory('d1').some((v) => v.text === 'Waiting in memory.');
-    dropHistory('d1');
-    return kept || readHistory('d1');`);
-
   await check('an offer to convert a pasted table expires when the open draft changes', `
     const origId = draftMeta.active;
     const tsv = 'A\\tB\\n1\\t2';
@@ -743,17 +884,14 @@ try {
     setSourceText('First draft $x$.', 0); saveDraftNow();
     return focusKept || document.activeElement && document.activeElement.outerHTML.slice(0, 80);`);
 
-  await check('Export asks about a draft whose read never answered, and forgets a deleted draft’s unsaved versions', `
+  await check('Export asks about a draft whose read never answered', `
     const id = createDraft('Never answered', ''); saveDraftMeta();
     fallbackDel(keyOfDraft(id)); delete draftTexts[id]; bodyKnown[id] = false; /* as after the 8 s watchdog */
     let asked = '';
     window.confirm = (q) => { asked = q; return false; };
     exportAllDrafts();
-    historyUnsaved[id] = [{ at: 1, why: 'test', text: 'Unsaved version.' }];
     window.confirm = () => true; deleteDraft(id); switchDraft('d1');
-    historyUnsaved[id] = [{ at: 1, why: 'test', text: 'Unsaved version.' }]; /* as if it came back */
-    pruneHistory();
-    return /“Never answered” has not loaded/.test(asked) && !historyUnsaved[id] || { asked, unsaved: !!historyUnsaved[id] };`);
+    return /“Never answered” has not loaded/.test(asked) || { asked };`);
 
   await check('a fresh editor after a draft switch still offers to convert a pasted table', `
     const origId = draftMeta.active;
@@ -863,6 +1001,58 @@ try {
     window.confirm = () => true;
     document.querySelector('#draftTools .dclose').click(); await wait(300);
     return ok && draftMeta.list.length === 1 || { meta: draftMeta, value: ta.value, d1: draftTexts.d1 };`);
+
+  await inPage(`importDrafts(JSON.stringify({ format: 'rebuttal-bench-drafts', drafts: [{ name: 'Imported here', text: 'Imported $q$.' }] }), 'x.json');
+    await wait(400); return true;`);
+  await load();
+  await check('with an asynchronous store, an imported draft reaches it and is there after a reload', `
+    const d = draftMeta.list.find((x) => x.name === 'Imported here');
+    const inStore = !!d && localStorage.getItem('stub:' + keyOfDraft(d.id)) === 'Imported $q$.' &&
+      JSON.parse(localStorage.getItem('stub:' + DRAFTS_KEY)).list.some((x) => x.id === d.id);
+    const ok = inStore && draftText(d.id) === 'Imported $q$.' && ta.value === 'Theirs $b$.';
+    if (d) { window.confirm = () => true; deleteDraft(d.id); await wait(300); }
+    return ok || { found: !!d, inStore, list: draftMeta.list.map((x) => x.name), value: ta.value };`);
+
+  await check('with an asynchronous store, a merge that brings back the open draft deleted on another device brings back its text', `
+    const id = createDraft('Deleted on another device', 'Still here $r$.'); switchDraft(id); await wait(500);
+    const s = JSON.parse(localStorage.getItem('stub:' + DRAFTS_KEY)); /* that device deleted it */
+    s.list = s.list.filter((d) => d.id !== id); s.gone[id] = Date.now(); s.saved = Date.now();
+    localStorage.setItem('stub:' + DRAFTS_KEY, JSON.stringify(s)); localStorage.removeItem('stub:' + keyOfDraft(id));
+    saveDraftMeta(); await wait(700);
+    const listed = JSON.parse(localStorage.getItem('stub:' + DRAFTS_KEY)).list.some((d) => d.id === id);
+    const body = localStorage.getItem('stub:' + keyOfDraft(id));
+    window.confirm = () => true; deleteDraft(id); await wait(300);
+    return listed && body === 'Still here $r$.' || { listed, body };`);
+
+  await check('with an asynchronous store, a draft re-created after a deletion elsewhere keeps its text through a switch right after', `
+    const origId = draftMeta.active;
+    const id = createDraft('Deleted in another window', 'Keep me $k$.'); switchDraft(id); await wait(500);
+    const theirs = JSON.parse(localStorage.getItem(DRAFTS_KEY)); /* another window deletes it, here and in the store */
+    theirs.list = theirs.list.filter((d) => d.id !== id); theirs.gone[id] = Date.now() + 1000; theirs.saved = Date.now();
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(theirs)); localStorage.removeItem(keyOfDraft(id));
+    localStorage.removeItem('stub:' + keyOfDraft(id));
+    window.dispatchEvent(new StorageEvent('storage', { key: DRAFTS_KEY, newValue: JSON.stringify(theirs) }));
+    switchDraft(origId); /* before the store has answered */
+    const localAtOnce = localStorage.getItem(keyOfDraft(id));
+    await wait(600);
+    const stored = localStorage.getItem('stub:' + keyOfDraft(id));
+    const listed = JSON.parse(localStorage.getItem(DRAFTS_KEY)).list.some((d) => d.id === id);
+    window.confirm = () => true; deleteDraft(id); await wait(300);
+    return localAtOnce === 'Keep me $k$.' && stored === 'Keep me $k$.' && listed || { localAtOnce, stored, listed };`);
+
+  await check('with an asynchronous store, re-creating never sends this window’s text over one another window saved meanwhile', `
+    const origId = draftMeta.active;
+    const id = createDraft('Saved meanwhile', 'Old text $o$.'); switchDraft(id); await wait(500);
+    const theirs = JSON.parse(localStorage.getItem(DRAFTS_KEY));
+    theirs.list = theirs.list.filter((d) => d.id !== id); theirs.gone[id] = Date.now() + 1000; theirs.saved = Date.now();
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(theirs)); localStorage.removeItem(keyOfDraft(id));
+    localStorage.removeItem('stub:' + keyOfDraft(id));
+    window.dispatchEvent(new StorageEvent('storage', { key: DRAFTS_KEY, newValue: JSON.stringify(theirs) }));
+    localStorage.setItem(keyOfDraft(id), 'Newer, from a third window.'); /* while the store is read */
+    await wait(600);
+    const stored = localStorage.getItem('stub:' + keyOfDraft(id)), local = localStorage.getItem(keyOfDraft(id));
+    window.confirm = () => true; switchDraft(origId); deleteDraft(id); await wait(300);
+    return stored !== 'Old text $o$.' && local === 'Newer, from a third window.' || { stored, local };`);
 
   results.push([errors.length === 0, 'no uncaught page errors', errors.join(' | ')]);
 } catch (e) {

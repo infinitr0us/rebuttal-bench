@@ -1,7 +1,8 @@
 'use strict';
-// Earlier versions of a draft (parseHistory, historyAdd, historyDue,
-// mergeHistory) and the export file (draftsFile). The page keeps versions in
-// this browser only; these are the rules it applies to them.
+// Earlier versions of a draft (parseHistory, historyAdd, historyDue, the
+// budget for all drafts: historySize, fitHistory) and drafts as files
+// (draftsFile, readDraftsFile, importPlan). The page keeps versions in this
+// browser only; these are the rules it applies to them.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadAnalyzer } = require('./lib/page');
@@ -49,10 +50,38 @@ test('history is capped by count and by characters, and always keeps the newest'
   assert.equal(A.historyAdd([], huge, '', 1).length, 1, 'a single huge version is still kept');
 });
 
-test('versions waiting in memory merge with the stored ones, each once', () => {
-  const stored = [{ at: 3, why: 'b', text: 'three' }, { at: 1, why: 'a', text: 'one' }];
-  const waiting = [{ at: 4, why: 'c', text: 'four' }, { at: 3, why: 'b', text: 'three' }];
-  assert.deepEqual(plain(A.mergeHistory(waiting, stored)).map((v) => v.text), ['four', 'three', 'one']);
+test('all drafts together stay within a budget, the oldest versions going first, whichever draft has them', () => {
+  const v = (at, text) => ({ at, why: 'w', text });
+  const lists = {
+    open: [v(50, 'open newest'), v(10, 'open oldest')],
+    idle: [v(40, 'idle newer'), v(20, 'idle older'), v(5, 'idle oldest')],
+    empty: [],
+  };
+  const size = A.historySize(lists);
+  assert.equal(size, Object.values(lists).flat().reduce((n, x) => n + JSON.stringify(x).length + 1, 0));
+  // Within the budget nothing goes, and the lists are the same objects.
+  const same = A.fitHistory(lists, size);
+  for (const id of Object.keys(lists)) assert.equal(same[id], lists[id], id);
+  // Each step down drops the next oldest version: 5, then 10, then 20, ...
+  const cost = (x) => JSON.stringify(x).length + 1;
+  const order = Object.values(lists).flat().sort((a, b) => a.at - b.at);
+  let budget = size;
+  for (let k = 1; k <= order.length; k++) {
+    budget -= cost(order[k - 1]);
+    const fit = plain(A.fitHistory(lists, budget));
+    const kept = Object.values(fit).flat().map((x) => x.at).sort((a, b) => a - b);
+    assert.deepEqual(kept, order.slice(k).map((x) => x.at), 'budget ' + budget);
+    assert.ok(A.historySize(fit) <= budget);
+    // What goes is always the end of a list: each stays newest first.
+    for (const id of Object.keys(fit)) assert.deepEqual(fit[id], plain(lists[id]).slice(0, fit[id].length), id);
+  }
+  assert.deepEqual(plain(A.fitHistory(lists, 0)), { open: [], idle: [], empty: [] });
+  // One byte over drops the oldest one; versions of the same time go from the end of their list.
+  const tie = { a: [v(7, 'x'), v(7, 'y')], b: [v(7, 'z')] };
+  const fit = plain(A.fitHistory(tie, A.historySize(tie) - 1));
+  assert.equal(fit.a.length + fit.b.length, 2);
+  assert.deepEqual(fit.a, plain(tie.a).slice(0, fit.a.length));
+  assert.ok(A.HISTORY_BUDGET >= 10 * A.HISTORY_CHARS, 'about ten drafts at their own cap');
 });
 
 test('while editing, a version is due every HISTORY_EVERY', () => {
@@ -71,4 +100,52 @@ test('an export holds every draft, by name and exact text, in tab order', () => 
   // Control characters and lone surrogates survive the JSON round trip.
   const odd = [{ name: 'x', text: '\u0000\u001b\ud800 end' }];
   assert.deepEqual(JSON.parse(A.draftsFile(odd, 0)).drafts, odd);
+  // An exported file reads back as the same drafts.
+  assert.deepEqual(plain(A.readDraftsFile(file, 'rebuttal-drafts-2026-11-21.json')), { drafts, error: null });
+});
+
+test('reading files for import', () => {
+  const md = plain(A.readDraftsFile('# Answer\r\n\r\nText.', 'C:\\Users\\me\\Reviewer   9xY2.md'));
+  assert.deepEqual(md, { drafts: [{ name: 'Reviewer 9xY2', text: '# Answer\n\nText.' }], error: null });
+  assert.equal(A.readDraftsFile('x', '').drafts[0].name, 'Imported');
+  // A draft that starts with a brace is still a draft.
+  assert.deepEqual(plain(A.readDraftsFile('{x} is the set.', 'set.txt')).drafts, [{ name: 'set', text: '{x} is the set.' }]);
+  assert.match(A.readDraftsFile('{"a": 1}', 'other.json').error, /not exported by Rebuttal Bench/);
+  assert.match(A.readDraftsFile('{"format": "rebuttal-bench-drafts", "drafts": []}', 'x.json').error, /no drafts/);
+  assert.match(A.readDraftsFile('PK\u0003\u0004\u0000\u0000', 'paper.docx').error, /not a text file/);
+  // Every draft Export wrote comes back, however many.
+  const many = { format: 'rebuttal-bench-drafts', drafts: Array.from({ length: 80 }, (_, i) => ({ name: 'D' + i, text: 't' + i })) };
+  assert.equal(A.readDraftsFile(JSON.stringify(many), 'x.json').drafts.length, 80);
+  // A Markdown or text file is one draft, even when its text is JSON, or an export.
+  for (const text of ['{"score": 4}', JSON.stringify(many)]) {
+    assert.deepEqual(plain(A.readDraftsFile(text, 'A.md')), { drafts: [{ name: 'A', text }], error: null });
+  }
+  assert.match(A.readDraftsFile(JSON.stringify({ ...many, version: 2 }), 'x.json').error, /newer version/);
+  const odd = { format: 'rebuttal-bench-drafts', drafts: [{ name: 7, text: 'kept' }, { name: 'no text' }, null, { name: ' Spaced\tname ', text: 'a\r\nb' }] };
+  assert.deepEqual(plain(A.readDraftsFile(JSON.stringify(odd), 'x.json')).drafts,
+    [{ name: 'Imported', text: 'kept' }, { name: 'Spaced name', text: 'a\nb' }]);
+});
+
+test('an import adds only new texts, under names no draft has, and replaces nothing', () => {
+  const existing = [{ name: 'Draft 1', text: 'mine' }, { name: 'Reviewer aBcD', text: 'answer' }];
+  const plan = plain(A.importPlan(existing, [
+    { name: 'Reviewer aBcD', text: 'answer' },     // already here
+    { name: 'Reviewer aBcD', text: 'other answer' }, // same name, new text
+    { name: 'reviewer abcd', text: 'third' },       // names compare without case
+    { name: 'General', text: 'g' },
+    { name: 'General', text: 'g' },                  // twice in the file
+  ]));
+  assert.deepEqual(plan, {
+    add: [
+      { name: 'Reviewer aBcD (2)', text: 'other answer' },
+      { name: 'reviewer abcd (3)', text: 'third' },
+      { name: 'General', text: 'g' },
+    ],
+    same: 2,
+  });
+  // A draft whose text is not known here keeps its name but matches no text.
+  assert.deepEqual(plain(A.importPlan([{ name: 'B', text: null }], [{ name: 'B', text: 'null' }, { name: 'X', text: '' }])),
+    { add: [{ name: 'B (2)', text: 'null' }, { name: 'X', text: '' }], same: 0 });
+  // Texts that look like object keys are ordinary texts.
+  assert.equal(A.importPlan([], [{ name: 'x', text: '__proto__' }, { name: 'y', text: 'constructor' }]).add.length, 2);
 });
