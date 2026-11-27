@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.11.0 (unreleased)
+## 3.11.0 (2026-11-27)
 
 ### Paste from Google Docs or Word
 - Formatted text pasted into the editor offers *Convert*: headings, bold and italics, links,
