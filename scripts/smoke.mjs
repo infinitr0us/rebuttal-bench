@@ -1223,6 +1223,99 @@ try {
     return card && elsewhere && renamed && draftMeta.active === home && !draftById(ab) && !draftById(k9) ||
       { card, elsewhere, renamed, titles: titles() };`);
 
+  // Native input creates the undo entries that assigning .value cannot.
+  async function key(key, code, keyCode, modifiers = 0) {
+    for (const type of ['rawKeyDown', 'keyUp']) {
+      const event = { type, key, code, windowsVirtualKeyCode: keyCode, modifiers };
+      if (process.platform === 'darwin' && modifiers === 2) {
+        event.modifiers = 4;
+        if (type === 'rawKeyDown') event.commands = [{ z: 'Undo', y: 'Redo', v: 'Paste' }[key]];
+      }
+      await send('Input.dispatchKeyEvent', event, sessionId);
+    }
+  }
+  const undo = () => key('z', 'KeyZ', 90, 2);
+  const redo = () => key('y', 'KeyY', 89, 2);
+  const typeText = text => send('Input.insertText', { text }, sessionId);
+  await inPage(`window.undoOriginal = draftMeta.active; window.undoA = createDraft("Isolation A", "Body A"); window.undoB = createDraft("Isolation B", "Body B");
+    localStorage.setItem(reviewKey(undoA), "Review A"); localStorage.setItem(reviewKey(undoB), "Review B");
+    switchDraft(undoA); viewReviewBtn.click(); await wait(80); ta.focus(); ta.setSelectionRange(6,6);`);
+  await typeText(' authored');
+  await inPage('reviewInput.focus();');
+  await undo();
+  await check('Undo in the review cannot remove native typing in the source', 'return ta.value === "Body A authored" && reviewInput.value === "Review A";');
+  await inPage('ta.focus();');
+  await undo();
+  await inPage('reviewInput.focus();');
+  await redo();
+  await check('Redo in the review leaves the source redo entry available', 'return ta.value === "Body A" && reviewInput.value === "Review A";');
+  await inPage('ta.focus();');
+  await redo();
+  await inPage('reviewInput.focus(); reviewInput.select();');
+  await typeText('Changed A');
+  await inPage('ta.focus();');
+  await undo();
+  await check('Undo in the source preserves native review edits', 'return ta.value === "Body A" && reviewInput.value === "Changed A";');
+  await redo();
+  await check('Redo in the source preserves the review', 'return reviewInput.value === "Changed A" && ta.value === "Body A authored";');
+  await inPage('switchDraft(undoB); await wait(80); reviewInput.focus();');
+  await undo();
+  await check('Undo in another draft cannot replay the previous review', 'await wait(450); return reviewInput.value === "Review B" && storedReview(undoB) === "Review B";');
+  await redo();
+  await check('Redo in another draft cannot replay the previous review', 'await wait(450); return reviewInput.value === "Review B" && storedReview(undoB) === "Review B" && storedReview(undoA) === "Changed A";');
+
+  await inPage('viewPreviewBtn.click(); viewPreviewBtn.focus();');
+  await key('ArrowRight', 'ArrowRight', 39);
+  await check('Right Arrow activates Review and moves the tab stop', `
+    return document.activeElement === viewReviewBtn && viewReviewBtn.tabIndex === 0 && viewPreviewBtn.tabIndex === -1 &&
+      !reviewView.hidden && viewReviewBtn.getAttribute('aria-selected') === 'true' && scroller.getAttribute('aria-hidden') === 'true';`);
+  await key('ArrowLeft', 'ArrowLeft', 37);
+  await check('Left Arrow returns to the labelled Preview tabpanel', `
+    return document.activeElement === viewPreviewBtn && viewPreviewBtn.tabIndex === 0 && viewReviewBtn.tabIndex === -1 &&
+      scroller.getAttribute('role') === 'tabpanel' && scroller.getAttribute('aria-labelledby') === viewPreviewBtn.id && reviewView.hidden;`);
+
+  await check('the review document follows both page themes', `
+    const original = prefs.theme;
+    const colors = ['light','dark'].map(theme => {
+      prefs.theme = theme; applyPrefs();
+      const style = reviewInput.ownerDocument.defaultView.getComputedStyle(reviewInput);
+      return [style.backgroundColor, style.color, reviewInput.ownerDocument.documentElement.style.colorScheme];
+    });
+    prefs.theme = original; applyPrefs();
+    return colors[0][0] !== colors[1][0] && colors[0][1] !== colors[1][1] && colors[0][2] === 'light' && colors[1][2] === 'dark' || colors;`);
+
+  // Copy a synthetic forum selection and paste it through the OS clipboard.
+  await inPage(`viewReviewBtn.click(); const note = document.createElement("div");
+    note.innerHTML = '<strong class="note-content-field">Questions:</strong> <div class="note-content-value"><p>For the axes:</p><ol><li>Which unit?</li><li>Which scale?</li></ol></div>';
+    document.body.appendChild(note); const range = document.createRange(); range.selectNodeContents(note);
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range); if (!document.execCommand("copy")) throw Error("copy");
+    note.remove(); reviewInput.focus(); reviewInput.select();`);
+  await key('v', 'KeyV', 86, 2);
+  await check('forum paste reconstructs the HTML list in the review editor', `
+    await wait(100); return reviewInput.value === 'Questions:\\nFor the axes:\\n\\n1. Which unit?\\n2. Which scale?' &&
+      reviewList.querySelectorAll('.rpoint').length === 2 || {value:reviewInput.value};`);
+  await undo();
+  await check('one native undo restores the pre-paste review', 'return reviewInput.value === "Review B" && ta.value === "Body B";');
+
+  await inPage(`window.quoteBase = "Opening.\\n\\n> Which unit describes the temperature axis?\\n\\nClosing.";
+    setSourceText(quoteBase,0); updateAll(); reviewInput.focus(); reviewInput.select();`);
+  await typeText('Questions:\n- Which unit describes the temperature axis?\n- Which scale?');
+  for (const [action, click] of [['Quote', 'reviewList.querySelectorAll(".rquote")[1].click()'], ['Insert skeleton', 'skeletonBtn.click()']]) {
+    await inPage('updateAll(); reviewList.querySelector(".rgo").click(); ' + click);
+    await check(action + ' after a point jump preserves the passage', `
+      return ta.value === "Opening.\\n\\n> Which unit describes the temperature axis?\\n\\n> **Q2.** Which scale?\\n\\nClosing." || {text:ta.value};`);
+    await undo();
+    await check(action + ' after a point jump takes one native undo', 'return ta.value === quoteBase;');
+  }
+  await check('review insertion respects manual selections and paragraph boundaries', `
+    const base = 'One.\\n\\nTwo\\nlines.\\n\\nThree.';
+    function inserted(start, end) { setSourceText(base,0); ta.setSelectionRange(start,end); insertBlock('Quote'); return ta.value; }
+    return inserted(2,8) === 'One.\\n\\nTwo\\nlines.\\n\\nQuote\\n\\nThree.' &&
+      inserted(5,5) === 'One.\\n\\nQuote\\n\\nTwo\\nlines.\\n\\nThree.' &&
+      inserted(0,0) === 'Quote\\n\\n' + base && inserted(6,6) === 'One.\\n\\nQuote\\n\\nTwo\\nlines.\\n\\nThree.';`);
+
+  await inPage('switchDraft(undoOriginal); window.confirm = () => true; deleteDraft(undoA); deleteDraft(undoB);');
+
   /* A Node string with real line breaks; JSON.stringify writes it into the page code. */
   const REVIEW = 'Official Review of Submission1 by Reviewer k9F2\nWeaknesses:\n1. No ablation on the number of experts.\n' +
     '2. Missing comparison with Switch Transformer.\nQuestions:\n- Why is the loss weighted by 0.01?\nRating: 4';

@@ -791,20 +791,16 @@ window.MathJax = {
     overflow: auto;
   }
   .reviewview[hidden] { display: none; }
-  #reviewInput {
+  #reviewSlot {
     flex: none;
     height: 34%;
     min-height: 90px;
     resize: vertical;
-    padding: 8px 10px;
+    overflow: hidden;
     border: 1px solid var(--line);
     border-radius: 6px;
-    background: var(--scroll-bg);
-    color: var(--text);
-    font-family: var(--mono);
-    font-size: 12px;
-    line-height: 1.5;
   }
+  #reviewSlot iframe { display: block; width: 100%; height: 100%; border: 0; }
   .review-bar { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--dim); }
   .review-bar label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
   .review-bar input { margin: 0; accent-color: var(--accent); }
@@ -1128,19 +1124,31 @@ window.MathJax = {
   <section class="pane" aria-label="Rendered preview and the review">
     <div class="pane-head"><div class="viewtabs" role="tablist" aria-label="Preview or review">
       <button type="button" role="tab" id="viewPreview" aria-selected="true" aria-controls="scroller">Preview</button>
-      <button type="button" role="tab" id="viewReview" aria-selected="false" aria-controls="reviewView" title="The review this draft answers, its points, and which of them the draft labels or quotes">Review <span id="reviewBadge" class="rbadge"></span></button>
+      <button type="button" role="tab" id="viewReview" tabindex="-1" aria-selected="false" aria-controls="reviewView" title="The review this draft answers, its points, and which of them the draft labels or quotes">Review <span id="reviewBadge" class="rbadge"></span></button>
     </div><span class="hint" id="viewHint">OpenReview's own note styles, 1:1 at 100%. Double-click to find a spot in the source.</span></div>
     <div class="viewbody">
-      <div class="scroller" id="scroller">
+      <div class="scroller" id="scroller" role="tabpanel" aria-labelledby="viewPreview" tabindex="0">
         <article class="paper" id="preview"><p class="empty">Nothing to preview yet.</p></article>
       </div>
       <div class="reviewview" id="reviewView" role="tabpanel" aria-labelledby="viewReview" hidden>
-        <textarea id="reviewInput" spellcheck="false" readonly aria-label="The review this draft answers"
-          placeholder="Paste the review this draft answers, copied from the OpenReview forum. It stays with this draft, in this browser only, and is never exported."></textarea>
+        <div id="reviewSlot"></div>
+        <template id="reviewEditor">
+          <style>
+            html, body { height: 100%; margin: 0; }
+            textarea {
+              display: block; box-sizing: border-box; width: 100%; height: 100%; resize: none;
+              padding: 8px 10px; border: 0; background: var(--scroll-bg); color: var(--text);
+              font: 12px/1.5 var(--mono);
+            }
+            textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+          </style>
+          <textarea id="reviewInput" spellcheck="false" aria-label="The review this draft answers"
+            placeholder="Paste the review this draft answers, copied from the OpenReview forum. It stays with this draft, in this browser only, and is never exported."></textarea>
+        </template>
         <div class="review-bar">
           <span id="reviewStat" class="review-stat"></span>
           <label title="Quote the first sentence of each point under its label"><input type="checkbox" id="skeletonQuote" checked> with quotes</label>
-          <button type="button" id="skeletonBtn" title="Insert, at the cursor, a label for each point that no part of the draft answers yet (one undo takes it back)">Insert skeleton</button>
+          <button type="button" id="skeletonBtn" title="Insert a separate paragraph for each point that no part of the draft answers yet (one undo takes it back)">Insert skeleton</button>
         </div>
         <div id="reviewNote" class="review-note" hidden></div>
         <div id="reviewList" class="review-list"></div>
@@ -6055,6 +6063,7 @@ function applyPrefs() {
   renderVenueStat();
   skeletonQuote.checked = !!prefs.skeletonQuotes;
   applyView();
+  themeReviewBox();
 }
 
 /* The venue's rule beside the counter: the year of its rules, what its limit
@@ -7839,7 +7848,7 @@ var PREVIEW_HINT = 'OpenReview’s own note styles, 1:1 at 100%. Double-click to
 var REVIEW_HINT = 'The review this draft answers, kept in this browser only. Click a point to go to its answer.';
 var viewPreviewBtn = document.getElementById('viewPreview'), viewReviewBtn = document.getElementById('viewReview');
 var viewHint = document.getElementById('viewHint'), reviewView = document.getElementById('reviewView');
-var reviewInput = document.getElementById('reviewInput'), reviewBadge = document.getElementById('reviewBadge');
+var reviewSlot = document.getElementById('reviewSlot'), reviewInput = null, reviewBadge = document.getElementById('reviewBadge');
 var reviewStat = document.getElementById('reviewStat'), reviewNote = document.getElementById('reviewNote');
 var reviewList = document.getElementById('reviewList'), skeletonQuote = document.getElementById('skeletonQuote');
 var skeletonBtn = document.getElementById('skeletonBtn');
@@ -7853,23 +7862,57 @@ function storedReview(id) {
 }
 function flushReview() {
   clearTimeout(reviewTimer);
-  if (reviewFor === null || reviewInput.value === reviewSaved) return;
+  if (!reviewInput || reviewInput.value === reviewSaved) return;
   var v = reviewInput.value;
   if (v) reviewUnsaved = !fallbackSet(reviewKey(reviewFor), v);
   else { fallbackDel(reviewKey(reviewFor)); reviewUnsaved = false; }
   reviewSaved = v;
 }
-/* Put draft `id`'s review in the box, after saving the one it held. */
+function themeReviewBox() {
+  if (!reviewInput) return;
+  var root = reviewInput.ownerDocument.documentElement, style = getComputedStyle(reviewSlot);
+  ['--scroll-bg', '--text', '--mono', '--accent'].forEach(function (key) {
+    root.style.setProperty(key, style.getPropertyValue(key));
+  });
+  root.style.colorScheme = prefs.theme === 'dark' ? 'dark' : 'light';
+}
+
+/* Chrome's editing history belongs to the document. Give each draft its own
+   review document, and keep its clipboard conversion on that history too. */
 function loadReviewBox(id) {
   flushReview();
+  reviewInput = null;
   reviewFor = id;
-  reviewInput.value = reviewSaved = storedReview(id);
+  reviewSaved = storedReview(id);
   reviewUnsaved = false;
-  reviewInput.readOnly = false;
+  var frame = document.createElement('iframe');
+  frame.title = 'The review this draft answers';
+  frame.srcdoc = '<!doctype html><html lang="en"><meta charset="utf-8">' + document.getElementById('reviewEditor').innerHTML;
+  frame.addEventListener('load', function () {
+    if (reviewSlot.firstChild !== frame) return;
+    reviewInput = frame.contentDocument.getElementById('reviewInput');
+    reviewInput.value = reviewSaved;
+    themeReviewBox();
+    reviewInput.addEventListener('input', reviewEdited);
+    reviewInput.addEventListener('blur', flushReview);
+    reviewInput.addEventListener('paste', function (e) {
+      var html = e.clipboardData && e.clipboardData.getData('text/html');
+      if (!html) return;
+      var text = readHtmlReview(new DOMParser().parseFromString(html, 'text/html'));
+      if (text === null) return;
+      e.preventDefault();
+      if (!frame.contentDocument.execCommand('insertText', false, text)) {
+        reviewInput.setRangeText(text, reviewInput.selectionStart, reviewInput.selectionEnd, 'end');
+        reviewEdited();
+      }
+    });
+  });
+  if (reviewSlot.firstChild) reviewSlot.replaceChild(frame, reviewSlot.firstChild);
+  else reviewSlot.appendChild(frame);
   renderReview();
 }
 function parsedReview() {
-  var v = reviewInput.value;
+  var v = reviewInput ? reviewInput.value : reviewSaved;
   if (reviewParsed.text !== v) reviewParsed = { text: v, r: reviewPoints(v) };
   return reviewParsed.r;
 }
@@ -7878,7 +7921,10 @@ function applyView() {
   var review = prefs.view === 'review';
   viewPreviewBtn.setAttribute('aria-selected', review ? 'false' : 'true');
   viewReviewBtn.setAttribute('aria-selected', review ? 'true' : 'false');
+  viewPreviewBtn.tabIndex = review ? -1 : 0;
+  viewReviewBtn.tabIndex = review ? 0 : -1;
   reviewView.hidden = !review;
+  scroller.setAttribute('aria-hidden', review ? 'true' : 'false');
   scroller.style.visibility = review ? 'hidden' : '';
   viewHint.textContent = review ? REVIEW_HINT : PREVIEW_HINT;
   if (review) renderReview();
@@ -7891,6 +7937,17 @@ function showView(view) {
 }
 viewPreviewBtn.addEventListener('click', function () { showView('preview'); });
 viewReviewBtn.addEventListener('click', function () { showView('review'); });
+
+viewPreviewBtn.parentNode.addEventListener('keydown', function (e) {
+  var tab;
+  if (e.key === 'Home') tab = viewPreviewBtn;
+  else if (e.key === 'End') tab = viewReviewBtn;
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') tab = e.target === viewPreviewBtn ? viewReviewBtn : viewPreviewBtn;
+  else return;
+  e.preventDefault();
+  tab.focus();
+  showView(tab === viewReviewBtn ? 'review' : 'preview');
+});
 
 /* The points of the review against the editor's text as posted (coverage
    offsets moved back into the editor), the badge, and when the view is
@@ -7908,7 +7965,7 @@ function renderReview() {
   if (reviewView.hidden) return;
   var writable = draftReady && !ta.readOnly;
   skeletonBtn.disabled = !writable || !open;
-  reviewStat.textContent = !reviewInput.value.trim() ? '' : !r.points.length
+  reviewStat.textContent = !reviewParsed.text.trim() ? '' : !r.points.length
     ? 'No points found: the Weaknesses, Questions and Limitations fields hold them.'
     : fmt(r.points.length) + ' point' + (r.points.length === 1 ? '' : 's') + ', ' +
       fmt(r.points.length - open) + ' labelled or quoted in the draft' +
@@ -7940,23 +7997,23 @@ function renderReview() {
       escHtml(p.field ? p.field + ': ' : '') + escHtml(p.text.slice(0, 600)) + '"><span class="rlabel">' + escHtml(p.label) +
       '</span><span class="rtext">' + escHtml(p.excerpt) + '</span><span class="rstatus">' + escHtml(status) + '</span></button>' +
       '<button type="button" class="rquote" data-i="' + i + '"' + (writable ? '' : ' disabled') +
-      ' title="Insert this point as a quote at the cursor">Quote</button></div>';
+      ' title="Insert this quote as a separate paragraph">Quote</button></div>';
   });
   reviewList.innerHTML = html;
 }
 
-reviewInput.addEventListener('input', function () {
+function reviewEdited() {
   clearTimeout(reviewTimer);
   reviewTimer = setTimeout(flushReview, 400);
   renderReview();
-});
-reviewInput.addEventListener('blur', flushReview);
+}
 window.addEventListener('pagehide', flushReview);
 window.addEventListener('storage', function (e) {
   /* Another window saved this draft's review: take it unless this box holds
      an edit of its own. */
-  if (reviewFor === null || e.key !== reviewKey(reviewFor) || reviewInput.value !== reviewSaved) return;
-  reviewInput.value = reviewSaved = typeof e.newValue === 'string' ? e.newValue : '';
+  if (reviewFor === null || e.key !== reviewKey(reviewFor) || (reviewInput && reviewInput.value !== reviewSaved)) return;
+  reviewSaved = typeof e.newValue === 'string' ? e.newValue : '';
+  if (reviewInput) reviewInput.value = reviewSaved;
   renderReview();
 });
 
@@ -7965,16 +8022,24 @@ window.addEventListener('storage', function (e) {
    `caret` characters into the block. */
 function insertBlock(block, caret) {
   if (!draftReady || ta.readOnly) return false;
-  var s = ta.selectionStart, e = ta.selectionEnd, v = ta.value, ok = false;
-  var before = v.slice(0, s), after = v.slice(e);
-  var pre = !before.trim() ? '' : /\n\n$/.test(before) ? '' : /\n$/.test(before) ? '\n' : '\n\n';
-  var post = !after ? '' : /^\n\n/.test(after) ? '' : /^\n/.test(after) ? '\n' : '\n\n';
+  var s = ta.selectionEnd, v = ta.value, ok = false;
+  /* A point jump or a manual selection is a location, never text to replace.
+     Inside a paragraph advance to its end; a blank line is already a boundary. */
+  if (v.slice(0, s).trim() && v.slice(s).trim()) {
+    var breaks = /\n[ \t]*\n(?:[ \t]*\n)*/g, m;
+    while ((m = breaks.exec(v)) && breaks.lastIndex < s) { /* preceding paragraphs */ }
+    if (!m) s = v.length;
+    else if (s < m.index) s = m.index;
+  }
+  var before = v.slice(0, s), after = v.slice(s);
+  var pre = !before || /\n[ \t]*\n$/.test(before) ? '' : /\n[ \t]*$/.test(before) ? '\n' : '\n\n';
+  var post = !after || /^\n[ \t]*\n/.test(after) ? '' : /^[ \t]*\n/.test(after) ? '\n' : '\n\n';
   var ins = pre + block + post;
   ta.focus();
-  ta.setSelectionRange(s, e);
+  ta.setSelectionRange(s, s);
   try { ok = document.execCommand('insertText', false, ins); } catch (x) { ok = false; }
   if (!ok) {
-    ta.setRangeText(ins, s, e, 'end');
+    ta.setRangeText(ins, s, s, 'end');
     editSeq++;
     afterSourceChange();
   }
