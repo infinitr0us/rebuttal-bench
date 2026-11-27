@@ -68,9 +68,8 @@ test('NeurIPS: score fields are skipped, a "Clarity:" paragraph inside the weakn
     'Rating: 4: Borderline accept',
   ].join('\n');
   assert.deepEqual(points(text), [
-    ['W1', 'Strengths And Weaknesses', 'The benchmark is useful.'],
-    ['W2', 'Strengths And Weaknesses', 'Clarity: the construction of the distractor set in Section 4 is never explained in enough detail.'],
-    ['W3', 'Strengths And Weaknesses', 'The evaluation uses only two model families.'],
+    ['W1', 'Strengths And Weaknesses', 'Clarity: the construction of the distractor set in Section 4 is never explained in enough detail.'],
+    ['W2', 'Strengths And Weaknesses', 'The evaluation uses only two model families.'],
     ['Q1', 'Questions', 'Could you report variance over seeds?'],
   ]);
 });
@@ -134,4 +133,130 @@ test('coverage: a labelled part, a quote of the point, or nothing', () => {
   assert.deepEqual(plain(A.reviewCoverage(ps, 'Weakness 3: fixed.')).map((c) => c.status),
     ['missing', 'missing', 'labelled', 'missing', 'missing']);
   assert.deepEqual(plain(A.reviewCoverage(ps, '')).map((c) => c.status), ['missing', 'missing', 'missing', 'missing', 'missing']);
+});
+
+const { JSDOM } = require('jsdom');
+const rows = (text) => plain(A.reviewPoints(text).points).map(p => p.label + ' ' + p.text);
+
+test('forum HTML keeps fields, item order, nested lists and paragraphs, including a selection without the outer div', () => {
+  const field = (name, content) => '<div><strong class="note-content-field disable-tex-rendering">' + name +
+    ':</strong><span style="display:inline"> </span><div class="note-content-value markdown-rendered">' + content + '</div></div>';
+  const html = '<h4>Official Review by Reviewer g4H2</h4>' +
+    field('Weaknesses', '<p>Two concerns:</p><ol><li>Missing <em>units</em>.<ul><li>Time axis</li></ul></li><li>Labels overlap.</li></ol>') +
+    field('Questions', '<ul><li>Which run?</li><li>Why stop?</li></ul>') +
+    field('Comments', '<p>Check the legend.</p><p>Show the axes.</p>');
+  const text = A.readHtmlReview(new JSDOM(html).window.document);
+  assert.equal(text, 'Official Review by Reviewer g4H2\nWeaknesses:\nTwo concerns:\n\n1. Missing units.\n  - Time axis\n2. Labels overlap.\n\nQuestions:\n- Which run?\n- Why stop?\n\nComments:\nCheck the legend.\n\nShow the axes.');
+  assert.deepEqual(rows(text), ['W1 Missing units.\n  - Time axis', 'W2 Labels overlap.', 'Q1 Which run?', 'Q2 Why stop?', 'C1 Check the legend.', 'C2 Show the axes.']);
+  assert.equal(A.readHtmlReview(new JSDOM('<ul><li>Clipboard from another app</li></ul>').window.document), null);
+});
+
+test('a plain forum selection separates items, drops list introductions, and keeps wrapped prose', () => {
+  assert.deepEqual(rows('Questions:\nI have two questions:\nWhich axis shows time?\nHow many bins were used?\n\nWeaknesses:\nThe mask had a\nsharp edge.\nThe unit is missing.'), [
+    'Q1 Which axis shows time?', 'Q2 How many bins were used?', 'W1 The mask had a\nsharp edge.', 'W2 The unit is missing.'
+  ]);
+});
+
+test('fragmentary items, an independent paragraph before a list, and a nested list introduction', () => {
+  assert.deepEqual(rows('Weaknesses:\nMissing units\nUnclear axes\n\nThis observation also needs an answer.\n1. Check the timing.\n- Check the indexing.'), [
+    'W1 Missing units', 'W2 Unclear axes', 'W3 This observation also needs an answer.', 'W4 Check the timing.', 'W5 Check the indexing.'
+  ]);
+  assert.deepEqual(rows('Questions:\n- Please clarify:\n  - Which map?\n  - Which grid?'), ['Q1 Which map?', 'Q2 Which grid?']);
+});
+
+test('score and administrative fields bound concerns even with a long inline value or an unfamiliar field name', () => {
+  assert.deepEqual(rows(['Weaknesses:', 'Minor: The axis has no unit.', 'Clarity: Which unit?', 'Rating: Borderline because this needs a better estimate of the error in the appendix.',
+    'Questions: Why five bins?', 'Flag For Ethics Review: The committee has received a separate report covering the use of personal records.',
+    'Limitations: Only one site.', 'Paper Formatting Concerns: None', 'Code Of Conduct Acknowledgement: Affirmed', 'Final Justification:', 'I retained my score.',
+    'Comments: Add the table.', 'Dataset Access Declaration:', 'The form was signed.', 'Questions: Which fold?', 'Resource Availability Declaration: A full statement follows in the record.'].join('\n')), [
+    'W1 Minor: The axis has no unit.', 'W2 Clarity: Which unit?', 'Q1 Why five bins?', 'L1 Only one site.', 'C1 Add the table.', 'Q2 Which fold?'
+  ]);
+});
+
+test('EMNLP and ARR form fields preserve the requests in each category', () => {
+  assert.deepEqual(rows(['Paper Topic And Main Contributions: A filter.', 'Reasons To Accept: Fast.', 'Reasons To Reject:', '1) No memory bound.', '2) Incomplete timing data.',
+    'Questions For The Authors: Which clock?', 'Missing References: Cite the estimator.', 'Typos Grammar Style And Presentation Improvements: Fix column B.', 'Excitement: 4'].join('\n')), [
+    'W1 No memory bound.', 'W2 Incomplete timing data.', 'Q1 Which clock?', 'C1 Cite the estimator.', 'C2 Fix column B.'
+  ]);
+});
+
+test('TMLR form questions and impact answers bound the requested changes', () => {
+  assert.deepEqual(rows(['Summary Of Contributions:', 'Weaknesses:', '- No timing data.',
+    'Are the claims made in the submission supported by accurate, convincing and clear evidence?: No', 'Explain your answer above: This was discussed.',
+    "Would at least some individuals in TMLR's audience be interested in knowing the findings of this paper?: Yes", 'Explain your answer above: Simulation researchers.',
+    'Requested Changes:', 'Critical:', '1. Add a clock.', 'Would strengthen the work:', '2. Plot memory use.', 'Broader Impact Concerns: No concerns.'].join('\n')), [
+    'W1 No timing data.', 'W2 Add a clock.', 'W3 Plot memory use.'
+  ]);
+});
+
+test('ICML placeholders and unqualified endorsements do not become skeleton items', () => {
+  assert.deepEqual(rows(['Claims And Evidence: The claims are well supported.', 'Methods And Evaluation Criteria: See below.',
+    'Theoretical Claims: Does not apply.', 'Experimental Designs Or Analyses: N/A', 'Essential References Not Discussed: No', 'Other Strengths And Weaknesses:',
+    'Strengths:', '- Well organized.', 'Weaknesses:', '- The paper is clear but the units are missing.',
+    'Other Comments Or Suggestions: None.', 'Questions For Authors: See above.'].join('\n')), ['W1 The paper is clear but the units are missing.']);
+});
+
+test('limitations suppress whole acknowledgements while preserving qualified and short answers', () => {
+  for (const value of ['Yes.', 'No', 'N/A', 'The limitations are discussed in the appendix.']) assert.deepEqual(rows('Limitations: ' + value), []);
+  for (const value of ['Yes, but please move them into the main paper.', 'No results on human data.', 'One site.']) assert.deepEqual(rows('Limitations: ' + value), ['L1 ' + value]);
+});
+
+test('point offsets address the original CRLF review', () => {
+  const text = 'Weaknesses:\r\n- Missing units.\r\n  In the map.\r\nQuestions: When exactly?';
+  assert.deepEqual(plain(A.reviewPoints(text).points).map(p => text.slice(p.start, p.end)), ['Missing units.\r\n  In the map.', 'When exactly?']);
+});
+
+test('a question written entirely in Chinese is a point', () => {
+  assert.deepEqual(rows('Questions:\n- 时间单位是什么？'), ['Q1 时间单位是什么？']);
+});
+
+test('review labels and skeleton labels use the same W/Q/L/C grammar', () => {
+  const ps = A.reviewPoints('Weaknesses:\n(Weakness2) Small sample.\n**Q12.** Which year?\n[Limitation 4] One region.\nConcern #7: Fix the axis.\nC8. Adjust the key.\nL9: One season.').points;
+  const names = ['W2', 'Q12', 'L4', 'C7', 'C8', 'L9'];
+  assert.deepEqual(plain(ps.map(p => p.label)), names);
+  for (const quotes of [true, false]) {
+    const source = A.reviewSkeleton(ps, [], quotes).join('\n\n');
+    const coverage = A.reviewCoverage(ps, source);
+    assert.deepEqual(plain(coverage.map(c => c.status)), names.map(() => 'labelled'));
+    assert.deepEqual(plain(A.reviewSkeleton(ps, coverage, quotes)), []);
+  }
+});
+
+test('one heading may cover several labels and a subpart name never covers its parent', () => {
+  const ps = A.reviewPoints('W2: Small sample.\nQuestion1: What unit?\nQ2: Which scale?').points;
+  const heading = '### **(Weakness2, Question1)** Samples and units';
+  const source = 'Opening\n\n' + heading + '\n\n### Q2a\nAn intermediate result.';
+  const coverage = plain(A.reviewCoverage(ps, source));
+  assert.deepEqual(coverage.map(c => c.status), ['labelled', 'labelled', 'missing']);
+  assert.deepEqual(coverage.slice(0, 2).map(c => source.slice(c.start, c.end).trim()), [heading, heading]);
+  for (const label of ['(Weakness2)', '[W2]', 'W2:', '**W2.**', 'Weakness 2']) {
+    assert.equal(A.reviewCoverage(ps, label + '\n\nResponse.')[0].status, 'labelled', label);
+  }
+  for (const suffix of ['a', 'Budget', '三']) assert.equal(A.pointName('Q2' + suffix), null);
+});
+
+test('quote coverage disambiguates shared openings and accepts a complete short point', () => {
+  const shared = 'Which sampling interval did the team use for ';
+  const ps = A.reviewPoints('Questions:\n- ' + shared + 'the spring survey?\n- ' + shared + 'the autumn survey?\n- Any ice?').points;
+  const draft = '> ' + shared + 'the autumn survey?\n\n> Any ice?';
+  const cov = plain(A.reviewCoverage(ps, draft));
+  assert.deepEqual(cov.map(c => c.status), ['missing', 'quoted', 'quoted']);
+  assert.deepEqual(cov.slice(1).map(c => draft.slice(c.start, c.end)), [shared + 'the autumn survey?', 'Any ice?']);
+});
+
+test('only visible quote text counts, including the words of a link label', () => {
+  const q = 'Where is the weather station located?', ps = A.reviewPoints('Questions: ' + q).points;
+  for (const source of ['[site]: /unused "' + q + '"', '[site]: /somewhere "' + q + '"\n\n[Map][site]', '`' + q + '`',
+    '~~~\n' + q + '\n~~~', '<!-- ' + q + ' -->', '[Answer](/map "' + q + '")']) {
+    assert.equal(A.reviewCoverage(ps, source)[0].status, 'missing', source);
+  }
+  assert.equal(A.reviewCoverage(ps, '> [Where is](/map) the weather station located?')[0].status, 'quoted');
+});
+
+test('quote offsets survive case folding and CRLF before and inside the quote', () => {
+  const ps = A.reviewPoints('Questions: Which location did you use?').points;
+  const draft = 'İstanbul\r\n\r\n> Which location\r\n> did you use?';
+  const c = A.reviewCoverage(ps, draft)[0];
+  assert.equal(c.status, 'quoted');
+  assert.equal(draft.slice(c.start, c.end), 'Which location\r\n> did you use?');
 });

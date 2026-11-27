@@ -81,13 +81,15 @@ leave the browser: they autosave on this device only.
   salutation, a *Response to* line or an opening or closing thanks that addresses another
   reviewer (an answer copied from their draft), and an ID in other capitals than its tab.
   Mentions in passing and joint thanks are left alone.
-- **Review.** The right pane switches between the *Preview* and the *Review* of the open draft:
-  paste the review it answers, copied from the forum, and it is cut into points (W1, Q2, … from
-  the Weaknesses, Questions and Limitations fields, or the reviewer's own labels). Each point
-  shows whether the draft has a part labelled for it or quotes it, and a click goes there; the
-  tab shows the count (*3/5*). *Quote* inserts a point as a quote at the cursor, and *Insert
-  skeleton* a label for every point not covered yet, each in one undoable step. The review stays
-  with its draft in this browser only: it is not exported and goes when the draft is deleted.
+- **Review.** Switch the right pane between *Preview* and *Review* with a click or the arrow
+  keys. Paste the forum review your draft answers. A rich paste keeps its fields, paragraphs
+  and lists. Plain text works too. Each weakness, question, limitation or comment gets a label
+  such as W1, Q2, L1 or C1, using the reviewer's label when supplied. Click a covered point
+  to find its label or quotation in the draft. A heading can answer several points together.
+  The tab shows the count (*3/5*). *Quote* inserts the point and *Insert skeleton* adds the
+  missing labels, optionally with quotes. Each inserts at a paragraph boundary or after the
+  paragraph containing the selection's end. One undo restores the draft. Each review has its
+  own undo history and stays with its draft in this browser, outside exports, until deletion.
 - **History and export.** *History* lists earlier versions of the open draft: one is kept before
   *Fix all*, *Apply to source*, *Replace all*, *Clear*, *Load example* and a restore, and one every 10 minutes
   while you edit, of the text the edit replaces (up to 20 per draft, in this browser only). When

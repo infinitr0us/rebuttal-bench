@@ -412,17 +412,26 @@ import, a list taken in from another window and a list merged on saving call
 
 ## The review beside its draft
 
-The right pane shows the preview or the review of the open draft (`prefs.view`, `applyView`).
-The preview stays laid out under the review (`visibility: hidden`), so MathJax keeps measuring
-it. `reviewPoints(text)` (pure, `tests/review.test.js`) cuts a review into fields by name
-(`REVIEW_FIELDS`: letter W, Q, L, C, or null for summaries, strengths and scores; a "Clarity:"
-line with prose inside a field of points stays in it) and each field into points at its list
-items (`REVIEW_ITEM`, the first item's kind and indent decide; nested items belong to theirs)
-or paragraphs; labels follow `pointName`, the reviewer's own first. `reviewCoverage(points,
-draft)` finds a part labelled so (`labelledParts`, from `commentSections(text, true)`, which
-also counts a draft whose one part is labelled) or the point's opening words; otherwise it says
-*no part labelled X*, never "unanswered". `reviewQuote` and `reviewSkeleton` build what *Quote*
-and *Insert skeleton* insert (`insertBlock`: through `execCommand('insertText')`, one undo).
+The Preview and Review tabs (`prefs.view`, `applyView`) use roving focus and arrow keys.
+The hidden preview stays laid out so MathJax can measure it. The review textarea lives in a
+same-origin `srcdoc` iframe. Chrome keeps undo history per document. `loadReviewBox` replaces
+the frame on a draft switch, binds input only after the current frame loads, and copies the
+theme tokens into its document on load and theme changes.
+
+`readHtmlReview(doc)` reads OpenReview's field/value sibling elements from a parsed clipboard
+fragment, preserving list markers, nested items and paragraphs. An ordinary paste stays native.
+`reviewPoints(text)` reads the original line endings for source offsets. Form fields set the
+type (W, Q, L or C) or end the preceding value. Aspect names such as Clarity can introduce
+prose inside a field. Plain selections lose list markers, so sentence boundaries and question
+openings help separate items while wrapped prose stays together. Keep ambiguous concerns in
+mixed fields, even when that also keeps some praise. Tests use synthetic reviews.
+
+`REVIEW_NAME` is shared by review items, section names and coverage. `labelledParts` reads all
+the leading labels in a section, including combined headings. `reviewCoverage` maps visible
+quotes back to source offsets after case and whitespace folding. Shared openings require the
+full point. Link definitions, destinations, comments and code cannot cover a point. A missing
+match says *no part labelled X*. `insertBlock` inserts Quote and Insert skeleton at a paragraph
+boundary or after the paragraph containing the selection's end, with one source undo.
 
 **Storage** is deliberately simpler than the drafts': a review lives under
 `REVIEW_PREFIX + draft id` in localStorage only (never the asynchronous store, Export, Import or

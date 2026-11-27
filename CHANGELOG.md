@@ -3,21 +3,20 @@
 ## 3.9.0 (unreleased)
 
 ### The review beside its draft
-- The right pane shows the *Preview* or the *Review*. Paste there the review a draft answers,
-  copied from the OpenReview forum: it is kept with that draft, in this browser only (never in
-  the asynchronous store, never in an export, and deleted with its draft), since OpenReview keeps
-  the original and it is the reviewer's text, not yours.
-- The review is cut into the points to answer: the items (or paragraphs) of its Weaknesses,
-  Questions, Limitations and comment fields, under the field names of NeurIPS, ICLR, ICML, ACL
-  ARR and AAAI forms, labelled W1, Q2, L1, C1, or with the reviewer's own labels. Summaries,
-  strengths and scores are left out; a text without field names counts as weaknesses.
-- Each point shows whether the draft has a part labelled for it (`**W1.**`, `Q2:`, as
-  *Sections* reads them) or quotes its opening words; a click goes there. The tab shows how many
-  points are covered (*3/5*). A point without either says *no part labelled W3*, not
-  "unanswered": an answer in other words counts too, and only you can tell.
-- *Quote* inserts a point at the cursor as `> **W2.** its text`; *Insert skeleton* inserts a
-  label for every point the draft does not cover yet, with its first sentence quoted or not.
-  One undo takes either back.
+- The right pane has keyboard-accessible *Preview* and *Review* tabs. Each draft keeps its
+  review in this browser only, outside exports and the asynchronous store. Deleting the draft
+  deletes its review. The review editor has its own undo and redo history for each draft.
+- Pasting an OpenReview note keeps field names, paragraphs and numbered or bulleted items.
+  Plain-text lists copied from the forum also yield separate points. The parser recognizes
+  NeurIPS, ICLR, ICML, TMLR, EMNLP, ACL ARR and AAAI field names, skips scores and administrative
+  fields, and keeps substantive limitations. Mixed fields can include praise alongside concerns.
+- The reviewer's labels and the inserted labels use W, Q, L and C. A combined heading such
+  as `(Weakness1, Question1)` covers both points. Visible quotes count, including complete short
+  questions. Points with the same opening use the full text. Click a covered point to find it.
+  The tab shows the count (*3/5*). A point without a match says *no part labelled W3*, since
+  only the author can judge an answer written in other words.
+- *Quote* and *Insert skeleton* add separate paragraphs. A caret inside a paragraph inserts
+  after it, and a selection uses its end. One undo restores the original passage.
 - When the review names its reviewer (OpenReview's *Official Review ... by Reviewer k9F2*) and
   the tab is named for another one, the view says so; a tab named for no one can take the
   reviewer's name with one click.
