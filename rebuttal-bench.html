@@ -2809,7 +2809,7 @@ function analyzeText(src, opts) {
     { re: /\?{2,}/g, math: false },
     { re: /\[(?:cite|citation(?: needed)?|refs?|references?|todo|tbd|placeholder|(?:insert|add|fill in)\b[^\]\n]{0,60})\](?![(\[:])/gi, math: false },
     /* what a template or a chat assistant leaves for the author: "[Your Name]" */
-    { re: /\[(?:your|authors?(?:'s|’s)?)\b[^\]\n]{0,40}\](?![(\[:])/gi, math: false },
+    { re: /\[(?:insert )?your (?:full )?(?:names?|affiliations?|institution|e-?mail|title|signature)\](?![(\[:])/gi, math: false },
     { re: /\blorem ipsum\b/gi, math: true }
   ];
   var placed = new Uint8Array(src.length);
@@ -2869,60 +2869,94 @@ function analyzeText(src, opts) {
     function (n) { return n === 1 ? 'spell it out' : 'spell all ' + n + ' out'; },
     function (ch) { return LIGATURES[ch]; });
 
-  /* The span of line `at`..`end` with one of its line breaks, so deleting it
-     leaves no blank line behind. */
-  function wholeLine(at, end) {
-    var from = src.lastIndexOf('\n', at - 1) + 1;
-    return end < src.length ? [from, end + 1] : [from > 0 ? from - 1 : from, end];
+  /* A line as recognized by the patterns below (a line ends at LF, CR, or a
+     U+2028/U+2029 separator): its span with the one line break after it,
+     or before it on the last line, so deleting it leaves no blank line. */
+  function lineSpan(from, to) {
+    var after = src.slice(to, to + 2), n = after.charAt(0) === '\r' && after.charAt(1) === '\n' ? 2 : /^[\n\r\u2028\u2029]/.test(after) ? 1 : 0;
+    if (n) return [from, to + n];
+    var before = src.slice(Math.max(0, from - 2), from), b = before === '\r\n' ? 2 : /[\n\r\u2028\u2029]$/.test(before) ? 1 : 0;
+    return [from - b, to];
+  }
+  /* Deleting `s`..`e` out of a line without joining two words or moving the
+     text after it: a span alone on its line goes with the line; otherwise
+     one space stays between words ("The【4†source】bound"), none is left
+     doubled, and "- " or "## " before it keeps its list or heading. */
+  function cutOut(s, e) {
+    var ls = s, le = e;
+    while (ls > 0 && !/[\n\r\u2028\u2029]/.test(src[ls - 1])) ls--;
+    while (le < src.length && !/[\n\r\u2028\u2029]/.test(src[le])) le++;
+    if (!src.slice(ls, s).trim() && !src.slice(e, le).trim()) { var w = lineSpan(ls, le); return [w[0], w[1], '']; }
+    var left = src[s - 1] || '', right = src[e] || '';
+    var word = /[0-9A-Za-zÀ-ɏͰ-ϿЀ-ӿ぀-ヿ㐀-鿿]/;
+    if (word.test(left) && word.test(right)) return [s, e, ' '];
+    if (/[ \t]/.test(left) && (!right || /[ \t.,;:!?)\]]/.test(right)) && /\S/.test(src.slice(ls, s - 1))) return [s - 1, e, ''];
+    return [s, e, ''];
   }
 
-  /* 19. LaTeX comment lines. A line that starts with % is a comment in the
-         paper's source (a note to a co-author, a sentence taken out), but
-         OpenReview prints it as typed, like an HTML comment. Only prose lines
-         count: TeX drops a comment inside math, and code shows what it shows.
-         A line break inside "by 5\n% on average" is a wrapped percentage. */
-  var commentLine = /^[ \t]{0,3}%[^\n]*/gm, cl;
+  /* 19. Commented-out LaTeX. A line that starts with % is a comment in the
+         paper's source, but OpenReview prints it as typed. Authors also write
+         lines that start with %: "%%% W1 %%%" headings, "% of runs ...",
+         a percentage wrapped onto the next line. So only a line that is
+         plainly LaTeX gets a card: a command or a table row after a single %
+         ("% \vspace{2mm}", "%Ours & 71.2 \\"), or a note to self ("% TODO
+         ask Alice"). Two Codex reviews ran this on 310 real author responses
+         (reviews/2026-11-27/codex-review-310). Inside math TeX drops the
+         comment, and code shows what it shows. */
+  var commentLine = /^[ \t]*%(?!%)([^\n\r\u2028\u2029]*)/gm, cl;
   while ((cl = commentLine.exec(src))) {
-    var cs = cl.index + cl[0].indexOf('%'), ce = cl.index + cl[0].length;
+    var cs = cl.index + cl[0].indexOf('%'), ce = cl.index + cl[0].length, rest = cl[1];
     if (skipText[cs] || mathMask[cs]) continue;
-    if (/\d[ \t]*$/.test(src.slice(Math.max(0, cl.index - 12), Math.max(0, cl.index - 1))) && /^%[ \t]+[a-z]/.test(src.slice(cs, ce))) continue;
-    var cut = wholeLine(cl.index, ce);
+    if (!/\\[A-Za-z]{2,}|&.*(?:&|\\\\)|\\\\[ \t]*$/.test(rest) &&
+        !/^[ \t]*(?:TODO|FIXME|TBD|XXX|NOTE(?: to self)?:|note to self|remove (?:this|before)|ask [A-Z])/.test(rest)) continue;
+    var cut = lineSpan(cl.index, ce);
     push('warn', 'LaTeX comment is shown to the reviewers',
       'OpenReview has no LaTeX comments: “' + escHtml(src.slice(cs, Math.min(ce, cs + 80))) + '” is posted as typed. ' +
-        'Delete the line if it was a note for your co-authors.',
+        'Delete the line if it was left out of the paper on purpose or was a note for your co-authors.',
       cs, ce, manual('delete the line', cut[0], cut[1], ''));
   }
 
-  /* 20. Leftovers of a chat assistant: the citation markers its copy button
-         leaves behind (":contentReference[oaicite:0]{index=0}",
-         "citeturn0search1", "【4†source】"), its own lines around the text it
-         wrote ("Certainly! Here is a revised version of your rebuttal:"), and
-         phrases only an assistant writes ("I hope this helps", "As an AI
-         language model"). Nothing an author writes to a reviewer, so a
-         warning; a marker or a line of its own can be deleted on a click. */
-  var CHAT_MARKER = /[ \t]?(?::?contentReference\[oaicite:\d+\]\{index=\d+\}|\[oaicite:\d+\]|?cite?(?:turn\d+(?:search|news|view|file|fetch|image)\d+?)+?|【\d+(?::\d+)?†[^】\n]{0,40}】)/g;
-  var CHAT_LINE = /^[ \t]*(?:(?:certainly|sure|of course|absolutely)[!,.][ \t]*here(?:'s|’s|[ \t]+is|[ \t]+are)\b|here(?:'s|’s|[ \t]+is)[ \t]+(?:a|an|the)[ \t]+(?:revised|polished|refined|improved|rewritten|edited|more concise|condensed|shortened)[ \t]+(?:version|draft)[ \t]+of[ \t]+(?:your|the)[ \t]+(?:rebuttal|response|reply|answer|comment|text|draft)\b)[^\n]*/gim;
-  var CHAT_PHRASE = /\b(?:i hope this helps|as an ai(?: language model)?\b|let me know if you(?:'d|’d| would) like me to|would you like me to (?:shorten|revise|adjust|rewrite|expand|make)|feel free to (?:adjust|tweak|modify) (?:it|this|the (?:text|wording|tone)) (?:as needed|to your)|(?:here(?:'s|’s| is) )?(?:a|the) (?:revised|polished) version of your (?:rebuttal|response))/gi;
+  /* 20. Leftovers of a chat assistant. Only what an author does not write:
+         the citation markers its copy button leaves (private-use delimited
+         "citeturn0search1" and "filecite" entities, ":contentReference
+         [oaicite:0]{index=0}", "【4†source】", a link labelled
+         "oai_citation:5‡Source"), its address to the user ("Here is a
+         revised version of your rebuttal:"), and its self-description ("As
+         an AI language model, I ..."). Phrases such as "I hope this helps"
+         or "Sure! Here are the results:" are the authors' too (seen in real
+         responses since 2017), so they get nothing. A marker or the opening
+         can be deleted on a click; the link keeps its destination. */
+  var CHAT_MARKER = /\ue200[^\ue201\n]{0,200}\ue201|(?:file)?cite(?:turn\d+(?:search|news|view|file|fetch|image)\d+)+|:?contentReference\[oaicite:\d+\](?:\{index=\d+\}|index=\d+)?|\[oaicite:\d+\]|【\d+(?::\d+)?†[^】\n]{0,40}】/g;
+  var CHAT_LINK = /oai_citation:\d+‡[^\]\n]{0,80}/g;
+  var CHAT_OPENING = /^[ \t]*(?:(?:certainly|sure|of course|absolutely)[!,.][ \t]*)?here(?:'s|’s|[ \t]+is)[ \t]+(?:a|an|the)[ \t]+(?:revised|polished|refined|improved|rewritten|edited|more concise|condensed|shortened)[ \t]+(?:version|draft)[ \t]+of[ \t]+your[ \t]+(?:rebuttal|response|reply|answer|comment|text|draft)\b[^:\n\r\u2028\u2029]{0,60}:?[ \t]*/gim;
+  var CHAT_SELF = /\b(?:as an ai language model,|as i am an ai language model\b|i am an ai language model\b|i'm an ai language model\b|i’m an ai language model\b)/gi;
   var chatSeen = new Uint8Array(src.length), cm;
   function chatCard(s, e, f) {
-    if (skipText[s] || mathMask[s] || chatSeen[s]) return;
+    if (s >= e || skipText[s] || mathMask[s] || chatSeen[s]) return;
     for (var k = s; k < e; k++) chatSeen[k] = 1;
     push('warn', 'Text left over from a chat assistant',
-      '“' + escHtml(src.slice(s, Math.min(e, s + 80)).trim()) + '” reads as a chat assistant’s own words or citation marker, not as part of your answer. Reviewers would see it as typed.',
+      '“' + escHtml(src.slice(s, Math.min(e, s + 80)).trim()) + '” is a chat assistant’s citation marker or its own words, not part of your answer. Reviewers would see it as typed.',
       s, e, f);
   }
   CHAT_MARKER.lastIndex = 0;
   while ((cm = CHAT_MARKER.exec(src))) {
-    var ms = cm.index + (cm[0].charAt(0) === ' ' || cm[0].charAt(0) === '\t' ? 1 : 0);
-    chatCard(ms, cm.index + cm[0].length, manual('delete the marker', cm.index, cm.index + cm[0].length, ''));
+    var out = cutOut(cm.index, cm.index + cm[0].length);
+    chatCard(cm.index, cm.index + cm[0].length, manual('delete the marker', out[0], out[1], out[2]));
   }
-  CHAT_LINE.lastIndex = 0;
-  while ((cm = CHAT_LINE.exec(src))) {
-    var ls = cm.index + cm[0].search(/\S/), le = cm.index + cm[0].length, whole = wholeLine(cm.index, le);
-    chatCard(ls, le, manual('delete the line', whole[0], whole[1], ''));
+  CHAT_LINK.lastIndex = 0;
+  while ((cm = CHAT_LINK.exec(src))) chatCard(cm.index, cm.index + cm[0].length, null);
+  CHAT_OPENING.lastIndex = 0;
+  while ((cm = CHAT_OPENING.exec(src))) {
+    var os = cm.index + cm[0].search(/\S/), oe = cm.index + cm[0].length;
+    if (os >= oe) { CHAT_OPENING.lastIndex++; continue; }
+    var lineEnd = oe;
+    while (lineEnd < src.length && !/[\n\r\u2028\u2029]/.test(src[lineEnd])) lineEnd++;
+    /* Only the opening goes: text after it on the same line is the author's. */
+    var span = src.slice(oe, lineEnd).trim() ? [os, oe] : lineSpan(cm.index, lineEnd);
+    chatCard(os, oe, manual('delete the opening', span[0], span[1], ''));
   }
-  CHAT_PHRASE.lastIndex = 0;
-  while ((cm = CHAT_PHRASE.exec(src))) chatCard(cm.index, cm.index + cm[0].length, null);
+  CHAT_SELF.lastIndex = 0;
+  while ((cm = CHAT_SELF.exec(src))) chatCard(cm.index, cm.index + cm[0].length, null);
 
   issues.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
   return {

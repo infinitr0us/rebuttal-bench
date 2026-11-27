@@ -3,17 +3,24 @@
 ## 3.10.0 (unreleased)
 
 ### Before posting
-- A line that starts with `%` is a LaTeX comment in the paper's source (a note to a co-author,
-  a sentence taken out), but OpenReview posts it as typed: it now gets a card, with a click to
-  delete the line. Percentages (`95% of runs`, a line break before `% on average`) and comments
-  inside math or code are left alone.
-- What a chat assistant leaves around its text gets a card: the citation markers its copy
-  button leaves (`:contentReference[oaicite:0]{index=0}`, `citeturn0search1`, `【4†source】`,
-  deleted with a click), its own opening line ("Certainly! Here is a revised version of your
-  rebuttal:") and phrases no author writes to a reviewer ("I hope this helps", "As an AI
-  language model"). An author's similar sentences ("Here is the revised proof:", "Please let us
-  know if you have further questions") are left alone.
-- `[Your Name]`, `[Authors' names]` and the like count as placeholders.
+- Commented-out LaTeX pasted from the paper's source gets a card, with a click to delete the
+  line: a line that starts with a single `%` followed by a LaTeX command or a table row
+  (`% \vspace{2mm}`, `%Ours & 71.2 \\`), or a note to self (`% TODO ask Alice`). OpenReview
+  posts it as typed. Other lines that start with `%` are the authors' own (`%%% W1 %%%`
+  headings, `% of runs ...`, a wrapped percentage) and are left alone, as are comments inside
+  math or code.
+- What a chat assistant leaves behind gets a card: the citation markers of its copy button
+  (`:contentReference[oaicite:0]{index=0}`, the `citeturn` and `filecite` entities,
+  `【4†source】`, a link labelled `oai_citation:5‡Source`), its address to the user ("Here is a
+  revised version of your rebuttal:") and its self-description ("As an AI language model,
+  I ..."). A click deletes a marker without joining two words or changing a list or heading,
+  or the opening without the text after it; a link keeps its destination. Phrases authors use
+  too ("I hope this helps", "Sure! Here are the results:") get nothing.
+- `[Your Name]`, `[Your affiliation]` and the like count as placeholders; `[Authors]` as an
+  anonymous signature does not.
+- A Codex review ran a broader first version on 310 real public author responses and found 49
+  false cards; the checks were narrowed until only the two genuine ones remained (commented-out
+  table rows), and those shapes are regression cases.
 - The Compaction panel says that notification e-mails show the Markdown rendered but formulas
   as LaTeX source, so only the formula tricks change what a reviewer reads there (checked in
   Outlook).

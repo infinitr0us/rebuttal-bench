@@ -104,10 +104,10 @@ leave the browser: they autosave on this device only.
   browser, export them in one and import them in the other.
 - **Before posting.** Cards also point out placeholders left in the text (`TODO`, `XX.X`,
   `Table X`, `[cite]`, `[Your Name]`, `??`), invisible characters and ligatures (`ﬁ`) that a copy
-  from a PDF brings along, LaTeX comment lines (`% ask Alice`) pasted from Overleaf, which
-  OpenReview posts as typed, what a chat assistant leaves around its text (citation markers such
-  as `:contentReference[oaicite:0]{index=0}`, "Certainly! Here is a revised version of your
-  rebuttal:", "I hope this helps"), and a start that posting reads differently: OpenReview trims a comment when it
+  from a PDF brings along, commented-out LaTeX pasted from Overleaf (`% \vspace{2mm}`, a `%`
+  table row, `% TODO`), which OpenReview posts as typed, what a chat assistant leaves behind
+  (citation markers such as `:contentReference[oaicite:0]{index=0}`, "Here is a revised version
+  of your rebuttal:"), and a start that posting reads differently: OpenReview trims a comment when it
   posts it, so an indented first line is no longer a code block. Once MathJax has typeset the
   preview, every formula it cannot typeset gets a card with its error message, and every macro
   it does not know (`\bm`, `\argmax`, `\R`) gets one card for all the formulas that use it,

@@ -89,15 +89,19 @@ text, discard the grid and use the regular text importer.
   Check 17 reports placeholders in visible text only (not in code, link destinations and
   definitions, image syntax, dropped cells or HTML comments), each pattern limited to where it
   is unmistakable (no `??` in code, no `XXX` in math); check 18 invisible characters and
-  ligatures, one card each, with a manual fix for all of them. Check 19 reports a prose line
-  that starts with `%` (a LaTeX comment from the paper's source, posted as typed), not inside
-  math or code and not a wrapped percentage ("by 5" then "% on average"); check 20 what a chat
-  assistant leaves behind: its citation markers (`oaicite`, `citeturn`, `【4†source】`), its own
-  opening line ("Certainly! Here is a revised version of your rebuttal:") and phrases no author
-  writes to a reviewer ("I hope this helps"). Both use check 17's mask, warn, and offer a manual
-  deletion only for a marker or a line of their own; `tests/leftovers.test.js` holds the
-  author's similar sentences that must stay quiet ("Here is the revised proof:", "Please let us
-  know"). Widen a pattern only with such a near-miss case.
+  ligatures, one card each, with a manual fix for all of them. Check 19 reports commented-out
+  LaTeX: a prose line starting with a single `%` and then a LaTeX command, a table row or a note
+  to self; check 20 a chat assistant's citation markers (private-use delimited entities,
+  `oaicite`, `【4†source】`, `oai_citation` link labels), its address to the user ("a revised
+  version of your rebuttal") and its self-description. Both use check 17's mask and warn. Their
+  manual fixes delete a whole line by the same line breaks the patterns use (LF, CR, U+2028,
+  U+2029: `lineSpan`), and a marker inside a line without joining words or breaking a list or
+  heading (`cutOut`); an opening deletes only itself when the author's text follows on its line.
+  A Codex review ran a broader version on 310 real author responses and found 49 false cards
+  (`reviews/2026-11-27/codex-review-310`, the corpus git-ignored): authors write `%%%` headings,
+  `% of runs`, "I hope this helps", "Sure! Here are the results:", `[Authors]` signatures.
+  `tests/leftovers.test.js` holds those shapes; widen a pattern only with such a near-miss case
+  and a rerun of that corpus.
 - `texProblemIssues(src, spans, reports, issues, {stale, analyze})` turns what MathJax reported
   after the last typeset (`texProblems()` in the DOM section: `{tex, undef, errors}` per formula,
   in document order) into cards. Formulas cut apart by inline Markdown are skipped (MathJax never
