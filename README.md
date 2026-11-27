@@ -53,15 +53,16 @@ leave the browser: they autosave on this device only.
   preview to select it in the source. *Spellcheck* turns on the browser's spellchecker in the
   editor (off by default, since TeX and Markdown are full of words it does not know).
 - **Venue.** Sets the limit and checks links against the venue's rebuttal rules: NeurIPS 2026
-  (10,000 per review), AAAI-26 (2,500 for all reviews) and ACL Rolling Review (5,000 per
-  response) allow no links at all, ICML 2027 (5,000 per round) no non-anonymized or shortened
-  URLs, ICLR 2027 only anonymous links that do not track visitors. ICLR states no number, so the
-  limit you typed last applies there. Two more presets follow OpenReview's default forms (5,000
-  per comment, 2,500 per rebuttal) for workshops and smaller venues. The rule shows beside the
-  counter (*your limit* when the number is yours, not the venue's); hover for its official
-  source and the date it was checked, click to open it. Rules change every year. At any venue,
-  a link that may name the authors (a personal repository or page, a shared drive, an e-mail
-  address) gets a note.
+  (10,000 per review) allows no links in a response (an anonymized code link for the AC, in an
+  Official Comment, excepted), AAAI-26 (2,500 for all reviews) no URLs, ACL Rolling Review
+  (5,000 per response) no external links, ICML 2027 (5,000 per round) no non-anonymized or
+  shortened URLs, ICLR 2027 only anonymous links whose host does not track visitors. ICLR states
+  no number, so the limit you typed last applies there. Two more presets follow OpenReview's
+  default forms (5,000 per comment, 2,500 per rebuttal) for workshops and smaller venues. The
+  rule shows beside the counter (*your limit* when the number is yours, not the venue's); hover
+  for its official sources and the date it was checked, click to open it. Rules change every
+  year. At any venue, a link that may name the authors (a personal repository or page, a shared
+  drive, an e-mail address) gets a note.
 - **Split into comments.** Where the venue allows several comments (NeurIPS does since 2026,
   ICLR's discussion is open), *Split into comments…* in the Compaction panel cuts a draft that is
   over the limit into parts under it, numbered like (1/3): only between paragraphs, table rows
@@ -75,10 +76,11 @@ leave the browser: they autosave on this device only.
   say; *Delete* removes it. Every draft autosaves on its own, undo never crosses from one draft
   into another, and several windows of the page can be open at once without losing a draft (a
   draft deleted in one window comes back if another window still has it open). A tab named for a
-  reviewer (`Reviewer k9F2`, `k9F2`, `R2`) is checked against the others: a card points out an
-  opening or closing that thanks another reviewer (an answer copied from their draft), an ID in
-  other capitals than its tab, an ID no tab has, and a pointer such as *see our answer to
-  Reviewer Ab12, Q2* when that draft labels no Q2.
+  reviewer (`Reviewer k9F2`, `k9F2`, `R2`) is checked against the others: a card points out a
+  salutation, a *Response to* line or an opening or closing thanks that addresses another
+  reviewer (an answer copied from their draft), an ID in other capitals than its tab, and a
+  pointer such as *see our answer to Reviewer Ab12, Q2* when that reviewer's drafts never
+  mention Q2. Mentions in passing and joint thanks are left alone.
 - **History and export.** *History* lists earlier versions of the open draft: one is kept before
   *Fix all*, *Apply to source*, *Replace all*, *Clear*, *Load example* and a restore, and one every 10 minutes
   while you edit, of the text the edit replaces (up to 20 per draft, in this browser only). When

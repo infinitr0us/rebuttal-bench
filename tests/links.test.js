@@ -25,12 +25,15 @@ test('no link hazards inside code', () => {
   assert.deepEqual(hazards('```\nhttps://bit.ly/3abc\n```', 'icml'), []);
 });
 
-test('NeurIPS, AAAI and ARR: every link is an error; a labelled link can keep its words', () => {
+test('NeurIPS and AAAI: every link is an error, ARR: every external one; a labelled link can keep its words', () => {
   for (const venue of ['neurips', 'aaai', 'arr']) {
     const name = A.venueById(venue).name.replace(/ \(.*\)$/, '');
+    const title = (venue === 'arr' ? 'External links are' : 'Links are') + ' not allowed at ' + name;
     assert.deepEqual(hazards('See [the logs](https://example.org/logs) and https://example.org/b.', venue),
-      ['err Links are not allowed at ' + name, 'err Links are not allowed at ' + name]);
+      ['err ' + title, 'err ' + title]);
   }
+  // ARR forbids external links: one into the forum is not external.
+  assert.deepEqual(hazards('As in [our reply](/forum?id=abc&noteId=def) and https://openreview.net/forum?id=abc.', 'arr'), []);
   const res = A.analyze('See [the logs](https://example.org/logs).', { venue: 'neurips' });
   const iss = [...res.issues].find((i) => /not allowed/.test(i.title));
   assert.equal(iss.fix.manual, true);
@@ -55,8 +58,8 @@ test('ICLR, the OpenReview defaults and no venue leave ordinary links alone; Fix
   assert.equal(A.fixAllText(src).text, src);
 });
 
-test('ICLR: links must be anonymous and must not track visitors, so a shortener is an error', () => {
-  assert.deepEqual(hazards('https://bit.ly/3abc', 'iclr'), ['err Shortened URL']);
+test('ICLR: links must be anonymous; a shortener, which can track visitors, gets a warning (only ICML names them)', () => {
+  assert.deepEqual(hazards('https://bit.ly/3abc', 'iclr'), ['warn Shortened URL']);
   assert.deepEqual(hazards('[repo](https://github.com/alice/method)', 'iclr'), ['warn This link may reveal who the authors are']);
   assert.deepEqual(hazards('[repo](https://anonymous.4open.science/r/method-1234)', 'iclr'), []);
 });
@@ -65,6 +68,10 @@ test('the NeurIPS link card names the one exception, a code link for the AC', ()
   const iss = [...A.analyze('See [code](https://example.org/c).', { venue: 'neurips' }).issues]
     .find((i) => /not allowed/.test(i.title));
   assert.match(iss.detail, /Official Comment/);
+  // A link into the forum: no claim that the rule "makes no exception".
+  const own = [...A.analyze('See [our reply](/forum?id=abc).', { venue: 'neurips' }).issues].find((i) => /not allowed/.test(i.title));
+  assert.equal(own.sev, 'warn');
+  assert.doesNotMatch(own.detail, /makes no exception/);
 });
 
 test('every venue preset names its rule, the year of its rules and an official source', () => {
@@ -76,7 +83,9 @@ test('every venue preset names its rule, the year of its rules and an official s
     assert.ok(/^https:\/\//.test(v.source), v.id);
     assert.ok(v.rule.length > 20, v.id);
     assert.ok(typeof v.label === 'string' && v.label.length > 2, v.id);
-    assert.ok(['none', 'anon', 'any'].includes(v.links), v.id);
+    assert.ok(['none', 'external', 'anon', 'any'].includes(v.links), v.id);
+    assert.equal(typeof v.linksBrief, 'string', v.id);
+    assert.ok(!v.also || v.also.every((u) => /^https:\/\//.test(u)), v.id);
     assert.ok(v.limit === null || (Number.isInteger(v.limit) && v.limit > 0), v.id);
     // A preset with a number says what it counts; one without has no unit.
     assert.ok(v.limit === null ? v.unit === null : typeof v.unit === 'string' && v.unit.length > 2, v.id);
