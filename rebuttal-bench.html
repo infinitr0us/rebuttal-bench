@@ -69,7 +69,7 @@ window.MathJax = {
     line-gap-override: 0.00%;
     size-adjust: 106.33%;
   }
-  :root {
+  :root, #printDrafts {
     --accent: #8c1b13;            /* OpenReview maroon */
     --accent-ink: #8c1b13;
     --bg: #ffffff;
@@ -940,6 +940,27 @@ window.MathJax = {
   .paper mjx-container[jax="CHTML"][display="true"]:last-child { margin-bottom: 1em; }
   .paper mjx-container[jax="CHTML"][display="true"] mjx-math { padding: 1px 0; }
 
+  /* Lay out the print copy off screen at page width so MathJax can measure
+     it even before the print dialog opens. It inherits the light note palette. */
+  #printDrafts {
+    position: fixed; left: -200vw; top: 0; visibility: hidden; width: 175mm;
+    background: white; color: var(--paper-ink); overflow-wrap: anywhere;
+  }
+  #printDrafts .paper { padding: 0; }
+  .print-heading { break-inside: avoid; break-after: avoid; margin-bottom: 16px; }
+  .print-heading h1 { margin: 0 0 4px; font-size: 18px; }
+  .print-heading p, .print-omitted { font-size: 12px; }
+  .print-heading p { margin: 0; }
+  @media print {
+    html { height: auto; }
+    body.printing-drafts { display: block; height: auto; background: white; }
+    body.printing-drafts > :not(#printDrafts) { display: none !important; }
+    #printDrafts { display: none; }
+    body.printing-drafts > #printDrafts { display: block; position: static; visibility: visible; width: auto; }
+    .printed-draft + .printed-draft { break-before: page; }
+    #printDrafts .paper pre, #printDrafts mjx-container[jax="CHTML"][display="true"] { overflow: visible; }
+  }
+
   footer {
     padding: 7px 20px 9px;
     border-top: 1px solid var(--line);
@@ -1208,6 +1229,8 @@ window.MathJax = {
       <p class="modal-note">Drafts are kept in this browser only, and the online page and a downloaded copy of it each keep their own. Export them to keep a backup, or to copy them into another browser. Import adds the drafts of an exported file as new tabs, and never replaces or changes a draft.</p>
       <div class="modal-actions">
         <button type="button" id="compareBtn">Compare…</button>
+        <button type="button" id="printOneBtn">Print this draft</button>
+        <button type="button" id="printAllBtn">Print all drafts</button>
         <button type="button" id="exportAllBtn" title="Every draft in one .json file, which Import reads back">Export all drafts</button>
         <button type="button" id="exportOneBtn" title="The open draft as a Markdown file">Download this draft (.md)</button>
         <button type="button" id="importBtn" title="The drafts of an exported .json file, or a .md or .txt file as one draft, as new tabs">Import…</button>
@@ -6591,6 +6614,15 @@ var EXAMPLE = [
 
 /* ---- rendering ---- */
 var renderBusy = false, renderQueued = false;
+var printRoot = null, printQueued = false;
+
+/* The preview, table import and printed comments share the input jax. Only
+   its owner may reset definitions or start another typeset. */
+function finishRender() {
+  renderBusy = false;
+  if (printQueued && window.MJ_READY) renderPrint();
+  else if (renderQueued) { renderQueued = false; renderPreview(); }
+}
 
 function setMathStatus(text, kind) {
   mjStatus.textContent = text;
@@ -6748,8 +6780,7 @@ function renderPreview() {
 
   var done = function () {
     scroller.scrollTop = keep;
-    renderBusy = false;
-    if (renderQueued) { renderQueued = false; renderPreview(); }
+    finishRender();
   };
 
   clearOldMath(target); /* MathJax must forget old items before their DOM is removed. */
@@ -6814,6 +6845,9 @@ if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then =
 
 /* ---- stats + lint ---- */
 function fmt(n) { return n.toLocaleString('en-US'); }
+function characterStat(chars, limit) {
+  return (limit > 0 ? fmt(chars) + ' / ' + fmt(limit) : fmt(chars)) + ' characters';
+}
 
 function updateAll() {
   var text = ta.value;
@@ -6829,7 +6863,7 @@ function updateAll() {
   var words = (text.trim().match(/\S+/g) || []).length;
   var limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
 
-  charStat.textContent = limit > 0 ? fmt(chars) + ' / ' + fmt(limit) + ' characters' : fmt(chars) + ' characters';
+  charStat.textContent = characterStat(chars, limit);
   var pct = limit > 0 ? Math.min(100, (chars / limit) * 100) : 0;
   charFill.style.width = pct + '%';
   charChip.classList.toggle('over', limit > 0 && chars > limit);
@@ -7710,6 +7744,7 @@ function openHistory() {
 function closeHistory() {
   if (historyDialog.hidden) return;
   historyDialog.hidden = true;
+  discardPrint();
   leaveCompare();
   setModal(historyDialog, false);
   var btn = draftTools.querySelector('.dtool[data-act="history"]');
@@ -7890,17 +7925,17 @@ function fileSafe(name) {
   return name.replace(/[\\\/:*?"<>|\u0000-\u001f]+/g, '-').replace(/^[\s.]+|[\s.]+$/g, '') || 'draft';
 }
 
-/* Every draft whose text is known; the others are named and left out only
-   if the author agrees. */
-/* Export only reads. The drafts are this window's list merged, in a private
-   copy, with the one stored here, which can name drafts another window added
-   since: nothing is adopted or saved on the way. */
-function exportAllDrafts() {
-  if (!draftReady) return;
+/* Export and Print read a private copy of the list, including drafts another
+   window has just added, without adopting that list or flushing any edits. */
+function draftsForOutput() {
   var meta = parseDraftMeta(JSON.stringify(draftMeta)), stored = storedValue(DRAFTS_KEY);
   if (typeof stored === 'string') meta = mergeDraftMeta(meta, parseDraftMeta(stored), Date.now());
+  return meta.list;
+}
+function exportAllDrafts() {
+  if (!draftReady) return;
   var drafts = [], missing = [];
-  meta.list.forEach(function (d) {
+  draftsForOutput().forEach(function (d) {
     var text = knownDraftText(d.id);
     if (text === null) missing.push('“' + d.name + '”');
     else drafts.push({ name: d.name, text: text });
@@ -7923,6 +7958,78 @@ function exportOpenDraft() {
   if (text === null) { showToast('This draft has not loaded yet: try again in a moment'); return; }
   if (!downloadFile(fileSafe(d ? d.name : 'draft') + '.md', text, 'text/markdown')) showToast('The browser did not allow the download');
 }
+
+function discardPrint() {
+  printQueued = false;
+  document.body.classList.remove('printing-drafts');
+  if (printRoot) printRoot.remove();
+  printRoot = null;
+}
+
+function renderPrint() {
+  var root = printRoot, papers = root.querySelectorAll('.printed-draft > .paper'), at = 0;
+  printQueued = false;
+  renderBusy = true;
+  function next() {
+    /* Closing History or switching drafts cancels even a typeset in flight. */
+    if (root !== printRoot) return;
+    if (at === papers.length) return document.fonts && document.fonts.ready;
+    resetTeXState();
+    return MathJax.typesetPromise([papers[at++]]).then(next);
+  }
+  Promise.resolve().then(next).then(function () {
+    clearOldMath(root); /* keep the rendered nodes, release the print-only MathItems */
+    if (root !== printRoot) return;
+    document.body.classList.add('printing-drafts');
+    window.print();
+  }).catch(function (err) {
+    clearOldMath(root);
+    if (root !== printRoot) return;
+    discardPrint();
+    showToast('Could not print the drafts: ' + (err.message || err));
+  }).then(finishRender);
+}
+
+function printDrafts(all) {
+  if (historyDialog.hidden || historyFor !== draftMeta.active || printRoot) return;
+  var drafts = all ? draftsForOutput() : [draftById(historyFor)];
+  var root = document.createElement('div'), missing = [];
+  root.id = 'printDrafts';
+  var limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
+  try {
+    drafts.forEach(function (d) {
+      var text = knownDraftText(d.id);
+      if (text === null) { missing.push('“' + d.name + '”'); return; }
+      text = text.trim();
+      var article = document.createElement('article');
+      article.className = 'printed-draft';
+      article.innerHTML = '<div class="print-heading"><h1>' + escHtml(d.name) + '</h1><p>' +
+        characterStat(text.length, limit) + '</p></div><div class="paper">' + renderOpenReviewMarkdown(text) + '</div>';
+      root.appendChild(article);
+    });
+  } catch (err) {
+    showToast('Could not render the drafts for printing: ' + (err.message || err));
+    return;
+  }
+  if (missing.length) {
+    var note = document.createElement('p');
+    note.className = 'print-omitted';
+    note.textContent = 'Left out because the text has not loaded: ' + missing.join(', ') + '.';
+    if (!root.firstChild) { showToast(note.textContent); return; }
+    root.insertBefore(note, root.firstChild);
+  }
+  document.body.appendChild(root);
+  printRoot = root;
+  printQueued = true;
+  showToast(window.MJ_READY ? 'Preparing the rendered drafts for printing…' : 'Waiting for MathJax before printing…');
+  if (window.MJ_READY && !renderBusy) renderPrint();
+}
+
+document.getElementById('printOneBtn').addEventListener('click', function () { printDrafts(false); });
+document.getElementById('printAllBtn').addEventListener('click', function () { printDrafts(true); });
+window.addEventListener('afterprint', function () {
+  if (document.body.classList.contains('printing-drafts')) discardPrint();
+});
 
 /* Import only adds: each draft of the file whose text no draft here has yet
    becomes a new tab, under a name no draft has yet. It never replaces,
