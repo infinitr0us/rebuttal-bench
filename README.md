@@ -200,7 +200,7 @@ tests/
   links.test.js            links under each venue's rules
   drafts.test.js           the stored list of drafts: parsing, merging two windows' lists
   split.test.js            splitting a draft into comments: where it cuts, what it keeps
-  reviewers.test.js        reviewer IDs across drafts: greetings, IDs, pointers to points
+  reviewers.test.js        reviewer IDs across drafts: greetings and IDs in other capitals
   fixtures/                realistic drafts used by the tests
   example.test.js          the built-in example must end clean and fully typeset
   fuzz.test.js             analyzer vs. real Marked + DOMPurify + MathJax
