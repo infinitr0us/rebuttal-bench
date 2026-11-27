@@ -498,6 +498,55 @@ try {
     convertPaste.click();
     return ta.value === 'a **word** b' || ta.value;`);
 
+  await check('a converted prose paste ending in a table separates itself from following draft text', htmlPaste + `
+    const initial = 'Before.\\n\\nREPLACEConclusion follows.';
+    setSourceText(initial, 9, 16);
+    const markup = '<p><b>Revised results.</b></p><table><tr><th>Model</th><th>Score</th></tr><tr><td>New</td><td>42</td></tr></table>';
+    const text = 'Revised results.\\n\\nModel\\tScore\\nNew\\t42';
+    paste(ta, markup, text);
+    const native = ta.value;
+    if (tableOffer.hidden || pasteQuestion.textContent !== 'Convert the pasted formatting to Markdown?') {
+      return { hidden: tableOffer.hidden, question: pasteQuestion.textContent };
+    }
+    convertPaste.click(); await wait(200);
+    const rendered = renderOpenReviewMarkdown(ta.value.trim());
+    const kept = ta.value.includes('|\\n\\nConclusion follows.') && rendered.includes('<p>Conclusion follows.</p>');
+    ta.focus(); document.execCommand('undo');
+    return kept && ta.value === native || { value: ta.value, rendered };`);
+
+  await check('a formatted paragraph containing a TeX array converts as prose rather than a table', htmlPaste + `
+    const text = 'Correction. We use $M=\\\\left(\\\\begin{array}{cc}a & b\\\\\\\\c & d\\\\end{array}\\\\right)$ in the new proof.';
+    const markup = '<b style="font-weight:normal"><p><span style="font-weight:700">Correction.</span> ' +
+      'We use $M=\\\\left(\\\\begin{array}{cc}a &amp; b\\\\\\\\c &amp; d\\\\end{array}\\\\right)$ in the new proof.</p></b>';
+    setSourceText('Before.\\n\\nREPLACE\\n\\nAfter.', 9, 16);
+    paste(ta, markup, text);
+    if (tableOffer.hidden || pasteQuestion.textContent !== 'Convert the pasted formatting to Markdown?') {
+      return { hidden: tableOffer.hidden, question: pasteQuestion.textContent };
+    }
+    convertPaste.click(); await wait(500);
+    const math = MathJax.startup.document.getMathItemsWithin(preview).filter(m => m.display !== null).map(m => m.math);
+    return !tableDialog.open && ta.value.includes('**Correction.**') && ta.value.includes('in the new proof.') &&
+      math.length === 1 && math[0].includes('\\\\begin{array}{cc}a & b\\\\\\\\c & d\\\\end{array}') ||
+      { value: ta.value, math, dialog: tableDialog.open };`);
+
+  await check('a standalone equation table keeps its alt text and warns in the import dialog', htmlPaste + `
+    const markup = '<table><tr><th>Metric</th><th>Definition</th></tr><tr><td>Loss</td>' +
+      '<td><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jk2cAAAAASUVORK5CYII=" alt="squared error"></td></tr></table>';
+    setSourceText('Before.\\n\\nREPLACE\\n\\nAfter.', 9, 16);
+    paste(ta, markup, 'Metric\\tDefinition\\nLoss\\tsquared error');
+    if (tableOffer.hidden || pasteQuestion.textContent !== 'Convert the pasted table to Markdown?') {
+      return { hidden: tableOffer.hidden, question: pasteQuestion.textContent };
+    }
+    convertPaste.click();
+    try {
+      if (!tableDialog.open || !tableWarnings.textContent.includes('Row 2:') ||
+          !tableWarnings.textContent.includes('equations') || !tableResult?.markdown.includes('squared error')) {
+        return { open: tableDialog.open, warnings: tableWarnings.textContent, md: tableResult?.markdown };
+      }
+      insertTableBtn.click(); await wait(100);
+      return ta.value.includes('squared error') || ta.value;
+    } finally { if (tableDialog.open) tableDialog.close(); }`);
+
   await check('math compaction becomes available when MathJax is ready, even for a cached draft', `
     const src = '$ x + \\\\frac{1}{2} $';
     setSourceText(src, 0);
@@ -818,6 +867,43 @@ try {
       window.print = realPrint;
       closeHistory(); localStorage.setItem(DRAFTS_KEY, storedList);
       switchDraft('d1'); window.confirm = () => true; [id, other].forEach(deleteDraft);
+    }`);
+
+  await check('Print all isolates forward equation references across comments and leaves the preview intact', String.raw`
+    const firstProof = 'First proof. See $\\eqref{eq:main}$.\n\n$$x=7\\tag{A}\\label{eq:main}$$';
+    const secondProof = 'Second proof. See $\\eqref{eq:main}$.\n\n$$x=9\\tag{B}\\label{eq:main}$$';
+    const a = createDraft('Ref A', firstProof), b = createDraft('Ref B', secondProof);
+    switchDraft(a);
+    for (let i = 0; i < 100 && (renderBusy || !preview.querySelector('a mjx-c')); i++) await wait(50);
+    const refOf = (el) => [...el.querySelectorAll('a mjx-c')].map(c => c.className).join(' ');
+    const A = 'mjx-c28 mjx-c41 mjx-c29', B = 'mjx-c28 mjx-c42 mjx-c29';
+    const previewBefore = refOf(preview);
+    const realPrint = window.print;
+    let printed = null;
+    window.print = () => {
+      const root = document.getElementById('printDrafts');
+      const articles = [...root.querySelectorAll('article')];
+      const find = (name) => articles.find(el => el.querySelector('h1').textContent === name);
+      printed = {
+        a: refOf(find('Ref A')),
+        b: refOf(find('Ref B')),
+        previewDuring: refOf(preview),
+      };
+    };
+    try {
+      openHistory();
+      document.getElementById('printAllBtn').click();
+      for (let i = 0; i < 100 && !printed; i++) await wait(50);
+      window.dispatchEvent(new Event('afterprint'));
+      for (let i = 0; i < 100 && (renderBusy || !preview.querySelector('a mjx-c')); i++) await wait(50);
+      const previewAfter = refOf(preview);
+      const previewItems = MathJax.startup.document.getMathItemsWithin(preview).filter(m => m.display !== null).length;
+      return previewBefore === A && printed && printed.a === A && printed.b === B &&
+        printed.previewDuring === A && previewAfter === A && previewItems === 2 ||
+        { previewBefore, printed, previewAfter, previewItems };
+    } finally {
+      window.print = realPrint;
+      closeHistory(); switchDraft('d1'); window.confirm = () => true; [a, b].forEach(deleteDraft);
     }`);
 
   await send('Emulation.setEmulatedMedia', { media: 'print' }, sessionId);

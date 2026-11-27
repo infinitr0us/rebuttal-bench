@@ -5,7 +5,7 @@ const { JSDOM } = require('jsdom');
 const { loadAnalyzer } = require('./lib/page');
 const { renderHtml, typeset } = require('./lib/pipeline');
 
-const { htmlToMarkdown } = loadAnalyzer();
+const { htmlToMarkdown, tableMarkdown, placeProsePaste, looksLikeTablePaste } = loadAnalyzer();
 const parse = html => new JSDOM(html).window.document;
 const imageWarning = 'Images and embedded equations cannot be converted. Check the pasted text for missing content.';
 
@@ -120,4 +120,108 @@ test('empty clipboard, ordinary text and unformatted wrappers need no conversion
     assert.equal(htmlToMarkdown(parse(src)), null, src);
   }
   assert.equal(htmlToMarkdown(null), null);
+});
+
+test('real Word fragment preserves heading, bold, superscript exponent, list, table and TeX', () => {
+  // Captured verbatim from desktop Word 16.0 (build 16.0.20625) in the 3.11 review.
+  const wordFragment = `\r\n\r\n<h1><span lang=EN-US>Response to Reviewer A<o:p></o:p></span></h1>\r\n\r\n` +
+    `<p class=MsoNormal><span lang=EN-US>We will clarify the <b style='mso-bidi-font-weight:\r\nnormal'>sensitivity analysis</b> in the revision.<o:p></o:p></span></p>\r\n\r\n` +
+    `<p class=MsoNormal><span lang=EN-US>Choose a tolerance of 10<sup>-3</sup> and\r\ncompute $\\alpha_i + \\frac{1}{2}$.<o:p></o:p></span></p>\r\n\r\n` +
+    `<p class=MsoListParagraphCxSpFirst style='margin-left:22.0pt;mso-add-space:\r\nauto;text-indent:-22.0pt;mso-list:l0 level1 lfo1'><![if !supportLists]><span\r\nlang=EN-US style='mso-fareast-font-family:等线;mso-fareast-theme-font:minor-latin;\r\nmso-bidi-font-family:等线;mso-bidi-theme-font:minor-latin'><span\r\nstyle='mso-list:Ignore'>1.<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\r\n</span></span></span><![endif]><span lang=EN-US>Add the sensitivity plot.<o:p></o:p></span></p>\r\n\r\n` +
+    `<p class=MsoListParagraphCxSpLast style='margin-left:22.0pt;mso-add-space:auto;\r\ntext-indent:-22.0pt;mso-list:l0 level1 lfo1'><![if !supportLists]><span\r\nlang=EN-US style='mso-fareast-font-family:等线;mso-fareast-theme-font:minor-latin;\r\nmso-bidi-font-family:等线;mso-bidi-theme-font:minor-latin'><span\r\nstyle='mso-list:Ignore'>2.<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;\r\n</span></span></span><![endif]><span lang=EN-US>Report both seeds.<o:p></o:p></span></p>\r\n\r\n` +
+    `<p class=MsoNormal><span lang=EN-US>The table follows.<o:p></o:p></span></p>\r\n\r\n` +
+    `<table class=MsoNormalTable border=0 cellspacing=0 cellpadding=0\r\n style='border-collapse:collapse;mso-table-layout-alt:fixed;mso-padding-alt:\r\n 0cm 5.4pt 0cm 5.4pt'>\r\n <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes'>\r\n  <td width=277 valign=top style='width:207.65pt;padding:0cm 5.4pt 0cm 5.4pt'>\r\n  <p class=MsoNormal><span lang=EN-US>Method<o:p></o:p></span></p>\r\n  </td>\r\n  <td width=277 valign=top style='width:207.65pt;padding:0cm 5.4pt 0cm 5.4pt'>\r\n  <p class=MsoNormal><span lang=EN-US>Score<o:p></o:p></span></p>\r\n  </td>\r\n </tr>\r\n <tr style='mso-yfti-irow:1;mso-yfti-lastrow:yes'>\r\n  <td width=277 valign=top style='width:207.65pt;padding:0cm 5.4pt 0cm 5.4pt'>\r\n  <p class=MsoNormal><span lang=EN-US>New<o:p></o:p></span></p>\r\n  </td>\r\n  <td width=277 valign=top style='width:207.65pt;padding:0cm 5.4pt 0cm 5.4pt'>\r\n  <p class=MsoNormal><span lang=EN-US>42<o:p></o:p></span></p>\r\n  </td>\r\n </tr>\r\n</table>\r\n\r\n` +
+    `<p class=MsoNormal><span lang=EN-US>End of response.<o:p></o:p></span></p>\r\n`;
+  const expected = '# Response to Reviewer A\n\n' +
+    'We will clarify the **sensitivity analysis** in the revision.\n\n' +
+    'Choose a tolerance of 10$^{-3}$ and compute $\\alpha_i + \\frac{1}{2}$.\n\n' +
+    '1. Add the sensitivity plot.\n2. Report both seeds.\n\n' +
+    'The table follows.\n\n' +
+    '|Method|Score|\n|:-|-:|\n|New|42|\n\n' +
+    'End of response.';
+  check(wordFragment, expected,
+    '<h1>Response to Reviewer A</h1>' +
+    '<p>We will clarify the <strong>sensitivity analysis</strong> in the revision.</p>' +
+    '<p>Choose a tolerance of 10$^{-3}$ and compute $\\alpha_i + \\frac{1}{2}$.</p>' +
+    '<ol><li>Add the sensitivity plot.</li><li>Report both seeds.</li></ol>' +
+    '<p>The table follows.</p>' +
+    '<table><thead><tr><th align="left">Method</th><th align="right">Score</th></tr></thead>' +
+    '<tbody><tr><td align="left">New</td><td align="right">42</td></tr></tbody></table>' +
+    '<p>End of response.</p>');
+  assert.deepEqual(typeset(expected), ['I:^{-3}', 'I:\\alpha_i + \\frac{1}{2}']);
+});
+
+test('prose preserves simple sup/sub tags and vertical-align super/sub, and warns on complex scripts', () => {
+  check('<p>Tolerance 10<span style="vertical-align:super">-3</span> and x<span style="vertical-align:sub">i+1</span>.</p>',
+    'Tolerance 10$^{-3}$ and x$_{i+1}$.',
+    '<p>Tolerance 10$^{-3}$ and x$_{i+1}$.</p>');
+  assert.deepEqual(typeset('Tolerance 10$^{-3}$ and x$_{i+1}$.'), ['I:^{-3}', 'I:_{i+1}']);
+  check('<p>Rate 10<sup>-3</sup></p>', 'Rate 10$^{-3}$', '<p>Rate 10$^{-3}$</p>');
+  check('<p><b>x<sub>k</sub></b> and a<sup>see note</sup>.</p>',
+    '**x$_{k}$** and asee note.',
+    '<p><strong>x$_{k}$</strong> and asee note.</p>',
+    ['Kept complex superscript as text.']);
+});
+
+test('pre, pre-wrap and monospace runs keep significant spaces while normal and pre-line collapse them', () => {
+  const docs = '<b style="font-weight:normal"><p dir="ltr"><span style="white-space:pre-wrap">The sentinel is </span>' +
+    '<span style="white-space:pre-wrap;font-family:Courier New">b"A  B"</span><span style="white-space:pre-wrap">.</span></p>' +
+    '<p><span style="white-space:pre-wrap">We use $\\verb|A  B|$ for comparison.</span></p></b>';
+  const expected = 'The sentinel is `b"A  B"`.\n\nWe use $\\verb|A  B|$ for comparison.';
+  check(docs, expected,
+    '<p>The sentinel is <code>b"A  B"</code>.</p><p>We use $\\verb|A  B|$ for comparison.</p>');
+  assert.deepEqual(typeset(expected), ['I:\\verb|A  B|']);
+  check('<p>Code <code>A   B</code> and <span style="white-space:pre">C  D</span>.</p>',
+    'Code `A   B` and C  D.',
+    '<p>Code <code>A   B</code> and C  D.</p>');
+  check('<p><b>Normal</b>   spaces and <span style="white-space:pre-line">two  spaces\nnext</span>.</p>',
+    '**Normal** spaces and two spaces  \nnext.',
+    '<p><strong>Normal</strong> spaces and two spaces<br>next.</p>');
+});
+
+test('block paste boundaries separate tables, lists, headings, quotes and code from adjacent text while inline stays inline', () => {
+  const tail = '**Revised results.**\n\n| Model | Score |\n| :-    | -:    |\n| New   | 42    |';
+  const placed = placeProsePaste('Before.\n\n', tail, 'Conclusion follows.');
+  assert.equal(placed.text, 'Before.\n\n' + tail + '\n\nConclusion follows.');
+  assert.match(renderHtml(placed.text), /<p>Conclusion follows\.<\/p>/);
+  assert.equal(placeProsePaste('Intro', '# Heading\n\nBody.', 'Tail').text, 'Intro\n\n# Heading\n\nBody.Tail');
+  assert.equal(placeProsePaste('Intro', '- item 1\n- item 2', 'Tail').text, 'Intro\n\n- item 1\n- item 2\n\nTail');
+  assert.equal(placeProsePaste('Intro', '> quoted', 'Tail').text, 'Intro\n\n> quoted\n\nTail');
+  assert.equal(placeProsePaste('Intro', '```\ncode\n```', 'Tail').text, 'Intro\n\n```\ncode\n```\n\nTail');
+  assert.equal(placeProsePaste('Before.\n', '| A | B |\n| :- | :- |\n| 1 | 2 |', '\nAfter.').text,
+    'Before.\n\n| A | B |\n| :- | :- |\n| 1 | 2 |\n\nAfter.');
+  assert.equal(placeProsePaste('Before.\n\n', '| A | B |\n| :- | :- |\n| 1 | 2 |', '\n\nAfter.').text,
+    'Before.\n\n| A | B |\n| :- | :- |\n| 1 | 2 |\n\nAfter.');
+  assert.equal(placeProsePaste('a', ' **word** ', 'b').text, 'a **word** b');
+  assert.equal(placeProsePaste('before ', 'Our **result** x', ' after').text, 'before Our **result** x after');
+});
+
+test('a TeX array inside a sentence is not routed to table import, while standalone tables and TSV still are', () => {
+  assert.equal(looksLikeTablePaste('Correction. We use $M=\\left(\\begin{array}{cc}a & b\\\\c & d\\end{array}\\right)$ in the new proof.'), false);
+  assert.equal(looksLikeTablePaste('Correction. We use\n$$M=\\left(\\begin{array}{cc}\na & b \\\\\nc & d \\\\\n\\end{array}\\right)$$\nin the new proof.'), false);
+  assert.equal(looksLikeTablePaste('$\\begin{array}{cc}a & b\\\\c & d\\end{array}$ is invertible.'), false);
+  for (const table of [
+    '\\begin{tabular}{lr} A & B \\end{tabular}',
+    '  \\begin{tabular*}{\\linewidth}{lr} A & B \\end{tabular*}',
+    '\\begin{tabularx}{\\linewidth}{lX} A & B \\end{tabularx}',
+    '\\begin{array}{cc} a & b \\\\ c & d \\end{array}',
+    '\\[\\begin{array}{cc} a & b \\\\ c & d \\end{array}\\]',
+    '\\begin{table}[t]\\centering\\begin{tabular}{lr} A & B \\end{tabular}\\end{table}',
+    '% comment\n\\begin{tabular}{lr} A & B \\end{tabular}',
+    'Model\tScore\nBase\t9',
+    'Model\tProjection\nBase\t$\\begin{array}{cc}1&0\\\\0&1\\end{array}$',
+    'A & B \\\\\nx & y \\\\',
+  ]) {
+    assert.equal(looksLikeTablePaste(table), true, table);
+  }
+});
+
+test('a standalone HTML table with keepGrid preserves image alt text and emits the media warning', () => {
+  const html = '<table><tr><th>Metric</th><th>Definition</th></tr>' +
+    '<tr><td>Loss</td><td><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jk2cAAAAASUVORK5CYII=" alt="squared error"></td></tr></table>';
+  const kept = htmlToMarkdown(parse(html), { keepGrid: true });
+  assert.ok(kept && kept.grid);
+  const rendered = tableMarkdown(kept.grid, { pad: false });
+  assert.equal(rendered.markdown, '|Metric|Definition|\n|:-|:-|\n|Loss|squared error|');
+  assert.deepEqual(Array.from(rendered.warnings, w => [w.row, w.message]), [[2, imageWarning]]);
 });
