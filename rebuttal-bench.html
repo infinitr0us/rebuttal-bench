@@ -758,6 +758,78 @@ window.MathJax = {
     background: var(--scroll-bg);
     padding: var(--scroll-pad);
   }
+  /* The right pane shows the preview or the review. The preview stays laid
+     out underneath (hidden, not removed), so MathJax keeps measuring it. */
+  .viewbody { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+  .viewtabs { display: flex; gap: 4px; }
+  .viewtabs button {
+    padding: 0 2px 2px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: none;
+    font-size: 11px;
+    font-family: var(--mono);
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .viewtabs button[aria-selected="true"] { color: var(--accent-ink); border-bottom-color: var(--accent); }
+  .viewtabs button:hover { color: var(--text); }
+  .rbadge { letter-spacing: 0.02em; color: var(--ok); }
+  .rbadge.open { color: var(--title-warn); }
+  .reviewview {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 18px;
+    border-top: 1px solid var(--line);
+    background: var(--panel);
+    overflow: auto;
+  }
+  .reviewview[hidden] { display: none; }
+  #reviewSlot {
+    flex: none;
+    height: 34%;
+    min-height: 90px;
+    resize: vertical;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  #reviewSlot iframe { display: block; width: 100%; height: 100%; border: 0; }
+  .review-bar { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--dim); }
+  .review-bar label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+  .review-bar input { margin: 0; accent-color: var(--accent); }
+  .review-stat { margin-right: auto; }
+  .review-note { font-size: 12px; line-height: 1.5; color: var(--title-warn); }
+  .review-note button { margin-left: 8px; padding: 2px 8px; font-size: 12px; }
+  .review-list { display: flex; flex-direction: column; gap: 2px; }
+  .rpoint { display: flex; align-items: flex-start; gap: 6px; }
+  .rpoint .rgo {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    gap: 8px;
+    padding: 3px 0;
+    border: none;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .rpoint .rgo:hover .rtext, .rpoint .rgo:focus-visible .rtext { text-decoration: underline; }
+  .rpoint .rlabel { flex: none; min-width: 2.6em; font-family: var(--mono); font-weight: 600; color: var(--accent-ink); }
+  .rpoint .rtext { flex: 1; min-width: 0; line-height: 1.45; }
+  .rpoint .rstatus { flex: none; font-family: var(--mono); font-size: 11.5px; color: var(--ok); white-space: nowrap; }
+  .rpoint.missing .rstatus { color: var(--dim); }
+  .rpoint .rquote { flex: none; padding: 1px 8px; font-size: 11.5px; }
+
   /* ---- OpenReview note styles ----------------------------------------
      Every value below is measured from openreview-web's compiled stylesheet
      as it computes on a rendered comment (.note-content .note-content-value
@@ -1049,10 +1121,38 @@ window.MathJax = {
 
   <div class="divider" aria-hidden="true"></div>
 
-  <section class="pane" aria-label="Rendered preview">
-    <div class="pane-head"><h2>Preview</h2><span class="hint">OpenReview's own note styles, 1:1 at 100%. Double-click to find a spot in the source.</span></div>
-    <div class="scroller" id="scroller">
-      <article class="paper" id="preview"><p class="empty">Nothing to preview yet.</p></article>
+  <section class="pane" aria-label="Rendered preview and the review">
+    <div class="pane-head"><div class="viewtabs" role="tablist" aria-label="Preview or review">
+      <button type="button" role="tab" id="viewPreview" aria-selected="true" aria-controls="scroller">Preview</button>
+      <button type="button" role="tab" id="viewReview" tabindex="-1" aria-selected="false" aria-controls="reviewView" title="The review this draft answers, its points, and which of them the draft labels or quotes">Review <span id="reviewBadge" class="rbadge"></span></button>
+    </div><span class="hint" id="viewHint">OpenReview's own note styles, 1:1 at 100%. Double-click to find a spot in the source.</span></div>
+    <div class="viewbody">
+      <div class="scroller" id="scroller" role="tabpanel" aria-labelledby="viewPreview" tabindex="0">
+        <article class="paper" id="preview"><p class="empty">Nothing to preview yet.</p></article>
+      </div>
+      <div class="reviewview" id="reviewView" role="tabpanel" aria-labelledby="viewReview" hidden>
+        <div id="reviewSlot"></div>
+        <template id="reviewEditor">
+          <style>
+            html, body { height: 100%; margin: 0; }
+            textarea {
+              display: block; box-sizing: border-box; width: 100%; height: 100%; resize: none;
+              padding: 8px 10px; border: 0; background: var(--scroll-bg); color: var(--text);
+              font: 12px/1.5 var(--mono);
+            }
+            textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+          </style>
+          <textarea id="reviewInput" spellcheck="false" aria-label="The review this draft answers"
+            placeholder="Paste the review this draft answers, copied from the OpenReview forum. It stays with this draft, in this browser only, and is never exported."></textarea>
+        </template>
+        <div class="review-bar">
+          <span id="reviewStat" class="review-stat"></span>
+          <label title="Quote the first sentence of each point under its label"><input type="checkbox" id="skeletonQuote" checked> with quotes</label>
+          <button type="button" id="skeletonBtn" title="Insert a separate paragraph for each point that no part of the draft answers yet (one undo takes it back)">Insert skeleton</button>
+        </div>
+        <div id="reviewNote" class="review-note" hidden></div>
+        <div id="reviewList" class="review-list"></div>
+      </div>
     </div>
   </section>
 </main>
@@ -4794,8 +4894,10 @@ function importPlan(existing, incoming) {
    ends in punctuation or stands alone (**W1.**, **Q2:**, **Reviewer aBcD**),
    or a point's name (W1:, Q2., Weakness 3:, [W4]). Bold that starts a
    sentence (**We thank** the reviewer) is no label. */
-var SECTION_NAME = '(?:[WQ]\\d{1,2}|(?:weakness|question|comment|concern|point|issue|limitation)s?\\s*#?\\d{1,2})';
-var SECTION_LABEL = new RegExp('^(?:\\[' + SECTION_NAME + '\\]|' + SECTION_NAME + '\\s*[.:)])', 'i');
+var REVIEW_NAME = '(?:[WQLC]\\d+|(?:weakness|question|comment|concern|limitation)s?[ \\t]*#?\\d+)(?![\\p{L}\\p{N}])';
+var SECTION_NAME = '(?:' + REVIEW_NAME + '|(?:point|issue)s?\\s*#?\\d{1,2})';
+var SECTION_LABEL = new RegExp('^(?:[\\[(]' + SECTION_NAME + '(?:\\s*,\\s*' + SECTION_NAME +
+  ')*[\\])]|' + SECTION_NAME + '\\s*(?:[.:)]|$))', 'iu');
 
 function sectionLabel(s) {
   s = s.replace(/^\s+/, '');
@@ -4803,7 +4905,7 @@ function sectionLabel(s) {
   if (bold && bold[2].length <= 100 &&
       (/[.:?)\]]$/.test(bold[2]) || /^\s*(?:$|[:.\u2013\u2014-])/.test(bold[3]) ||
        /* "**W3** (novelty)": a point's name, not "**Our method** (Sec. 3) improves" */
-       (/^\s*\(/.test(bold[3]) && new RegExp('^' + SECTION_NAME + '$', 'i').test(bold[2])))) return true;
+       (/^\s*\(/.test(bold[3]) && new RegExp('^' + SECTION_NAME + '$', 'iu').test(bold[2])))) return true;
   return SECTION_LABEL.test(s);
 }
 
@@ -4834,8 +4936,9 @@ function definitionRanges(text) {
    `kind` is 'heading', 'point' or 'opening' (the text before the first),
    `level` how many headings enclose it, `chars` its trimmed length in UTF-16
    units, as the limit counts. Only top-level blocks count: a heading in a
-   code block or a quote is not one. null with fewer than two sections. */
-function commentSections(text) {
+   code block or a quote is not one. null with fewer than two sections,
+   unless `any` (a draft whose one part is labelled still has that label). */
+function commentSections(text, any) {
   var api = typeof window !== 'undefined' ? window.marked : null;
   if (typeof text !== 'string' || !api || typeof api.lexer !== 'function') return null;
   var tokens;
@@ -4884,7 +4987,7 @@ function commentSections(text) {
     out.push({ title: s.title, kind: s.kind, level: open.length, start: s.start, end: end, chars: text.slice(s.start, end).trim().length });
     if (s.depth) open.push(s.depth);
   });
-  return out.length < 2 ? null : { total: text.trim().length, sections: out };
+  return out.length < (any ? 1 : 2) ? null : { total: text.trim().length, sections: out };
 }
 
 /* The source of each top-level block Marked renders as an element, in
@@ -4968,6 +5071,33 @@ function reviewerRef(text, i, known) {
   }
   if (ref) ref.after = i + m[0].length;
   return ref;
+}
+
+/* A point's name as Sections and the review's points write it, made
+   comparable: "W1", "Weakness 1" and "weakness #1" are all W1. */
+var POINT_NAME = new RegExp('^(?:\\*\\*|__)?[\\[(]?(' + REVIEW_NAME + ')', 'iu');
+function pointName(s) {
+  var m = POINT_NAME.exec(s);
+  return m ? m[1].charAt(0).toUpperCase() + m[1].match(/\d+$/)[0].replace(/^0+(?=\d)/, '') : null;
+}
+
+/* Read the original first line. Sections abbreviates titles for display,
+   and a combined heading can have several labels beyond that abbreviation. */
+function labelledParts(text) {
+  var r = commentSections(text, true), out = [];
+  (r ? r.sections : []).forEach(function (s) {
+    if (s.kind === 'opening') return;
+    var stop = text.indexOf('\n', s.start);
+    var line = text.slice(s.start, stop < 0 ? text.length : stop).replace(/^\s*(?:#{1,6}\s+|>\s*|(?:[*+-]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?/, '');
+    var m;
+    while ((m = POINT_NAME.exec(line))) {
+      out.push({ label: pointName(m[1]), start: s.start, end: s.end });
+      var comma = /^[)\]]?(?:\*\*|__)?\s*,\s*/.exec(line.slice(m[0].length));
+      if (!comma) break;
+      line = line.slice(m[0].length + comma[0].length);
+    }
+  });
+  return out;
 }
 
 /* Cards for a draft (`text`, as posted) whose tab is named `self`, given the
@@ -5084,6 +5214,321 @@ function reviewerIssues(text, self, others, spans) {
   });
   issues.sort(function (a, b) { return a.start - b.start; });
   return issues;
+}
+
+/* ---- a review's points (pure) ----
+   A review copied from the OpenReview forum (or its e-mail) is a run of
+   fields, a name such as "Weaknesses:" followed by its text. The points to
+   answer are in the fields that criticize or ask: each such field is cut at
+   its list items, or at its paragraphs when it has none, and each point gets
+   a label the draft can use (W1, Q2), the reviewer's own when they wrote one.
+   Scores, summaries and strengths are not points. A text with no field names
+   is one field of weaknesses. The labels follow pointName, so coverage
+   (reviewCoverage) compares like with like. */
+var REVIEW_FIELDS = [
+  /* letter, then names; the longest name of a line wins */
+  ['W', 'weaknesses', 'weakness', 'summary of weaknesses', 'strengths and weaknesses', 'other strengths and weaknesses',
+    'claims and evidence', 'methods and evaluation criteria', 'theoretical claims', 'experimental designs or analyses',
+    'essential references not discussed', 'requested changes', 'concerns', 'main weaknesses', 'major weaknesses',
+    'major concerns', 'paper formatting concerns', 'reasons to reject', 'relation to broader scientific literature'],
+  ['Q', 'questions', 'question', 'questions for authors', 'questions for the authors', 'questions to authors',
+    'questions to the authors', 'questions and suggestions', 'questions for rebuttal'],
+  ['L', 'limitations', 'limitation', 'limitations and societal impact'],
+  ['C', 'other comments or suggestions', 'comments suggestions and typos', 'comments, suggestions and typos',
+    'comments', 'comment', 'suggestions', 'minor comments', 'minor weaknesses', 'minor issues', 'typos',
+    'additional comments', 'additional feedback', 'detailed comments', 'missing references', 'minor typos',
+    'typos grammar style and presentation improvements',
+    /* TMLR's explanation of a yes/no answer can hold a request ("say who the
+       intended readers are"); the answer itself is no point. */
+    'explain your answer above'],
+  [null, 'summary', 'paper summary', 'summary of the paper', 'summary of contributions', 'summary of strengths',
+    'strengths', 'strength', 'main strengths', 'soundness', 'presentation', 'contribution', 'rating', 'overall rating',
+    'overall recommendation', 'recommendation', 'overall assessment', 'confidence', 'reviewer confidence',
+    'flag for ethics review', 'ethical concerns', 'details of ethics concerns', 'ethics', 'code of conduct',
+    'supplementary material', 'reasons to accept', 'paper topic and main contributions', 'paper topic', 'relation to prior work', 'quality',
+    'clarity', 'significance', 'originality', 'reproducibility', 'best paper', 'justification for recommendation',
+    'first time reviewer', 'review', 'title', 'excitement', 'references', 'final justification',
+    'code of conduct acknowledgement', 'responsible reviewing acknowledgement', 'broader impact concerns',
+    'are the claims made in the submission supported by accurate, convincing and clear evidence?',
+    "would at least some individuals in tmlr's audience be interested in knowing the findings of this paper?"]
+];
+var REVIEW_FIELD_INDEX = (function () {
+  var map = Object.create(null);
+  REVIEW_FIELDS.forEach(function (f) { f.slice(1).forEach(function (n) { map[n] = f[0]; }); });
+  return map;
+})();
+/* A list item's marker at the start of a line: a number, a bullet, or the
+   reviewer's own label. */
+var REVIEW_ITEM = new RegExp('^([ \\t]{0,8})(?:(\\d+)[.)]|\\((\\d+)\\)|([-*•●▪◦‣])|' +
+  '(?:\\*\\*|__)?[\\[(]?(' + REVIEW_NAME + ')[\\])]?[ \\t]*[.:)–-]?(?:\\*\\*|__)?)(?=[ \\t]+\\S|$)', 'iu');
+
+/* The field a line names, as {letter, name, rest: the text after the name
+   on the same line}, or null. Markup around the name (**, ##) is ignored. */
+function reviewField(line) {
+  var m = /^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*([A-Za-z][A-Za-z '?,/&-]*?)[ \t]*(?:\*\*|__)?[ \t]*(?::|：|$)(?:(?:\*\*|__)[ \t]*)?(.*)$/.exec(line);
+  if (!m) return null;
+  var title = m[1].trim(), name = title.toLowerCase().replace(/\s*&\s*/g, ' and ').replace(/\s+/g, ' ');
+  var letter = REVIEW_FIELD_INDEX[name];
+  /* An unfamiliar form field ends the preceding value only when it reads as
+     the form's own administration ("Final Justification:", "Code Of Conduct
+     Acknowledgement: ..."). Any other title-cased heading is the reviewer's
+     sub-heading ("**Experimental Setup:**" over two questions) and stays in
+     its field, as does "Minor: ..." in prose. */
+  if (letter === undefined) {
+    if (!/:|：/.test(line) || !/^[A-Z][a-z]+(?: [A-Z][a-z]+)+$/.test(title)) return null;
+    if (!/ (?:Acknowledgement|Acknowledgment|Assessment|Declaration|Decision|Justification|Rating|Score|Recommendation|Confidence)$|^(?:Code Of Conduct|Ethics|Ethical)\b/.test(title)) return null;
+    letter = null;
+  }
+  return { letter: letter, name: title, rest: m[2] };
+}
+
+/* Read the field/value siblings OpenReview copies, including selections whose
+   outer note-content div is missing. Only text enters the review box. */
+function readHtmlReview(doc) {
+  var names = doc.getElementsByClassName('note-content-field'), fields = [];
+  function children(node, indent) {
+    var out = '';
+    for (var child = node.firstChild; child; child = child.nextSibling) out += read(child, indent);
+    return out;
+  }
+  function clean(s) { return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim(); }
+  function read(node, indent) {
+    if (node.nodeType === 3) return node.nodeValue.replace(/\s+/g, ' ');
+    if (node.nodeType !== 1 && node.nodeType !== 11) return '';
+    var tag = node.nodeName;
+    if (/^(?:SCRIPT|STYLE)$/.test(tag)) return '';
+    if (tag === 'BR') return '\n';
+    /* Code keeps its lines and indentation; a table keeps its rows and cells. */
+    if (tag === 'PRE') return '\n\n' + node.textContent.replace(/\s+$/, '') + '\n\n';
+    if (tag === 'TABLE') {
+      var trs = node.getElementsByTagName('tr'), lines = [];
+      for (var r = 0; r < trs.length; r++) {
+        var cells = [];
+        for (var c = trs[r].firstElementChild; c; c = c.nextElementSibling) {
+          if (c.nodeName === 'TD' || c.nodeName === 'TH') cells.push(c.textContent.replace(/\s+/g, ' ').trim());
+        }
+        lines.push(indent + cells.join(' | '));
+      }
+      return '\n\n' + lines.join('\n') + '\n\n';
+    }
+    if (tag === 'OL' || tag === 'UL') {
+      var rows = [], n = node.hasAttribute('start') ? Number(node.getAttribute('start')) : 1;
+      for (var li = node.firstElementChild; li; li = li.nextElementSibling) {
+        if (li.nodeName !== 'LI') continue;
+        if (li.hasAttribute('value')) n = Number(li.getAttribute('value'));
+        rows.push(indent + (tag === 'OL' ? (n++) + '. ' : '- ') + clean(children(li, indent + '  ')));
+      }
+      return '\n' + rows.join('\n') + '\n';
+    }
+    var value = children(node, indent);
+    return /^(?:DIV|P|H[1-6]|BLOCKQUOTE|PRE)$/.test(tag) ? '\n\n' + value.trim() + '\n\n' : value;
+  }
+  for (var i = 0; i < names.length; i++) {
+    var name = names[i], value = name.nextElementSibling;
+    /* Chrome can wrap the space after a field name in a styled span. */
+    while (value && value.nodeName === 'SPAN' && !value.classList.contains('note-content-value') &&
+        !value.textContent.trim()) value = value.nextElementSibling;
+    if (!value || !value.classList.contains('note-content-value')) return null;
+    fields.push(name.textContent.trim().replace(/[:：]?$/, ':') + '\n' + clean(read(value, '')));
+  }
+  if (!fields.length) return null;
+  var prefix = doc.createRange();
+  prefix.selectNodeContents(doc.body);
+  prefix.setEndBefore(names[0]);
+  var title = clean(read(prefix.cloneContents(), ''));
+  return (title ? title + '\n' : '') + fields.join('\n\n');
+}
+
+/* The first sentence of `s`, at most `max` characters, cut at a word. */
+function reviewExcerpt(s, max) {
+  s = s.replace(/\s+/g, ' ').trim();
+  var end = s.search(/[.?!](?:\s|$)/);
+  if (end >= 0 && end + 1 <= max) return s.slice(0, end + 1);
+  if (s.length <= max) return s;
+  var cut = s.lastIndexOf(' ', max - 1);
+  return s.slice(0, cut > max / 2 ? cut : max - 1).replace(/[\s,;:]+$/, '') + '…';
+}
+
+/* {reviewer, points: [{label, letter, field, text, excerpt, start, end}]}:
+   `reviewer` is the ID in OpenReview's title line ("Official Review of
+   Submission12 by Reviewer k9F2"), or null; offsets are into `text`. */
+var REVIEW_WORD = new RegExp('[\\p{L}\\p{N}]', 'u');
+function reviewPoints(text) {
+  var out = { reviewer: null, points: [] };
+  if (typeof text !== 'string' || !text.trim()) return out;
+  var who = /\bby[ \t]+Reviewer[ \t_]+([A-Za-z0-9]{4})(?![A-Za-z0-9])/.exec(text.slice(0, 400));
+  if (who) out.reviewer = who[1];
+  /* Lines with their offsets; fields as runs of lines. */
+  var lines = [], lineRe = /([^\r\n]*)(?:\r\n?|\n|$)/g, line;
+  while ((line = lineRe.exec(text)) && line[0]) lines.push({ text: line[1], start: line.index });
+  var fields = [], cur = null;
+  lines.forEach(function (l) {
+    var f = reviewField(l.text);
+    /* Inside a field of points, "Clarity: the notation in Sec. 3 is ..." is
+       one of them; a score field reads "Clarity: 3: good". */
+    if (f && cur && cur.letter && /^(?:quality|clarity|significance|originality|soundness|presentation|contribution)$/i.test(f.name) &&
+        f.rest.trim() && !/^(?:\d|(?:excellent|good|fair|poor|weak|strong|adequate|satisfactory)\.?$)/i.test(f.rest.trim())) f = null;
+    if (f) {
+      cur = { letter: f.letter, name: f.name, lines: [] };
+      fields.push(cur);
+      if (f.rest.trim()) {
+        var restAt = l.start + l.text.length - f.rest.length;
+        cur.lines.push({ text: f.rest, start: restAt });
+      }
+    } else if (cur) cur.lines.push(l);
+  });
+  if (!fields.length) fields = [{ letter: 'W', name: '', lines: lines }];
+  var used = { W: 0, Q: 0, L: 0, C: 0 }, taken = Object.create(null);
+  fields.forEach(function (f) {
+    if (!f.letter) return;
+    var items = [], listIndent = null, item = null, para = null, previous = '';
+    var mixed = /strengths and weaknesses/i.test(f.name);
+    f.lines.forEach(function (l) {
+      var body = l.text.trim(), bare = body.replace(/\*\*|__/g, '');
+      if (!body) { para = null; previous = ''; return; }
+      var m = REVIEW_ITEM.exec(l.text);
+      if (m && /[:：]$/.test(bare) && l.text.slice(m[0].length).trim()) {
+        item = para = listIndent = null;
+      } else if (m && (listIndent === null || m[1].length <= listIndent)) {
+        listIndent = m[1].length;
+        item = { start: l.start + m[0].length, end: l.start + l.text.length, own: m[5] ? pointName(m[5]) : null };
+        items.push(item);
+      } else if (!m && (/[:：]$/.test(bare) || /^#{1,6}\s/.test(bare) ||
+          /^\[\d+\]\s/.test(body) || (mixed && /^\+\s/.test(body)))) {
+        /* Neither a list introduction nor a bibliography entry belongs to the
+           preceding item. In a mixed field + can explicitly mark strengths. */
+        item = para = null;
+      } else if (item) {
+        item.end = l.start + l.text.length;
+      } else {
+        /* A forum selection loses list markers. Terminal punctuation followed
+           by a fresh statement separates items; keep hard-wrapped prose. */
+        var fresh = /^(?:(?:missing|unclear|limited|please|another concern|some (?:other|further) limitations)\b|(?:why|how|could|can|does|do|what|which)\b.*\?)/i.test(body);
+        if (!para || (!/^\s/.test(l.text) && !/^[,.;:?!)]/.test(body) && (fresh || /[.!?。？！]["')\]]?$/.test(previous)))) {
+          para = { start: l.start, end: l.start, prose: true };
+          items.push(para);
+        }
+        para.end = l.start + l.text.length;
+      }
+      previous = body;
+    });
+    items.forEach(function (it) {
+      var body = text.slice(it.start, it.end).trim(), plain = body.replace(/\*\*|__/g, '');
+      if (!REVIEW_WORD.test(body) || /^\d+[.)]$/.test(body)) return;
+      if (it.prose && /^(?:a )?(?:summary of )?(?:my |the )?(?:concerns|questions|suggestions|weaknesses) (?:are|is|follow(?:s)?)\s*(?:listed )?(?:as follows|below)?[.:]?$/i.test(plain)) return;
+      if (/^(?:none|n\/?a|no|yes|does not apply|not applicable|see (?:above|below)|no(?: (?:further|other|additional|paper formatting))? (?:questions?|comments?|concerns?))[.!]?$/i.test(plain)) return;
+      if (f.letter === 'L' && /^(?:yes[,.:]?\s*)?(?:the (?:authors|paper) (?:discuss|discusses|acknowledge|acknowledges) (?:the |their )?limitations|(?:the )?limitations are (?:discussed|acknowledged))(?: in (?:the )?(?:paper|appendix|supplementary material))?[.!]?$/i.test(plain)) return;
+      if (/^(?:please )?(?:see|refer to) (?:the )?(?:writing issues in )?(?:weaknesses|questions|reasons to reject)[.!]?$/i.test(plain)) return;
+      /* Only whole, unqualified endorsements. A "but", request or second
+         sentence leaves the point for the author to judge. */
+      if (f.letter === 'W' && /^(?:the (?:paper|benchmark|method|writing|proof) is (?:useful|clear|correct|well[- ]written)|the (?:theoretical )?claims are (?:correctly proved and )?well supported(?: by (?:the )?(?:numerical|empirical) evidence)?)[.!]?$/i.test(plain)) return;
+      var start = it.start + text.slice(it.start, it.end).search(/\S/), label = it.own;
+      /* A label the reviewer used twice gets the next free number. */
+      if (label && taken[label]) label = null;
+      if (label) {
+        var letter = label.charAt(0), n = +label.slice(1);
+        /* An enormous pasted identifier remains a label, but must not put
+           subsequent generated numbers beyond exact integer arithmetic. */
+        if (n < 9007199254740991 - text.length && n > used[letter]) used[letter] = n;
+      } else {
+        do { label = f.letter + (++used[f.letter]); } while (taken[label]);
+      }
+      taken[label] = true;
+      out.points.push({ label: label, letter: label.charAt(0), field: f.name, text: body,
+        excerpt: reviewExcerpt(body, 120), start: start, end: start + body.length });
+    });
+  });
+  return out;
+}
+
+/* For each point, how the draft answers it: {label, status, start, end}:
+   'labelled' when a part of the draft carries the label (start/end: that
+   part), 'quoted' when the draft repeats the point's opening words (the
+   quote), else 'missing' (no part labelled so: perhaps answered in other
+   words, so the page never says unanswered). */
+function reviewCoverage(points, draft) {
+  draft = typeof draft === 'string' ? draft : '';
+  if (/\r/.test(draft)) {
+    /* Marked locates LF text. Translate both ends of its half-open ranges. */
+    var offsets = [], lf = draft.replace(/\r\n?|\n|[^\r\n]+/g, function (run, start) {
+      var count = run === '\r\n' ? 1 : run.length;
+      for (var j = 0; j < count; j++) offsets.push(start + j);
+      return run.charAt(0) === '\r' ? '\n' : run;
+    });
+    offsets.push(draft.length);
+    return reviewCoverage(points, lf).map(function (c) {
+      if (c.start >= 0) { c.start = offsets[c.start]; c.end = offsets[c.end]; }
+      return c;
+    });
+  }
+  var model = draft && collectMarkedRanges(draft), labels = Object.create(null);
+  if (model) labelledParts(draft).forEach(function (p) { if (!labels[p.label]) labels[p.label] = p; });
+  /* Inline code is text a reader sees ("Why is `batch_size` fixed?"): only
+     its backticks are skipped. Code blocks, HTML, images, definitions and
+     link destinations are not. */
+  var excluded = model ? model.ranges.filter(function (r) {
+    return /^(?:code|html|image)$/.test(r.type);
+  }).concat(model.definitions, model.unlocated, model.dropped, looseFenceRanges(draft)) : [];
+  var mask = makeMask(draft.length, excluded), syntax = makeMask(draft.length, model ? model.hidden : []);
+  var quoted = makeMask(draft.length, model ? model.ranges.filter(function (r) { return r.type === 'blockquote'; }) : []);
+  var flat = '', at = [], prevSpace = true;
+  for (var i = 0; model && i < draft.length; i++) {
+    if (mask[i]) {
+      if (!i || !mask[i - 1]) { flat += '\u0000'; at.push(i); }
+      continue;
+    }
+    if (syntax[i]) continue;
+    var ch = draft[i];
+    if (/\s|>/.test(ch)) { if (!prevSpace) { flat += ' '; at.push(i); prevSpace = true; } continue; }
+    if (ch === '*' || ch === '_' || ch === '`') continue;
+    var folded = ch.toLowerCase();
+    flat += folded;
+    for (var n = 0; n < folded.length; n++) at.push(i);
+    prevSpace = false;
+  }
+  /* A distinctive opening allows an abbreviated quote. If several points
+     share it, only their full text distinguishes the corresponding answers. */
+  var counts = Object.create(null);
+  var needles = (points || []).map(function (p) {
+    var full = p.text.replace(/[*_`]/g, '').replace(/[\s>]+/g, ' ').trim().toLowerCase();
+    var opening = full.slice(0, 40).trim();
+    counts[opening] = (counts[opening] || 0) + 1;
+    return { full: full, opening: opening };
+  });
+  return (points || []).map(function (p, index) {
+    var part = labels[p.label];
+    if (part) return { label: p.label, status: 'labelled', start: part.start, end: part.end };
+    var needle = needles[index], probe = counts[needle.opening] > 1 ? needle.full : needle.opening;
+    var hit = probe ? flat.indexOf(probe) : -1;
+    /* A point this short ("Runtime", "Why no data?") counts as quoted only
+       as a whole word inside a quote: in prose it is a coincidence. */
+    if (probe.length < 15) {
+      while (hit >= 0 && ((hit && REVIEW_WORD.test(flat.charAt(hit - 1)) && REVIEW_WORD.test(probe.charAt(0))) ||
+          (REVIEW_WORD.test(probe.slice(-1)) && REVIEW_WORD.test(flat.charAt(hit + probe.length))) || !quoted[at[hit]])) {
+        hit = flat.indexOf(probe, hit + 1);
+      }
+    }
+    if (hit >= 0) return { label: p.label, status: 'quoted', start: at[hit], end: at[hit + probe.length - 1] + 1 };
+    return { label: p.label, status: 'missing', start: -1, end: -1 };
+  });
+}
+
+/* A point as a quote to answer under: "> **W2.** its text", on one line
+   (the reviewer's line breaks and nested bullets would start a list inside
+   the quote). */
+function reviewQuote(p) {
+  return '> **' + p.label + '.** ' + p.text.replace(/\s+/g, ' ').trim();
+}
+/* The labels of the points no part of the draft answers yet, each on its own
+   paragraph, with the point's first sentence quoted when `quotes`: the
+   blocks to insert, in order. */
+function reviewSkeleton(points, coverage, quotes) {
+  var out = [];
+  (points || []).forEach(function (p, i) {
+    if (coverage && coverage[i] && coverage[i].status !== 'missing') return;
+    out.push(quotes ? '> **' + p.label + '.** ' + p.excerpt : '**' + p.label + '.** ');
+  });
+  return out;
 }
 
 /* ---- wording hints (pure): shorter ways to say the same ----
@@ -5613,7 +6058,8 @@ var FS_STEPS = { fsEditor: 1, zoomPreview: 10 };
    chosen venue states no number (Custom, ICLR), so one venue's limit does
    not stay on after switching to another. */
 var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, ownLimit: 5000, sync: true, venue: '',
-  compact: compactDefaults(), compactOpen: false, wordingOpen: false, sectionsOpen: false, spellcheck: false };
+  compact: compactDefaults(), compactOpen: false, wordingOpen: false, sectionsOpen: false, spellcheck: false,
+  view: 'preview', skeletonQuotes: true };
 
 function applyPrefs() {
   document.documentElement.setAttribute('data-theme', prefs.theme === 'dark' ? 'dark' : 'light');
@@ -5640,6 +6086,9 @@ function applyPrefs() {
     box.checked = !!prefs.compact[box.getAttribute('data-trick')];
   });
   renderVenueStat();
+  skeletonQuote.checked = !!prefs.skeletonQuotes;
+  applyView();
+  themeReviewBox();
 }
 
 /* The venue's rule beside the counter: the year of its rules, what its limit
@@ -6204,6 +6653,7 @@ function updateAll() {
   renderIssues();
   renderWording(text, res.spans);
   renderSections(text, chars);
+  renderReview(); /* which points the draft labels or quotes */
   refreshFind(); /* a draft switch puts in another text */
   scheduleCompaction();
   renderDraftTabs();
@@ -6287,6 +6737,7 @@ function reviewerCards(text, spans) {
 }
 function refreshReviewerCards() {
   if (lastAnalysis && analyzedText === ta.value) renderIssues();
+  renderReview(); /* its note compares the review's reviewer with the tab's name */
 }
 
 /* The analyzer's hazards for analyzedText plus what MathJax reported in the
@@ -6529,6 +6980,7 @@ function openDraft(id) {
   if (splitDialog && !splitDialog.hidden) closeSplit();
   if (tableDialog && tableDialog.open) tableDialog.close();
   if (tableOffer) { pastedTable = null; tableOffer.hidden = true; } /* an offer to convert a paste into the draft left */
+  flushReview(); /* the review in the box belongs to the draft left */
   var local = fallbackGet(keyOfDraft(id)); /* read before `id` becomes the open draft */
   var text = typeof local === 'string' ? local : (draftTexts[id] || '');
   var state = bodyState[id] || 'ready';
@@ -6550,6 +7002,7 @@ function openDraft(id) {
     var give = setTimeout(function () { unlockDraft(id, null); }, 8000);
     load.then(function (res) { clearTimeout(give); unlockDraft(id, res); });
   }
+  loadReviewBox(id);
   updateAll();
   renderPreview();
 }
@@ -6654,6 +7107,7 @@ function deleteDraft(id) {
   }
   deleteDraftStorage(keyOfDraft(id));
   dropHistory(id);
+  fallbackDel(reviewKey(id)); /* after openDraft, which saves the review of the draft left */
   retryLocalWrites(); /* space just freed */
   saveDraftMeta();
   renderDraftTabs();
@@ -6942,10 +7396,24 @@ function pruneHistory() {
   });
   var ids = historyKeys().map(function (k) { return k.slice(HISTORY_PREFIX.length); })
     .concat(Object.keys(memHistory));
-  ids.forEach(function (id) {
-    var alive = meta.list.some(function (d) { return d.id === id; });
-    if (meta.gone[id] !== undefined && !alive) dropHistory(id);
+  function gone(id) { return meta.gone[id] !== undefined && !meta.list.some(function (d) { return d.id === id; }); }
+  ids.forEach(function (id) { if (gone(id)) dropHistory(id); });
+  /* Reviews go the same way; the one in the box is this window's open draft. */
+  prefixedKeys(REVIEW_PREFIX).forEach(function (k) {
+    var id = k.slice(REVIEW_PREFIX.length);
+    if (id !== reviewFor && gone(id)) fallbackDel(k);
   });
+}
+function prefixedKeys(prefix) {
+  var keys = [];
+  if (!canLocalRead) return keys;
+  try {
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf(prefix) === 0) keys.push(k);
+    }
+  } catch (e) {}
+  return keys;
 }
 
 /* The text of draft `id` as far as this window knows it, or null while it
@@ -7389,6 +7857,271 @@ sectionsList.addEventListener('click', function (e) {
   ta.focus();
   ta.setSelectionRange(at, at);
   revealOffset(at);
+});
+
+/* ---- the review each draft answers ----
+   The right pane shows the preview or the review of the open draft. A review
+   is kept in localStorage only, under its draft's id: never the asynchronous
+   store, never Export, since it is the reviewer's confidential text, and
+   OpenReview keeps the original. So it is best effort: one that does not fit
+   stays in this window until it is left, and never costs a draft or a
+   version (fallbackSet makes room only for drafts). It goes with its draft.
+   The box is bound to the draft whose review it holds (`reviewFor`), so a
+   save after a switch cannot land under another draft. */
+var REVIEW_PREFIX = 'rebuttal-bench-review-';
+var PREVIEW_HINT = 'OpenReview’s own note styles, 1:1 at 100%. Double-click to find a spot in the source.';
+var REVIEW_HINT = 'The review this draft answers, kept in this browser only. Click a point to go to its answer.';
+var viewPreviewBtn = document.getElementById('viewPreview'), viewReviewBtn = document.getElementById('viewReview');
+var viewHint = document.getElementById('viewHint'), reviewView = document.getElementById('reviewView');
+var reviewSlot = document.getElementById('reviewSlot'), reviewInput = null, reviewBadge = document.getElementById('reviewBadge');
+var reviewStat = document.getElementById('reviewStat'), reviewNote = document.getElementById('reviewNote');
+var reviewList = document.getElementById('reviewList'), skeletonQuote = document.getElementById('skeletonQuote');
+var skeletonBtn = document.getElementById('skeletonBtn');
+var reviewFor = null, reviewSaved = '', reviewTimer = null, reviewUnsaved = false;
+var reviewParsed = { text: null, r: null }, reviewCov = [], reviewShown = null;
+
+function reviewKey(id) { return REVIEW_PREFIX + id; }
+function storedReview(id) {
+  var v = fallbackGet(reviewKey(id));
+  return typeof v === 'string' ? v : '';
+}
+function flushReview() {
+  clearTimeout(reviewTimer);
+  if (!reviewInput || reviewInput.value === reviewSaved) return;
+  var v = reviewInput.value;
+  if (v) reviewUnsaved = !fallbackSet(reviewKey(reviewFor), v);
+  else { fallbackDel(reviewKey(reviewFor)); reviewUnsaved = false; }
+  reviewSaved = v;
+}
+function themeReviewBox() {
+  if (!reviewInput) return;
+  var root = reviewInput.ownerDocument.documentElement, style = getComputedStyle(reviewSlot);
+  ['--scroll-bg', '--text', '--mono', '--accent'].forEach(function (key) {
+    root.style.setProperty(key, style.getPropertyValue(key));
+  });
+  root.style.colorScheme = prefs.theme === 'dark' ? 'dark' : 'light';
+}
+
+/* Chrome's editing history belongs to the document. Give each draft its own
+   review document, and keep its clipboard conversion on that history too. */
+function loadReviewBox(id) {
+  flushReview();
+  reviewInput = null;
+  reviewFor = id;
+  reviewSaved = storedReview(id);
+  reviewUnsaved = false;
+  var frame = document.createElement('iframe');
+  frame.title = 'The review this draft answers';
+  frame.srcdoc = '<!doctype html><html lang="en"><meta charset="utf-8">' + document.getElementById('reviewEditor').innerHTML;
+  frame.addEventListener('load', function () {
+    if (reviewSlot.firstChild !== frame) return;
+    reviewInput = frame.contentDocument.getElementById('reviewInput');
+    reviewInput.value = reviewSaved;
+    themeReviewBox();
+    reviewInput.addEventListener('input', reviewEdited);
+    reviewInput.addEventListener('blur', flushReview);
+    reviewInput.addEventListener('paste', function (e) {
+      var html = e.clipboardData && e.clipboardData.getData('text/html');
+      if (!html) return;
+      var text = readHtmlReview(new DOMParser().parseFromString(html, 'text/html'));
+      if (text === null) return;
+      e.preventDefault();
+      if (!frame.contentDocument.execCommand('insertText', false, text)) {
+        reviewInput.setRangeText(text, reviewInput.selectionStart, reviewInput.selectionEnd, 'end');
+        reviewEdited();
+      }
+    });
+  });
+  if (reviewSlot.firstChild) reviewSlot.replaceChild(frame, reviewSlot.firstChild);
+  else reviewSlot.appendChild(frame);
+  renderReview();
+}
+function parsedReview() {
+  var v = reviewInput ? reviewInput.value : reviewSaved;
+  if (reviewParsed.text !== v) reviewParsed = { text: v, r: reviewPoints(v) };
+  return reviewParsed.r;
+}
+
+function applyView() {
+  var review = prefs.view === 'review';
+  viewPreviewBtn.setAttribute('aria-selected', review ? 'false' : 'true');
+  viewReviewBtn.setAttribute('aria-selected', review ? 'true' : 'false');
+  viewPreviewBtn.tabIndex = review ? -1 : 0;
+  viewReviewBtn.tabIndex = review ? 0 : -1;
+  reviewView.hidden = !review;
+  scroller.setAttribute('aria-hidden', review ? 'true' : 'false');
+  scroller.style.visibility = review ? 'hidden' : '';
+  viewHint.textContent = review ? REVIEW_HINT : PREVIEW_HINT;
+  if (review) renderReview();
+}
+function showView(view) {
+  if (prefs.view === view) return;
+  prefs.view = view;
+  applyView();
+  savePrefs();
+}
+viewPreviewBtn.addEventListener('click', function () { showView('preview'); });
+viewReviewBtn.addEventListener('click', function () { showView('review'); });
+
+viewPreviewBtn.parentNode.addEventListener('keydown', function (e) {
+  var tab;
+  if (e.key === 'Home') tab = viewPreviewBtn;
+  else if (e.key === 'End') tab = viewReviewBtn;
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') tab = e.target === viewPreviewBtn ? viewReviewBtn : viewPreviewBtn;
+  else return;
+  e.preventDefault();
+  tab.focus();
+  showView(tab === viewReviewBtn ? 'review' : 'preview');
+});
+
+/* The points of the review against the editor's text as posted (coverage
+   offsets moved back into the editor), the badge, and when the view is
+   shown, the list. Called on every analysis and on every change of the box. */
+function renderReview() {
+  var r = parsedReview(), text = ta.value, lead = leadOf(text);
+  reviewCov = r.points.length ? reviewCoverage(r.points, text.trim()).map(function (c) {
+    if (c.start >= 0) { c.start += lead; c.end += lead; }
+    return c;
+  }) : [];
+  var open = reviewCov.filter(function (c) { return c.status === 'missing'; }).length;
+  reviewBadge.textContent = r.points.length ? (r.points.length - open) + '/' + r.points.length : '';
+  reviewBadge.classList.toggle('open', open > 0);
+  reviewShown = text;
+  if (reviewView.hidden) return;
+  var writable = draftReady && !ta.readOnly;
+  skeletonBtn.disabled = !writable || !open;
+  reviewStat.textContent = !reviewParsed.text.trim() ? '' : !r.points.length
+    ? 'No points found: the Weaknesses, Questions and Limitations fields hold them.'
+    : fmt(r.points.length) + ' point' + (r.points.length === 1 ? '' : 's') + ', ' +
+      fmt(r.points.length - open) + ' labelled or quoted in the draft' +
+      (!reviewUnsaved ? '' : canLocalRead ? ' (not saved: this browser’s storage is full)'
+        : ' (not saved: this browser keeps no data for this page, so the review lasts until you leave it)');
+  /* The review's own reviewer against the tab's name. */
+  var self = draftReady ? draftById(draftMeta.active) : null, who = self ? draftReviewer(self.name) : null;
+  reviewNote.hidden = true;
+  reviewNote.textContent = '';
+  if (r.reviewer && who && who.ids.indexOf(r.reviewer) < 0) {
+    reviewNote.hidden = false;
+    if (who.ids.length) {
+      reviewNote.textContent = 'This review is by Reviewer ' + r.reviewer + ', but the tab is named for ' + self.name + '.';
+    } else {
+      reviewNote.textContent = 'This review is by Reviewer ' + r.reviewer + '.';
+      var name = document.createElement('button');
+      name.type = 'button';
+      name.id = 'reviewNameTab';
+      name.textContent = 'Name this tab Reviewer ' + r.reviewer;
+      name.disabled = !draftReady;
+      reviewNote.appendChild(name);
+    }
+  }
+  var html = '';
+  r.points.forEach(function (p, i) {
+    var c = reviewCov[i];
+    var status = c.status === 'labelled' ? 'labelled' : c.status === 'quoted' ? 'quoted' : 'no part labelled ' + p.label;
+    html += '<div class="rpoint ' + c.status + '"><button type="button" class="rgo" data-i="' + i + '" title="' +
+      escHtml(p.field ? p.field + ': ' : '') + escHtml(p.text.slice(0, 600)) + '"><span class="rlabel">' + escHtml(p.label) +
+      '</span><span class="rtext">' + escHtml(p.excerpt) + '</span><span class="rstatus">' + escHtml(status) + '</span></button>' +
+      '<button type="button" class="rquote" data-i="' + i + '"' + (writable ? '' : ' disabled') +
+      ' title="Insert this quote as a separate paragraph">Quote</button></div>';
+  });
+  reviewList.innerHTML = html;
+}
+
+function reviewEdited() {
+  clearTimeout(reviewTimer);
+  reviewTimer = setTimeout(flushReview, 400);
+  renderReview();
+}
+window.addEventListener('pagehide', flushReview);
+window.addEventListener('storage', function (e) {
+  /* Another window saved this draft's review: take it unless this box holds
+     an edit of its own. */
+  if (reviewFor === null || e.key !== reviewKey(reviewFor) || (reviewInput && reviewInput.value !== reviewSaved)) return;
+  reviewSaved = typeof e.newValue === 'string' ? e.newValue : '';
+  if (reviewInput) reviewInput.value = reviewSaved;
+  renderReview();
+});
+
+/* Insert `block` at the editor's cursor as a paragraph of its own, through
+   the browser's editing so that one undo takes it back; the caret goes to
+   `caret` characters into the block. */
+function insertBlock(block, caret) {
+  if (!draftReady || ta.readOnly) return false;
+  var s = ta.selectionEnd, v = ta.value, ok = false;
+  /* A point jump or a manual selection is a location, never text to replace.
+     Inside a top-level Markdown block (a paragraph, a list, a code block) go
+     to its end, as Marked sees it: a blank line inside a fenced code block is
+     no boundary. At a block's start the caret is already between blocks. */
+  var blocks = blockSources(v), inBlock = false;
+  for (var k = 0; k < blocks.length; k++) {
+    if (s > blocks[k].start && s < blocks[k].end) { s = blocks[k].end; inBlock = true; break; }
+  }
+  /* An HTML block has no entry: fall back to the next blank line. */
+  if (!inBlock && v.slice(0, s).trim() && v.slice(s).trim() && !/\n[ \t]*$/.test(v.slice(0, s))) {
+    var breaks = /\n[ \t]*\n(?:[ \t]*\n)*/g, m;
+    while ((m = breaks.exec(v)) && breaks.lastIndex < s) { /* preceding paragraphs */ }
+    if (!m) s = v.length;
+    else if (s < m.index) s = m.index;
+  }
+  var before = v.slice(0, s), after = v.slice(s);
+  var pre = !before || /\n[ \t]*\n$/.test(before) ? '' : /\n[ \t]*$/.test(before) ? '\n' : '\n\n';
+  var post = !after || /^\n[ \t]*\n/.test(after) ? '' : /^[ \t]*\n/.test(after) ? '\n' : '\n\n';
+  var ins = pre + block + post;
+  ta.focus();
+  ta.setSelectionRange(s, s);
+  try { ok = document.execCommand('insertText', false, ins); } catch (x) { ok = false; }
+  if (!ok) {
+    ta.setRangeText(ins, s, s, 'end');
+    editSeq++;
+    afterSourceChange();
+  }
+  var at = s + pre.length + (typeof caret === 'number' ? caret : block.length);
+  ta.setSelectionRange(at, at);
+  revealOffset(at);
+  return true;
+}
+
+reviewList.addEventListener('click', function (e) {
+  var btn = e.target.closest('button[data-i]');
+  if (!btn) return;
+  if (reviewShown !== ta.value) renderReview(); /* drawn for an older text */
+  var r = parsedReview(), i = parseInt(btn.getAttribute('data-i'), 10), p = r.points[i], c = reviewCov[i];
+  if (!p || !c) return;
+  if (btn.classList.contains('rquote')) {
+    insertBlock(reviewQuote(p));
+    return;
+  }
+  if (c.start < 0) {
+    showToast('No part of this draft is labelled ' + p.label + '. Start your answer with **' + p.label +
+      '.**, or insert the point with Quote.');
+    return;
+  }
+  ta.focus();
+  ta.setSelectionRange(c.start, c.status === 'quoted' ? c.end : c.start);
+  revealOffset(c.start);
+});
+reviewNote.addEventListener('click', function (e) {
+  if (!e.target.closest('#reviewNameTab')) return;
+  var r = parsedReview(), d = draftReady ? draftById(draftMeta.active) : null;
+  if (!r.reviewer || !d) return;
+  d.name = cleanDraftName('Reviewer ' + r.reviewer);
+  d.at = Date.now();
+  saveDraftMeta();
+  renderDraftTabs();
+  renderIssues();
+  renderReview();
+});
+skeletonQuote.addEventListener('change', function () {
+  prefs.skeletonQuotes = skeletonQuote.checked;
+  savePrefs();
+});
+skeletonBtn.addEventListener('click', function () {
+  if (reviewShown !== ta.value) renderReview();
+  var blocks = reviewSkeleton(parsedReview().points, reviewCov, skeletonQuote.checked);
+  if (!blocks.length) { showToast('Every point already has a labelled part or a quote in this draft.'); return; }
+  if (insertBlock(blocks.join('\n\n'), blocks[0].length)) {
+    showToast('Inserted ' + blocks.length + ' label' + (blocks.length === 1 ? '' : 's') + '. One ' + UNDO_HINT + ' takes them back.');
+  }
 });
 
 /* ---- spellcheck, find and replace, preview to source ---- */
@@ -8163,6 +8896,8 @@ storeGet(PREFS_KEY).then(function (v) {
       if (typeof p.wordingOpen === 'boolean') restore('wordingOpen', p.wordingOpen);
       if (typeof p.sectionsOpen === 'boolean') restore('sectionsOpen', p.sectionsOpen);
       if (typeof p.spellcheck === 'boolean') restore('spellcheck', p.spellcheck);
+      if (p.view === 'preview' || p.view === 'review') restore('view', p.view);
+      if (typeof p.skeletonQuotes === 'boolean') restore('skeletonQuotes', p.skeletonQuotes);
     } catch (e) {}
   }
   if (limitAction === 'venue') {
@@ -8236,6 +8971,7 @@ function finishBoot(draft, note) {
   if (metaChanged) saveDraftMeta();
   pruneHistory();
   renderDraftTabs();
+  loadReviewBox(draftMeta.active);
   updateAll();
   renderPreview();
 }

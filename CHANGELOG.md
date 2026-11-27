@@ -1,5 +1,35 @@
 # Changelog
 
+## 3.9.0 (unreleased)
+
+### The review beside its draft
+- The right pane has keyboard-accessible *Preview* and *Review* tabs. Each draft keeps its
+  review in this browser only, outside exports and the asynchronous store. Deleting the draft
+  deletes its review. The review editor has its own undo and redo history for each draft.
+- Pasting an OpenReview note keeps field names, paragraphs and numbered or bulleted items.
+  Plain-text lists copied from the forum also yield separate points. The parser recognizes
+  NeurIPS, ICLR, ICML, TMLR, EMNLP, ACL ARR and AAAI field names, skips scores and administrative
+  fields, and keeps substantive limitations. Mixed fields can include praise alongside concerns.
+- The reviewer's labels and the inserted labels use W, Q, L and C. A combined heading such
+  as `(Weakness1, Question1)` covers both points. Visible quotes count, including complete short
+  questions. Points with the same opening use the full text. Click a covered point to find it.
+  The tab shows the count (*3/5*). A point without a match says *no part labelled W3*, since
+  only the author can judge an answer written in other words.
+- *Quote* and *Insert skeleton* add separate paragraphs. A caret inside a paragraph, a list or
+  a code block inserts after that block, and a selection uses its end. One undo restores the
+  original passage.
+- Pasted code keeps its lines and a pasted table its rows and cells. A reviewer's own
+  sub-heading inside a field (*Experimental Setup:*) keeps the items under it, and TMLR's
+  *Explain your answer above* counts as comments, since it can hold a request.
+- When the review names its reviewer (OpenReview's *Official Review ... by Reviewer k9F2*) and
+  the tab is named for another one, the view says so; a tab named for no one can take the
+  reviewer's name with one click.
+- Two Codex reviews tested the view on 26 public reviews from ICLR, NeurIPS, ICML, TMLR and
+  EMNLP (kept out of the repository; the tests use invented reviews of the same shapes). Every
+  point an author would answer is found, both from a field-by-field paste and from a copy of
+  the forum page; some extra rows remain, mostly praise or explanations inside a field of
+  concerns, which the parser keeps rather than risk dropping a real concern.
+
 ## 3.8.0 (2026-11-27)
 
 ### Venue rules, checked again on 2026-11-27

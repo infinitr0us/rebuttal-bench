@@ -81,6 +81,15 @@ leave the browser: they autosave on this device only.
   salutation, a *Response to* line or an opening or closing thanks that addresses another
   reviewer (an answer copied from their draft), and an ID in other capitals than its tab.
   Mentions in passing and joint thanks are left alone.
+- **Review.** Switch the right pane between *Preview* and *Review* with a click or the arrow
+  keys. Paste the forum review your draft answers. A rich paste keeps its fields, paragraphs
+  and lists. Plain text works too. Each weakness, question, limitation or comment gets a label
+  such as W1, Q2, L1 or C1, using the reviewer's label when supplied. Click a covered point
+  to find its label or quotation in the draft. A heading can answer several points together.
+  The tab shows the count (*3/5*). *Quote* inserts the point and *Insert skeleton* adds the
+  missing labels, optionally with quotes. Each inserts at a paragraph boundary or after the
+  paragraph containing the selection's end. One undo restores the draft. Each review has its
+  own undo history and stays with its draft in this browser, outside exports, until deletion.
 - **History and export.** *History* lists earlier versions of the open draft: one is kept before
   *Fix all*, *Apply to source*, *Replace all*, *Clear*, *Load example* and a restore, and one every 10 minutes
   while you edit, of the text the edit replaces (up to 20 per draft, in this browser only). When
@@ -201,6 +210,7 @@ tests/
   drafts.test.js           the stored list of drafts: parsing, merging two windows' lists
   split.test.js            splitting a draft into comments: where it cuts, what it keeps
   reviewers.test.js        reviewer IDs across drafts: greetings and IDs in other capitals
+  review.test.js           a review's points and how a draft covers them
   fixtures/                realistic drafts used by the tests
   example.test.js          the built-in example must end clean and fully typeset
   fuzz.test.js             analyzer vs. real Marked + DOMPurify + MathJax

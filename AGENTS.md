@@ -410,6 +410,45 @@ the macro check never see them. They depend on the tabs' names, so a rename, a d
 import, a list taken in from another window and a list merged on saving call
 `refreshReviewerCards`.
 
+## The review beside its draft
+
+The Preview and Review tabs (`prefs.view`, `applyView`) use roving focus and arrow keys.
+The hidden preview stays laid out so MathJax can measure it. The review textarea lives in a
+same-origin `srcdoc` iframe. Chrome keeps undo history per document. `loadReviewBox` replaces
+the frame on a draft switch, binds input only after the current frame loads, and copies the
+theme tokens into its document on load and theme changes.
+
+`readHtmlReview(doc)` reads OpenReview's field/value sibling elements from a parsed clipboard
+fragment, preserving list markers, nested items, paragraphs, code lines and table cells. An
+ordinary paste stays native.
+`reviewPoints(text)` reads the original line endings for source offsets. Form fields set the
+type (W, Q, L or C) or end the preceding value; an unknown title-cased heading ends it only
+when it reads as the form's administration (Acknowledgement, Justification, Declaration and the
+like), otherwise it is the reviewer's sub-heading and its items stay in the field. Aspect names
+such as Clarity can introduce prose inside a field. Plain selections lose list markers, so sentence boundaries and question
+openings help separate items while wrapped prose stays together. Keep ambiguous concerns in
+mixed fields, even when that also keeps some praise. Tests use synthetic reviews.
+
+`REVIEW_NAME` is shared by review items, section names and coverage. `labelledParts` reads all
+the leading labels in a section, including combined headings. `reviewCoverage` maps visible
+quotes back to source offsets after case and whitespace folding. Shared openings require the
+full point. Link definitions, destinations, comments and code blocks cannot cover a point;
+inline code is visible text (only its backticks are skipped). A point under 15 characters counts
+only as a whole word inside a blockquote. A missing match says *no part labelled X*.
+`insertBlock` inserts Quote and Insert skeleton at a block boundary or after the top-level block
+(`blockSources`) holding the selection's end, never inside a fenced code block, with one source
+undo. Known limits accepted by the last review (`reviews/2026-11-27/codex-final-39`): praise in a
+field of concerns can become a point, and a part labelled Question2.1 counts for Q2.
+
+**Storage** is deliberately simpler than the drafts': a review lives under
+`REVIEW_PREFIX + draft id` in localStorage only (never the asynchronous store, Export, Import or
+History), since OpenReview keeps the original and it is the reviewer's text. `fallbackSet`
+makes room only for drafts, so a review that does not fit stays in memory until the page is
+left, and the view says so. The box is bound to its draft (`reviewFor`): `openDraft` saves the
+review of the draft it leaves, then loads the new one; deleting a draft deletes its review, and
+`pruneHistory` drops reviews of drafts deleted elsewhere. Another window's save of the same
+review is taken in only when this box holds no edit of its own (last save wins otherwise).
+
 ## Staying in sync with OpenReview
 
 `npm run check-upstream` diffs the openreview-web excerpts the page mirrors against
@@ -436,7 +475,9 @@ state per preview (no duplicate `\label` errors, deleted `\newcommand`s, `\defin
 across a reload and with a slow store), manual fixes outside Fix
 all, Fix all's added-character count, the selection count, venue presets (the rule beside the
 counter, the author's own limit, preferences stored before 3.8), reviewer cards across drafts
-(with a rename), Copy compact and Apply to
+(with renames here and in another window), the review view (points, coverage, Quote and the
+skeleton with one undo each, a review per draft, across a reload, deleted with its draft),
+Copy compact and Apply to
 source (with undo), the compact chip state, compaction switches across a reload, jumping to a hazard on a
 long soft-wrapped line, refusing a stale one-click fix, draft persistence across a reload (also
 with a stubbed asynchronous `window.storage`: keystrokes before a reload, a draft saved elsewhere,
