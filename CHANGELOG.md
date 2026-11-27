@@ -6,7 +6,11 @@
 - Formatted text pasted into the editor offers *Convert*: headings, bold and italics, links,
   nested lists, quotes, inline code and tables become Markdown, and one undo brings back the
   plain paste. TeX written in the document (`$\alpha$`) reaches MathJax unchanged; an equation
-  that arrives as an image or MathML keeps its alt text, with a warning.
+  that arrives as an image or MathML keeps its alt text, with a warning. Superscripts stay
+  exponents (`10<sup>-3</sup>` from Word becomes `10$^{-3}$`), spaces in code stay, and a pasted
+  table or list never runs into the text after it.
+- A Codex review with a real Word clipboard found six problems in this and in Print before
+  release; Gemini 4 Neon fixed them, each with a test that fails without the fix.
 
 ### Promises
 - The *Promises* panel lists what the drafts promise to change in the paper, grouped by tab:

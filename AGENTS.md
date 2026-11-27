@@ -145,7 +145,14 @@ editor asks for `keepGrid`, so a paste that is only a table still opens the tabl
 explicit HTML list wins over the tab-separated heuristic (Word puts tabs after list markers). The
 offer is bound to the captured draft, source and range, like the table offer, and applies with
 `setSourceText` for one undo. Tests check the exact Markdown, the rendered HTML and the TeX that
-reaches MathJax.
+reaches MathJax. Fixed after the 3.11 review (`reviews/2026-11-27/codex-review-311`, with a real
+Word clipboard fragment): superscripts and subscripts (`sup`, `sub`, `vertical-align`) go through
+the table importer's `readHtmlScript`, so `10<sup>-3</sup>` stays an exponent; spaces are kept in
+`pre`, `pre-wrap` and monospace runs (`\verb|A  B|`); a paste counts as a LaTeX table only when
+its text starts with the environment (`looksLikeTablePaste`), not when a sentence holds an
+`array`; a pasted block (table, list, heading, quote, code) is set apart from the draft text
+next to it by a blank line (`placeProsePaste`); and a table keeps an equation image's alt text,
+with the media warning, whether pasted alone or inside prose.
 
 ## Compaction
 
@@ -321,7 +328,10 @@ cases, Chrome probes); keep their rules:
   picker stays bound to the versions shown when Compare opened. Print reads `knownDraftText`
   with Export's private list merge, renders through the preview's queue with a fresh TeX state
   per comment, waits for the typeset before `window.print()`, and removes its copy on
-  `afterprint`; closing History or switching drafts cancels a pending print.
+  `afterprint`; closing History or switching drafts cancels a pending print. MathJax updates
+  `\eqref` across one document, so Print takes the preview's math out of MathJax's list before
+  it typesets, clears each printed comment's math right after its typeset (two drafts may both
+  define `eq:main`), and re-renders the preview when printing ends.
 - **Import only adds** (`importDrafts`; pure: `readDraftsFile`, `importPlan`). Each draft of the
   file whose text no draft known here has (`knownDraftText`, after taking in the stored list)
   becomes a new tab under a name no draft has. It never replaces, changes or opens a draft and
