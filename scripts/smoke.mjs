@@ -694,6 +694,139 @@ try {
     window.confirm = () => true; deleteDraft(a); await wait(50);
     return inert && focusKept && closed && kept && draftMeta.active === 'd1' || { inert, focusKept, closed, kept, active: draftMeta.active };`);
 
+  await check('Compare reads versions, other drafts and pasted edits without changing the draft or storage', `
+    const id = createDraft('Compare current', 'Our current result.');
+    const other = createDraft('Co-author', 'Our revised result.');
+    const unknown = createDraft('Still loading', '');
+    fallbackDel(keyOfDraft(unknown)); bodyState[unknown] = 'loading'; delete bodyKnown[unknown];
+    switchDraft(id);
+    keepVersion('before edits', 'Our earlier result.');
+    const stored = JSON.stringify(localStorage), meta = JSON.stringify(draftMeta);
+    const shown = () => Array.from(compareDiff.children, el => [el.tagName, el.textContent]);
+    const change = (value) => { compareSource.value = value; compareSource.dispatchEvent(new Event('change')); };
+    try {
+      draftTools.querySelector('[data-act="history"]').click();
+      document.getElementById('compareBtn').click();
+      const version = shown(), modal = !!ta.closest('[inert]') && !compareView.closest('[inert]');
+      const unavailable = compareSource.querySelector('[value="draft-' + unknown + '"]').disabled;
+      change('draft-' + other);
+      const draft = shown();
+      change('paste'); comparePaste.value = 'Our <b> result.'; comparePaste.dispatchEvent(new Event('input'));
+      const pasted = shown(), count = compareSummary.textContent;
+      document.getElementById('compareBack').click();
+      const back = compareView.hidden && !historyVersions.hidden && !!historyList.querySelector('[data-restore]');
+      document.getElementById('compareBtn').click();
+      const readOnly = stored === JSON.stringify(localStorage) && meta === JSON.stringify(draftMeta) && ta.value === 'Our current result.';
+      switchDraft('d1');
+      const closed = historyDialog.hidden && compareView.hidden && !comparePaste.value && !ta.closest('[inert]');
+      return JSON.stringify(version) === JSON.stringify([['DEL','earlier'],['INS','current']]) &&
+        JSON.stringify(draft) === JSON.stringify([['DEL','current'],['INS','revised']]) &&
+        JSON.stringify(pasted) === JSON.stringify([['DEL','current'],['INS','<b>']]) &&
+        /1 word deleted, 1 word inserted/.test(count) && modal && unavailable && back && readOnly && closed ||
+        { version, draft, pasted, count, modal, unavailable, back, readOnly, closed };
+    } finally {
+      closeHistory(); switchDraft('d1'); window.confirm = () => true;
+      [id, other, unknown].forEach(deleteDraft);
+    }`);
+
+  await check('Print prepares one or all rendered comments, isolates TeX, names omissions and only reads', String.raw`
+    const source = '  **Visible draft** $\\newcommand{\\RBprint}{7}\\RBprint$\n';
+    const id = createDraft('Proof <A>', 'Previously saved.');
+    const other = createDraft('Second proof', '$\\newcommand{\\RBprint}{9}\\RBprint$');
+    switchDraft(id);
+    ta.value = source; /* edited but not yet saved */
+    const storedList = localStorage.getItem(DRAFTS_KEY), elsewhere = JSON.parse(storedList);
+    elsewhere.list.push({ id: 'dawaitingprint', name: 'Still arriving', at: Date.now() });
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(elsewhere));
+    const before = JSON.stringify(localStorage), meta = JSON.stringify(draftMeta), calls = [];
+    const realPrint = window.print;
+    window.print = () => {
+      const root = document.getElementById('printDrafts');
+      calls.push({
+        names: [...root.querySelectorAll('.print-heading h1')].map(el => el.textContent),
+        counts: [...root.querySelectorAll('.print-heading p')].map(el => el.textContent),
+        math: root.querySelectorAll('.paper mjx-container').length,
+        values: [...root.querySelectorAll('.paper')].map(el => [!!el.querySelector('.mjx-c37'), !!el.querySelector('.mjx-c39')]),
+        bold: root.querySelector('strong')?.textContent, errors: root.querySelectorAll('mjx-merror').length,
+        omitted: root.querySelector('.print-omitted')?.textContent,
+        ready: document.body.classList.contains('printing-drafts') && !!ta.closest('[inert]'),
+      });
+    };
+    async function print(button, n) {
+      document.getElementById(button).click();
+      for (let i = 0; i < 100 && calls.length < n; i++) await wait(50);
+      window.dispatchEvent(new Event('afterprint'));
+      return !document.getElementById('printDrafts') && !document.body.classList.contains('printing-drafts');
+    }
+    try {
+      openHistory();
+      const cleanedOne = await print('printOneBtn', 1), cleanedAll = await print('printAllBtn', 2);
+      const [one, all] = calls, expected = draftMeta.list.map(d => d.name);
+      const limit = Number(limitInput.value);
+      const count = source.trim().length + (limit ? ' / ' + limit.toLocaleString('en-US') : '') + ' characters';
+      const unchanged = before === JSON.stringify(localStorage) && meta === JSON.stringify(draftMeta) && ta.value === source;
+      return cleanedOne && cleanedAll && unchanged && calls.length === 2 && one.ready && all.ready &&
+        one.names.join() === 'Proof <A>' && one.counts[0] === count && one.math === 1 && one.bold === 'Visible draft' &&
+        !one.omitted && one.errors === 0 && one.values[0][0] &&
+        JSON.stringify(all.names) === JSON.stringify(expected) && all.math === expected.length && all.errors === 0 &&
+        all.values[expected.indexOf('Proof <A>')][0] && all.values[expected.indexOf('Second proof')][1] &&
+        all.omitted.includes('Still arriving') || { calls, cleanedOne, cleanedAll, count, unchanged };
+    } finally {
+      window.print = realPrint;
+      closeHistory(); localStorage.setItem(DRAFTS_KEY, storedList);
+      switchDraft('d1'); window.confirm = () => true; [id, other].forEach(deleteDraft);
+    }`);
+
+  await send('Emulation.setEmulatedMedia', { media: 'print' }, sessionId);
+  try {
+    await check('print media shows only the rendered notes, in the light palette even from dark mode', `
+      const theme = document.documentElement.dataset.theme, realPrint = window.print;
+      let layout;
+      window.print = () => {
+        const root = document.getElementById('printDrafts'), paper = root.querySelector('.paper');
+        layout = {
+          othersHidden: [...document.body.children].every(el => el === root || getComputedStyle(el).display === 'none'),
+          width: paper.getBoundingClientRect().width, visibility: getComputedStyle(root).visibility,
+          ink: getComputedStyle(paper).color, background: getComputedStyle(paper).backgroundColor,
+        };
+      };
+      try {
+        document.documentElement.dataset.theme = 'dark';
+        openHistory(); document.getElementById('printOneBtn').click();
+        for (let i = 0; i < 100 && !layout; i++) await wait(30);
+        return layout && layout.othersHidden && layout.width > 0 && layout.visibility === 'visible' &&
+          layout.ink === 'rgb(51, 51, 51)' && layout.background === 'rgb(255, 255, 255)' || layout;
+      } finally {
+        window.dispatchEvent(new Event('afterprint')); closeHistory();
+        document.documentElement.dataset.theme = theme; window.print = realPrint;
+      }`);
+  } finally { await send('Emulation.setEmulatedMedia', { media: '' }, sessionId); }
+
+  await check('switching drafts while Print typesets cancels the print and releases the preview queue', `
+    const id = createDraft('Print in progress', 'An equation $q$.');
+    switchDraft(id); openHistory();
+    const realPrint = window.print, typeset = MathJax.typesetPromise;
+    let release, started = false, printed = false;
+    const gate = new Promise(r => { release = r; });
+    window.print = () => { printed = true; };
+    MathJax.typesetPromise = function (targets) {
+      if (!targets[0].closest('#printDrafts')) return typeset.call(this, targets);
+      started = true;
+      return gate.then(() => typeset.call(this, targets));
+    };
+    try {
+      document.getElementById('printOneBtn').click();
+      for (let i = 0; i < 100 && !started; i++) await wait(30);
+      switchDraft('d1'); release();
+      for (let i = 0; i < 100 && renderBusy; i++) await wait(30);
+      return started && !printed && !renderBusy && historyDialog.hidden && !ta.closest('[inert]') &&
+        !document.getElementById('printDrafts') && !!preview.querySelector('mjx-container') ||
+        { started, printed, renderBusy, hidden: historyDialog.hidden, text: preview.textContent };
+    } finally {
+      release(); MathJax.typesetPromise = typeset; window.print = realPrint;
+      closeHistory(); switchDraft('d1'); window.confirm = () => true; deleteDraft(id);
+    }`);
+
   await check('Export names a draft that has not loaded instead of writing it as blank', `
     const id = createDraft('Loading one', 'its text'); saveDraftMeta();
     fallbackDel(keyOfDraft(id)); delete draftTexts[id]; bodyState[id] = 'loading';
