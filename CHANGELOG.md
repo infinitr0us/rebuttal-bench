@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.9.0 (unreleased)
+## 3.9.0 (2026-11-27)
 
 ### The review beside its draft
 - The right pane has keyboard-accessible *Preview* and *Review* tabs. Each draft keeps its
