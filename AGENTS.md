@@ -375,8 +375,40 @@ because OpenReview typesets each comment from a fresh TeX state.
 ## Venue presets
 
 `VENUES` holds each venue's limit, link rule, whether several comments are allowed (`parts`) and official source, checked on `VENUES_CHECKED`.
-When a call for papers changes, update the entry, its source and the date together, and keep
+`label` names the rules (with their year where they have one), `unit` what the limit counts and
+`linksBrief` the link rule, all shown beside the counter by `renderVenueStat`; `also` lists
+further pages a rule draws on. `links` is 'none', 'external' (a link into the forum is fine),
+'anon' or 'any'; `noShorteners` only where shortened URLs are named and forbidden. Wording must
+not claim more than the cited page says (a Codex review caught "no links" for ARR's "no
+external links"). `limit: null` means the rules state no number, and the page then uses
+`prefs.ownLimit`, the limit the author typed last, so one venue's limit never stays on under
+another; a venue chosen before the stored preferences arrive is resolved after they do
+(`limitAction`). Ids are stored in the preferences: keep them when renaming a venue.
+When a call for papers changes, update the entry, its sources and the date together, and keep
 `tests/links.test.js` passing. Do not add a venue without an official page that states its rule.
+
+## Reviewer IDs across drafts
+
+`reviewerIssues(text, self, others, spans)` (pure, `tests/reviewers.test.js`) reads the open
+draft as posted against the tabs' names (`draftReviewer`: an ID-shaped word after "Reviewer", a
+bare ID-shaped word with a small letter, a whole-word number). **Only what is unmistakable gets
+a card**: a salutation naming another reviewer anywhere, a "Response to Reviewer X" heading or
+line of its own, thanks with that reviewer as its object (and no other reviewer named with it)
+in the opening or closing block; an ID that no tab spells so but one does in other capitals.
+The card selects the ID alone. Mentions in passing, joint thanks, text in quotation marks within
+its block, quotes, code, general tabs and comparisons across numbering schemes (ID against
+number) give nothing. Two Codex reviews (`reviews/2026-11-27/codex-review-38`,
+`codex-recheck-38`) found false cards in broader versions, which also checked pointers ("see our
+answer to Reviewer X, Q2") and IDs no tab has; both were dropped. Their sentences are the
+regression cases: widen a pattern only with a near-miss test, and bring pointers back only with
+a design that reads the other draft's parts, not its words. Known misses, accepted by the final
+review round (`codex-final-38`): a salutation in italics, or wrapped right after "Dear". At ARR,
+`[x](www.host/path)` counts as external although OpenReview would resolve it inside the forum
+(the author means to leave it). The cards are advice without fixes
+and come from `renderIssues` (`reviewerCards`), not from `analyze`, so Fix all, compaction and
+the macro check never see them. They depend on the tabs' names, so a rename, a deletion, an
+import, a list taken in from another window and a list merged on saving call
+`refreshReviewerCards`.
 
 ## Staying in sync with OpenReview
 
@@ -402,7 +434,9 @@ asynchronous store), a page back from the back/forward cache, a fresh TeX
 state per preview (no duplicate `\label` errors, deleted `\newcommand`s, `\definecolor`s and
 `\DeclarePairedDelimiter`s forgotten), drafts (a fresh one, switching, undo isolation, rename and delete,
 across a reload and with a slow store), manual fixes outside Fix
-all, Fix all's added-character count, the selection count, venue presets, Copy compact and Apply to
+all, Fix all's added-character count, the selection count, venue presets (the rule beside the
+counter, the author's own limit, preferences stored before 3.8), reviewer cards across drafts
+(with a rename), Copy compact and Apply to
 source (with undo), the compact chip state, compaction switches across a reload, jumping to a hazard on a
 long soft-wrapped line, refusing a stale one-click fix, draft persistence across a reload (also
 with a stubbed asynchronous `window.storage`: keystrokes before a reload, a draft saved elsewhere,

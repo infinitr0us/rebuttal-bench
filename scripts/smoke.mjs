@@ -304,6 +304,35 @@ try {
     return ok && prefs.venue === '' && currentIssues.length === 0 ||
       { before, limit: limitInput.value, issues: currentIssues.map((i) => i.title) };`);
 
+  await check('a venue that states no limit uses the one typed last, and the rule shows by the counter', `
+    limitInput.value = '4200'; limitInput.dispatchEvent(new Event('input'));
+    venueSelect.value = 'aaai'; venueSelect.dispatchEvent(new Event('change')); await wait(50);
+    const aaai = limitInput.value === '2500' && !venueStat.hidden &&
+      venueStat.textContent === 'AAAI-26 · for all reviews · no URLs' && /aaai-26-faq/.test(venueStat.href);
+    venueSelect.value = 'iclr'; venueSelect.dispatchEvent(new Event('change')); await wait(50);
+    const iclr = limitInput.value === '4200' && /Limit: your own, 4,200/.test(toast.textContent) &&
+      venueStat.textContent === 'ICLR 2027 · your limit (none stated) · anonymous links only';
+    venueSelect.value = 'neurips'; venueSelect.dispatchEvent(new Event('change'));
+    limitInput.value = '9500'; limitInput.dispatchEvent(new Event('input'));
+    const typed = venueStat.textContent === 'NeurIPS 2026 · your limit (rule: 10,000 per review) · no links (code for the AC excepted)';
+    venueSelect.value = ''; venueSelect.dispatchEvent(new Event('change'));
+    const custom = venueStat.hidden && limitInput.value === '9500';
+    limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
+    return aaai && iclr && typed && custom && prefs.ownLimit === 5000 ||
+      { aaai, iclr, typed, custom, stat: venueStat.textContent, limit: limitInput.value, toast: toast.textContent };`);
+
+  /* Preferences stored before 3.8 have no ownLimit: a venue's own limit is
+     not taken for the author's. */
+  await inPage(`localStorage.setItem('rebuttal-bench-prefs',
+    JSON.stringify(Object.assign({}, prefs, { venue: 'aaai', limit: 2500, ownLimit: undefined }))); return true;`);
+  await load();
+  await check('preferences from before 3.8 keep the venue and do not take its limit for the author’s', `
+    const kept = prefs.venue === 'aaai' && limitInput.value === '2500' && prefs.ownLimit === 5000;
+    venueSelect.value = 'iclr'; venueSelect.dispatchEvent(new Event('change')); await wait(50);
+    const iclr = limitInput.value === '5000';
+    venueSelect.value = ''; venueSelect.dispatchEvent(new Event('change'));
+    return kept && iclr && prefs.venue === '' || { kept, iclr, limit: limitInput.value, own: prefs.ownLimit };`);
+
   await check('Import table previews sanitized cells, warnings and math, then inserts with one undo', `
     const original = 'IntroSELECTConclusion';
     setSourceText(original, 5, 11);
@@ -1169,6 +1198,31 @@ try {
     setSourceText(was, 0); saveDraftNow(); updateAll();
     return rows.join('|') === 'Reviewer A:0|W1: First:1|Reviewer B:0|W1: Next:1' && at === 4 || { rows, at };`);
 
+  await check('a draft named for one reviewer that thanks another gets a card, which follows renames here and in another window', `
+    const home = draftMeta.active;
+    const ab = createDraft('Reviewer Ab12', '**W1.** Seeds.');
+    const k9 = createDraft('Reviewer k9F2', ''); saveDraftMeta();
+    switchDraft(k9); await wait(50);
+    setSourceText('We thank Reviewer Ab12 for the review.\\n\\nW1: more seeds.', 0); updateAll();
+    const titles = () => currentIssues.map((i) => i.title + ' @' + ta.value.slice(i.start, i.end)).join('|');
+    const card = titles() === 'This draft addresses another reviewer @Ab12';
+    /* Another window renames this tab: the card goes with no edit here. */
+    const meta = JSON.parse(localStorage.getItem('rebuttal-bench-drafts'));
+    meta.list.find((d) => d.id === k9).name = 'Reviewer Ab12 (follow-up)';
+    meta.list.find((d) => d.id === k9).at = Date.now();
+    localStorage.setItem('rebuttal-bench-drafts', JSON.stringify(meta));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'rebuttal-bench-drafts', newValue: JSON.stringify(meta) }));
+    const elsewhere = draftById(k9).name === 'Reviewer Ab12 (follow-up)' && titles() === '';
+    window.prompt = () => 'Reviewer k9F2';
+    await wait(5); /* a later rename here, which the merge keeps */
+    renameDraft(k9); await wait(20);
+    const renamed = titles() === 'This draft addresses another reviewer @Ab12';
+    window.confirm = () => true;
+    deleteDraft(ab); deleteDraft(k9); await wait(50);
+    switchDraft(home); await wait(50);
+    return card && elsewhere && renamed && draftMeta.active === home && !draftById(ab) && !draftById(k9) ||
+      { card, elsewhere, renamed, titles: titles() };`);
+
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).
@@ -1218,6 +1272,24 @@ try {
       !compactList.querySelector('input[data-trick="tables"]').checked || { restored: prefsRestored, tables: prefs.compact.tables };`);
   await inPage(`localStorage.setItem('stub:delay', '50');
     compactList.querySelector('input[data-trick="tables"]').click(); await wait(300); return true;`);
+
+  await inPage(`localStorage.setItem('stub:delay', '3000');
+    const p = JSON.parse(localStorage.getItem('stub:rebuttal-bench-prefs') || JSON.stringify(prefs));
+    localStorage.setItem('stub:rebuttal-bench-prefs', JSON.stringify(Object.assign(p, { venue: 'aaai', limit: 2500, ownLimit: 4200 })));
+    return true;`);
+  await send('Page.navigate', { url: PAGE }, sessionId);
+  await sleep(600);
+  await check('a venue chosen before the stored preferences arrive gets its limit, or the author’s stored one', `
+    for (let i = 0; i < 60 && typeof venueSelect === 'undefined'; i++) await wait(50);
+    if (prefsRestored) return 'the stored preferences came back too soon to test this';
+    venueSelect.value = 'iclr'; venueSelect.dispatchEvent(new Event('change'));
+    for (let i = 0; i < 80 && !prefsRestored; i++) await wait(50);
+    return prefsRestored && prefs.venue === 'iclr' && prefs.limit === 4200 && limitInput.value === '4200' ||
+      { venue: prefs.venue, limit: prefs.limit, own: prefs.ownLimit, shown: limitInput.value };`);
+  await inPage(`localStorage.setItem('stub:delay', '50');
+    for (let i = 0; i < 100 && !draftReady; i++) await wait(50);
+    venueSelect.value = ''; venueSelect.dispatchEvent(new Event('change'));
+    limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input')); await wait(300); return true;`);
 
   await load();
   await inPage(`document.querySelector('#draftTools .dadd').click(); await wait(50);

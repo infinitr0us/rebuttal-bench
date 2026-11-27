@@ -1,5 +1,44 @@
 # Changelog
 
+## 3.8.0 (unreleased)
+
+### Venue rules, checked again on 2026-11-27
+- The rule of the chosen venue now shows beside the character counter: the rules it follows
+  (with their year where they have one), what the limit counts and its link rule, for example
+  *NeurIPS 2026 · per review · no links (code for the AC excepted)*. Hover for the full rule,
+  its sources and the date it was checked; click to open the official page.
+- A venue whose rules state no number (ICLR) no longer keeps the limit of the venue chosen
+  before it: it uses the limit you typed last (5,000 until you type one), and the counter says
+  *your limit*. So does a limit you type over a venue's, with the venue's own number beside it.
+  A limit stored by 3.7 counts as yours unless it is the stored venue's own (3.7 could leave
+  one venue's limit under another, which cannot be told apart from a typed one). A venue picked
+  in the first moments, before the stored preferences are read, keeps its own limit.
+- ICML cites its 2027 instructions (5,000 characters per round, unchanged). AAAI is labelled
+  AAAI-26: the 2,500 characters come from its FAQ, and the AAAI-27 call states no character
+  limit. ACL ARR forbids external links, so a link into the OpenReview forum (a path, a query or
+  a fragment) is no longer flagged there, while `//host` links are. ICLR's guide asks for code in
+  an anonymous repository and demos on hosts that do not track visitors: a link that may name the
+  authors gets a warning there, a shortened URL a warning (an error only at ICML, which names
+  them). The NeurIPS rule names its one exception: an anonymized link to code the
+  reviewers asked for, sent to the AC in an Official Comment.
+- Two new presets for venues that keep OpenReview's default forms (workshops, smaller venues):
+  *OpenReview default comment* (5,000 characters) and *OpenReview default rebuttal* (2,500).
+
+### Reviewer IDs across drafts
+- A draft whose tab is named for a reviewer (`Reviewer k9F2`, `k9F2`, `R2`) gets a card when it
+  addresses another one: a salutation (*Dear Reviewer Ab12*), a line such as *Response to
+  Reviewer Ab12*, or thanks to that reviewer in its opening or closing. That is the sign of an
+  answer copied from another draft. Mentions in passing (*as Reviewer Ab12 also noted*, *thank
+  you for raising the same concern as Reviewer Ab12*), joint thanks to several reviewers, quotes
+  and a general response are left alone, and IDs are never compared with numbers.
+- An ID written in other capitals than every tab's (`k9f2` for `k9F2`) gets a card, since
+  OpenReview IDs are case-sensitive.
+- Both are advice: nothing changes the text, and Fix all does not count them. The cards follow
+  the tabs' names, renamed here, in another window or on another device.
+- Two Codex reviews of these checks found cards on ordinary sentences; the checks were narrowed
+  to what is unmistakable, a planned check of pointers such as *see our answer to Reviewer
+  Ab12, Q2* was left out for now, and every sentence the reviews tried is a regression case.
+
 ## 3.7.0 (2026-11-25)
 
 ### Tables pasted from Word, Google Docs and web pages
