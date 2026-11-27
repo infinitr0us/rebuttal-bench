@@ -6640,6 +6640,7 @@ function reviewerCards(text, spans) {
 }
 function refreshReviewerCards() {
   if (lastAnalysis && analyzedText === ta.value) renderIssues();
+  renderReview(); /* its note compares the review's reviewer with the tab's name */
 }
 
 /* The analyzer's hazards for analyzedText plus what MathJax reported in the
@@ -7794,7 +7795,7 @@ function flushReview() {
   clearTimeout(reviewTimer);
   if (reviewFor === null || reviewInput.value === reviewSaved) return;
   var v = reviewInput.value;
-  if (v) reviewUnsaved = !fallbackSet(reviewKey(reviewFor), v) && canLocalRead;
+  if (v) reviewUnsaved = !fallbackSet(reviewKey(reviewFor), v);
   else { fallbackDel(reviewKey(reviewFor)); reviewUnsaved = false; }
   reviewSaved = v;
 }
@@ -7851,7 +7852,8 @@ function renderReview() {
     ? 'No points found: the Weaknesses, Questions and Limitations fields hold them.'
     : fmt(r.points.length) + ' point' + (r.points.length === 1 ? '' : 's') + ', ' +
       fmt(r.points.length - open) + ' labelled or quoted in the draft' +
-      (reviewUnsaved ? ' (not saved: this browser’s storage is full)' : '');
+      (!reviewUnsaved ? '' : canLocalRead ? ' (not saved: this browser’s storage is full)'
+        : ' (not saved: this browser keeps no data for this page, so the review lasts until you leave it)');
   /* The review's own reviewer against the tab's name. */
   var self = draftReady ? draftById(draftMeta.active) : null, who = self ? draftReviewer(self.name) : null;
   reviewNote.hidden = true;

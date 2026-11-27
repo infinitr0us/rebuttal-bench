@@ -81,6 +81,13 @@ leave the browser: they autosave on this device only.
   reviewer (an answer copied from their draft), an ID in other capitals than its tab, and a
   pointer such as *see our answer to Reviewer Ab12, Q2* when that reviewer's drafts never
   mention Q2. Mentions in passing and joint thanks are left alone.
+- **Review.** The right pane switches between the *Preview* and the *Review* of the open draft:
+  paste the review it answers, copied from the forum, and it is cut into points (W1, Q2, … from
+  the Weaknesses, Questions and Limitations fields, or the reviewer's own labels). Each point
+  shows whether the draft has a part labelled for it or quotes it, and a click goes there; the
+  tab shows the count (*3/5*). *Quote* inserts a point as a quote at the cursor, and *Insert
+  skeleton* a label for every point not covered yet, each in one undoable step. The review stays
+  with its draft in this browser only: it is not exported and goes when the draft is deleted.
 - **History and export.** *History* lists earlier versions of the open draft: one is kept before
   *Fix all*, *Apply to source*, *Replace all*, *Clear*, *Load example* and a restore, and one every 10 minutes
   while you edit, of the text the edit replaces (up to 20 per draft, in this browser only). When

@@ -1,5 +1,27 @@
 # Changelog
 
+## 3.9.0 (unreleased)
+
+### The review beside its draft
+- The right pane shows the *Preview* or the *Review*. Paste there the review a draft answers,
+  copied from the OpenReview forum: it is kept with that draft, in this browser only (never in
+  the asynchronous store, never in an export, and deleted with its draft), since OpenReview keeps
+  the original and it is the reviewer's text, not yours.
+- The review is cut into the points to answer: the items (or paragraphs) of its Weaknesses,
+  Questions, Limitations and comment fields, under the field names of NeurIPS, ICLR, ICML, ACL
+  ARR and AAAI forms, labelled W1, Q2, L1, C1, or with the reviewer's own labels. Summaries,
+  strengths and scores are left out; a text without field names counts as weaknesses.
+- Each point shows whether the draft has a part labelled for it (`**W1.**`, `Q2:`, as
+  *Sections* reads them) or quotes its opening words; a click goes there. The tab shows how many
+  points are covered (*3/5*). A point without either says *no part labelled W3*, not
+  "unanswered": an answer in other words counts too, and only you can tell.
+- *Quote* inserts a point at the cursor as `> **W2.** its text`; *Insert skeleton* inserts a
+  label for every point the draft does not cover yet, with its first sentence quoted or not.
+  One undo takes either back.
+- When the review names its reviewer (OpenReview's *Official Review ... by Reviewer k9F2*) and
+  the tab is named for another one, the view says so; a tab named for no one can take the
+  reviewer's name with one click.
+
 ## 3.8.0 (unreleased)
 
 ### Venue rules, checked again on 2026-11-27
