@@ -5106,15 +5106,19 @@ function reviewerIssues(text, self, others, spans) {
     for (var k = 0; k < blocks.length; k++) if (at >= blocks[k].start && at < blocks[k].end) return blocks[k];
     return null;
   }
-  /* Visible, and not inside quotation marks in its block ("The review reads,
-     'We thank Reviewer X'" quotes someone else's words). */
+  /* Visible, and not perhaps inside quotation marks in its block ("The
+     example reads, 'We thank Reviewer X'" quotes someone else's words). A
+     single quote cannot be told from an apostrophe ("the reviewers’
+     suggestion"), so an opening one before and a closing one after count as
+     a quote: missing a card is the safe side. */
   function visible(a, b) {
     if (maskHits(mask, a, b)) return false;
-    var blk = blockOf(a), before = text.slice(blk ? blk.start : text.lastIndexOf('\n', a - 1) + 1, a);
+    var blk = blockOf(a), from = blk ? blk.start : text.lastIndexOf('\n', a - 1) + 1;
+    var before = text.slice(from, a), after = text.slice(b, blk ? blk.end : text.length);
     if ((before.split('"').length - 1) % 2) return false;
-    if (before.split('“').length > before.split('”').length) return false;
-    var opens = before.split('‘').length - 1, closes = (before.match(/’(?![A-Za-z])/g) || []).length;
-    return opens <= closes;
+    if (before.indexOf('“') >= 0 && after.indexOf('”') >= 0) return false;
+    if (before.indexOf('‘') >= 0 && /’(?![A-Za-z])/.test(after)) return false;
+    return !(/(?:^|[\s(\[])'(?=[A-Za-z])/.test(text.slice(from, a + 1)) && /'(?![A-Za-z])/.test(after));
   }
   function isFor(who, r) { return r.id ? who.ids.indexOf(r.id) >= 0 : who.nums.indexOf(r.num) >= 0; }
   function sameScheme(who, r) { return r.id ? who.ids.length > 0 : who.nums.length > 0; }
@@ -5155,22 +5159,33 @@ function reviewerIssues(text, self, others, spans) {
     return (!!first && at >= first.start && at < first.end) || (!!last && at >= last.start && at < last.end);
   }
   /* A salutation can stand anywhere (after a title); a "Response to" line
-     only as a heading or a line of its own ("Our response to Reviewer X
-     contains the table" points to it); thanks only in the opening or
-     closing, with that reviewer as its object and no other named with it
-     ("We thank Reviewer X and Reviewer Y"). */
+     only as a heading, whatever follows ("## Reply to Reviewer X:
+     Calibration"), or as a paragraph of its own ("Our response to Reviewer
+     X contains the table", even wrapped, points to it); thanks only in the
+     opening or closing, with that reviewer as its only object: "We thank
+     Reviewer X and Reviewer Y", "... as well as the other reviewers" thank
+     several. A salutation is joint only with "and" ("Dear Reviewer X,
+     Reviewer Y raised ..." still greets X). */
+  var JOINT_THANKS = /^\s*(?:,\s*(?:and\s+)?|and\s+|&\s*|as\s+well\s+as\s+)(?:(?:the|all|both|other|our)\s+)*(?:reviewers?\b|rev\.?\s*\d|r?\d{1,2}(?![A-Za-z0-9])|([A-Za-z0-9]{4})(?![A-Za-z0-9]))/i;
+  var JOINT_SALUTATION = /^\s*(?:and\s+|&\s*|as\s+well\s+as\s+)(?:(?:the|all|both|other)\s+)*(?:reviewers?\b|rev\.?\s*\d|r?\d{1,2}(?![A-Za-z0-9]))/i;
   var triggers = [
-    { re: /(?:^|[.!?][ \t]+|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:dear|hi|hello)[ \t]+/gi },
-    { re: /(?:^|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:our[ \t]+)?(?:author[ \t]+)?(?:response|reply|answer|rebuttal)s?[ \t]+to[ \t]+(?:the[ \t]+)?/gi, line: true },
-    { re: /\b(?:(?:we|i)[ \t]+(?:(?:sincerely|warmly|again|truly|deeply|also|would like to)[ \t]+)?thank|thank[ \t]+you|thanks)[ \t]*,?[ \t]*(?:again[ \t]*,?[ \t]*)?(?:dear[ \t]+)?/gi, edge: true }
+    { re: /(?:^|[.!?][ \t]+|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:dear|hi|hello)[ \t]+/gi, joint: JOINT_SALUTATION },
+    { re: /(?:^|\n)[ \t]*(#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:our[ \t]+)?(?:author[ \t]+)?(?:response|reply|answer|rebuttal)s?[ \t]+to[ \t]+(?:the[ \t]+)?/gi, line: true, joint: JOINT_SALUTATION },
+    { re: /\b(?:(?:we|i)[ \t]+(?:(?:sincerely|warmly|again|truly|deeply|also|would like to)[ \t]+)?thank|thank[ \t]+you|thanks)[ \t]*,?[ \t]*(?:again[ \t]*,?[ \t]*)?(?:dear[ \t]+)?/gi, edge: true, joint: JOINT_THANKS }
   ];
   triggers.forEach(function (tr) {
     while ((m = tr.re.exec(text))) {
       var r = reviewerRef(text, m.index + m[0].length, known);
       if (!r || !visible(m.index + m[0].search(/\S/), r.end) || (tr.edge && !edge(r.start))) continue;
-      if (tr.line && !/^[ \t]*(?:\*\*|__)?[ \t]*[:.!]?[ \t]*(?:\*\*|__)?[ \t]*(?:\n|$)/.test(text.slice(r.after, r.after + 12))) continue;
-      var also = /^[ \t]*(?:,[ \t]*(?:and[ \t]+)?|and[ \t]+|&[ \t]*)/.exec(text.slice(r.after, r.after + 12));
-      if (also && reviewerRef(text, r.after + also[0].length, known)) continue;
+      if (tr.line && !m[1]) {
+        /* A paragraph of its own: it starts its block ("see our\nresponse to
+           Reviewer X." is a wrapped sentence) and ends after the name. */
+        var lineAt = m.index + m[0].search(/\S/), own = blockOf(lineAt);
+        if (!own || own.start !== text.lastIndexOf('\n', lineAt - 1) + 1 ||
+            !/^[ \t]*(?:\*\*|__)?[ \t]*[:.!]?[ \t]*(?:\*\*|__)?[ \t]*(?:\n[ \t]*\n|\n?[ \t]*$)/.test(text.slice(r.after, r.after + 40))) continue;
+      }
+      var also = tr.joint.exec(text.slice(r.after, r.after + 60));
+      if (also && (!also[1] || known[also[1].toLowerCase()] || idShaped(also[1]))) continue;
       if (caseCard(r) || isFor(me, r) || !sameScheme(me, r)) continue;
       var theirs = tabs.filter(function (t) { return isFor(t.who, r); })[0];
       card('This draft addresses another reviewer',

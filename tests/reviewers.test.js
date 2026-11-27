@@ -46,6 +46,14 @@ test('a copied salutation, "Response to" line or thanks for another reviewer get
   assert.deepEqual(cards('Dear **Reviewer Ab12**, thank you.'), [[ADDRESS, 'Ab12']]);
   assert.deepEqual(cards('Dear Reviewer **Ab12**, thank you.'), [[ADDRESS, 'Ab12']]);
   assert.deepEqual(cards('Thanks, Reviewer\nAb12, for the suggestion.'), [[ADDRESS, 'Ab12']]);
+  // Final recheck: a heading names its addressee whatever follows; a salutation followed by
+  // another reviewer as the subject of the next clause still greets the first; thanks to one.
+  for (const s of ['Thanks.\n\n## Reply to Reviewer Ab12: Calibration\n\nMore seeds.',
+    'Thanks.\n\n## Response to Reviewer Ab12 ##\n\nMore seeds.',
+    'Dear Reviewer Ab12, Reviewer k9F2 raised a related concern.',
+    'We thank Reviewer Ab12 and appreciate the suggestion.']) {
+    assert.deepEqual(cards(s), [[ADDRESS, 'Ab12']], s);
+  }
   for (const [s, hit] of [['Dear R3, thank you for the review.', 'R3'], ['Dear Reviewer R3, thank you.', 'R3'],
     ['## Reply to Rev. 3', '3'], ['Dear Reviewer 3, thank you.', '3']]) {
     assert.deepEqual(cards(s, 'R2', NUMBERED), [[ADDRESS, hit]], s);
@@ -74,7 +82,17 @@ test('the sentences of the two 3.8 reviews stay quiet', () => {
     'We thank the reviewer also for the typo.',
     'One concern was also raised by Reviewer Cd34, and Reviewer Zz99 agreed.',
     'Dear Reviewer k9F2, thank you.\n\nW1: as Reviewer Ab12 noted, we thank them as well.\n\nW2: more seeds.\n\nBest.',
+    // From the final recheck (codex-final-38): joint thanks across a soft break or with
+    // "as well as", quotes after an apostrophe or in straight single quotes, a wrapped pointer.
+    'We thank Reviewer Ab12\nand Reviewer k9F2 for independently suggesting the same baseline.',
+    'We thank Reviewer Ab12 as well as Reviewer k9F2 for suggesting the same baseline.',
+    'We thank Reviewer Ab12 and the other reviewers for their constructive feedback.',
+    'Following the reviewers’ suggestion, we changed the example to ‘We thank Reviewer Ab12 for the feedback.’',
+    'The example now reads, \'We thank Reviewer Ab12 for the feedback.\'',
+    'Dear Reviewer k9F2,\n\nOur response to Reviewer Ab12\ncontains the full ablation table.\n\nBest regards.',
+    'Dear Reviewer k9F2,\n\nFor the complete calculation, see our\nresponse to Reviewer Ab12.\n\nBest regards.',
   ]) assert.deepEqual(cards(s), [], s);
+  assert.deepEqual(cards('We thank Reviewer 3 and 2 for independently suggesting this baseline.', 'R2', NUMBERED), []);
   // General tabs, whatever they name; numbering schemes are not compared with IDs.
   for (const name of ['ICLR 2027 – General response', 'GPT4 experiments – general response', 'Reviewer list']) {
     assert.deepEqual(cards('Dear Reviewer Ab12, we thank all four reviewers.', name), [], name);
