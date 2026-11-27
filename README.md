@@ -27,6 +27,11 @@ leave the browser: they autosave on this device only.
   preview and any row or line warnings. *Pad columns* aligns the Markdown in the editor.
   *Insert at cursor* inserts the table in one undoable edit. Pasting a copied table, LaTeX
   table, or tab-separated grid into the editor also offers to convert it in place.
+- **Paste from Google Docs or Word.** Paste formatted text into the editor and choose *Convert*
+  to keep its headings, bold and italics, links, nested lists, quotes, inline code and tables as
+  Markdown; one undo brings back the plain paste. TeX you wrote in the document (`$\alpha$`)
+  reaches MathJax unchanged. An equation that arrives as an image or MathML keeps its alt text
+  where it has one, with a warning to check it.
 - **Compaction.** *Copy compact* copies a shorter form of your source that OpenReview renders
   exactly the same: table padding and long delimiter rows (`| --- |` becomes `|-|`), links
   that repeat their URL, closing `#`s, extra blank lines and spaces, character references.
@@ -48,6 +53,12 @@ leave the browser: they autosave on this device only.
   opens with a label such as `**W1.**`, `**Q2:**` or `W3:`; points are listed under their
   heading, so one comment answering several reviewers shows each reviewer's total. Click a part
   to go to it.
+- **Promises.** The *Promises* panel lists what your drafts promise to change in the paper,
+  grouped by tab: commitments (*we will add the seed sweep*) and changes already made (*we have
+  revised Section 3*). Click one to open its draft at the sentence; *Copy as checklist* copies
+  the commitments as a Markdown to-do list with their tab names, for the revision. A draft not
+  read yet is marked *not checked*. It errs on the side of missing an indirect promise rather
+  than listing a sentence that promises nothing.
 - **Editing.** *Find* (Ctrl+F or ⌘F in the editor) searches and replaces in the source, with the
   matches highlighted; one undo takes back *Replace all*. Double-click a word or formula in the
   preview to select it in the source. *Spellcheck* turns on the browser's spellchecker in the
@@ -79,8 +90,9 @@ leave the browser: they autosave on this device only.
   draft deleted in one window comes back if another window still has it open). A tab named for a
   reviewer (`Reviewer k9F2`, `k9F2`, `R2`) is checked against the others: a card points out a
   salutation, a *Response to* line or an opening or closing thanks that addresses another
-  reviewer (an answer copied from their draft), and an ID in other capitals than its tab.
-  Mentions in passing and joint thanks are left alone.
+  reviewer (an answer copied from their draft), an ID in other capitals than its tab, and a
+  pointer such as *please refer to our response to Reviewer Ab12, Q2* when that reviewer's drafts
+  label no Q2. Mentions in passing and joint thanks are left alone.
 - **Review.** Switch the right pane between *Preview* and *Review* with a click or the arrow
   keys. Paste the forum review your draft answers. A rich paste keeps its fields, paragraphs
   and lists. Plain text works too. Each weakness, question, limitation or comment gets a label
@@ -101,7 +113,12 @@ leave the browser: they autosave on this device only.
   not save). *Import…* reads such a file back, or a `.md` or `.txt` file as one draft: each draft
   you do not have yet becomes a new tab, and no draft is replaced or changed. The online page and
   a downloaded copy of it keep separate drafts; to move drafts between them, or to another
-  browser, export them in one and import them in the other.
+  browser, export them in one and import them in the other. *Compare* shows what changed between
+  the open draft and an earlier version, another draft or a co-author's copy you paste in
+  (insertions underlined, deletions struck through, with counts); it changes nothing. *Print
+  this draft* and *Print all drafts* print the comments as OpenReview renders them, with typeset
+  math, each with its title and its length against the limit, for an advisor who reads no
+  Markdown.
 - **Before posting.** Cards also point out placeholders left in the text (`TODO`, `XX.X`,
   `Table X`, `[cite]`, `[Your Name]`, `??`), invisible characters and ligatures (`ﬁ`) that a copy
   from a PDF brings along, commented-out LaTeX pasted from Overleaf (`% \vspace{2mm}`, a `%`
@@ -215,6 +232,9 @@ tests/
   reviewers.test.js        reviewer IDs across drafts: greetings and IDs in other capitals
   leftovers.test.js        LaTeX comment lines and chat-assistant leftovers, caught and quiet
   review.test.js           a review's points and how a draft covers them
+  paste.test.js            formatted prose from Docs, Word and web pages as Markdown
+  promises.test.js         promises to change the paper, found and left alone
+  diff.test.js             the word-level comparison: exact texts, bounded work
   fixtures/                realistic drafts used by the tests
   example.test.js          the built-in example must end clean and fully typeset
   fuzz.test.js             analyzer vs. real Marked + DOMPurify + MathJax

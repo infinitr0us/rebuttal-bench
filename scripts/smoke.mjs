@@ -455,6 +455,98 @@ try {
         'missing HTML-only preview';
     } finally { if (tableDialog.open) tableDialog.close(); }`);
 
+  await check('formatted prose converts its native paste in place, warns about an equation and takes one undo', htmlPaste + `
+    setSourceText('before X after', 7, 8);
+    paste(ta, '<p>Our <b>result</b> <img alt="x"></p>', 'Our result x');
+    const native = 'before Our result x after';
+    if (ta.value !== native || tableOffer.hidden || pasteQuestion.textContent !== 'Convert the pasted formatting to Markdown?') {
+      return { value: ta.value, hidden: tableOffer.hidden, question: pasteQuestion.textContent };
+    }
+    ta.setSelectionRange(0, 0);
+    convertPaste.click();
+    if (ta.value !== 'before Our **result** x after' || tableDialog.open || !tableOffer.hidden ||
+        !toast.textContent.includes('equations')) return { value: ta.value, msg: toast.textContent };
+    ta.focus(); document.execCommand('undo');
+    return ta.value === native || ta.value;`);
+
+  await check('a draft switch drops a formatting offer even when both drafts contain the pasted text', htmlPaste + `
+    const original = draftMeta.active, id = createDraft('Clipboard check', 'same');
+    try {
+      setSourceText('X', 0, 1); paste(ta, '<strong>same</strong>', 'same');
+      if (tableOffer.hidden) return 'missing offer';
+      switchDraft(id);
+      convertPaste.click();
+      return tableOffer.hidden && ta.value === 'same' && !tableDialog.open || ta.value;
+    } finally { switchDraft(original); window.confirm = () => true; deleteDraft(id); }`);
+
+  await check('plain clipboard HTML and formatting already present in the native text have no offer', htmlPaste + `
+    for (const [markup, text] of [['<p>Literal *star*</p>', 'Literal *star*'], ['<b>word</b>', '**word**'],
+        ['<img src="unavailable">', 'Equation']]) {
+      setSourceText('X', 0, 1); paste(ta, markup, text);
+      if (ta.value !== text || !tableOffer.hidden) return { text, value: ta.value, hidden: tableOffer.hidden };
+    }
+    return true;`);
+
+  await check('Word list markers followed by tabs convert to a list and inline selections keep their edge spaces', htmlPaste + `
+    setSourceText('X', 0, 1);
+    paste(ta, '<p class="MsoListParagraph">1. First</p><p class="MsoListParagraph">2. Next</p>', '1.\\tFirst\\n2.\\tNext');
+    if (tableOffer.hidden) return 'missing Word list offer';
+    convertPaste.click();
+    if (tableDialog.open || ta.value !== '1. First\\n2. Next') return ta.value;
+    setSourceText('aXb', 1, 2);
+    paste(ta, '<b> word </b>', ' word ');
+    convertPaste.click();
+    return ta.value === 'a **word** b' || ta.value;`);
+
+  await check('a converted prose paste ending in a table separates itself from following draft text', htmlPaste + `
+    const initial = 'Before.\\n\\nREPLACEConclusion follows.';
+    setSourceText(initial, 9, 16);
+    const markup = '<p><b>Revised results.</b></p><table><tr><th>Model</th><th>Score</th></tr><tr><td>New</td><td>42</td></tr></table>';
+    const text = 'Revised results.\\n\\nModel\\tScore\\nNew\\t42';
+    paste(ta, markup, text);
+    const native = ta.value;
+    if (tableOffer.hidden || pasteQuestion.textContent !== 'Convert the pasted formatting to Markdown?') {
+      return { hidden: tableOffer.hidden, question: pasteQuestion.textContent };
+    }
+    convertPaste.click(); await wait(200);
+    const rendered = renderOpenReviewMarkdown(ta.value.trim());
+    const kept = ta.value.includes('|\\n\\nConclusion follows.') && rendered.includes('<p>Conclusion follows.</p>');
+    ta.focus(); document.execCommand('undo');
+    return kept && ta.value === native || { value: ta.value, rendered };`);
+
+  await check('a formatted paragraph containing a TeX array converts as prose rather than a table', htmlPaste + `
+    const text = 'Correction. We use $M=\\\\left(\\\\begin{array}{cc}a & b\\\\\\\\c & d\\\\end{array}\\\\right)$ in the new proof.';
+    const markup = '<b style="font-weight:normal"><p><span style="font-weight:700">Correction.</span> ' +
+      'We use $M=\\\\left(\\\\begin{array}{cc}a &amp; b\\\\\\\\c &amp; d\\\\end{array}\\\\right)$ in the new proof.</p></b>';
+    setSourceText('Before.\\n\\nREPLACE\\n\\nAfter.', 9, 16);
+    paste(ta, markup, text);
+    if (tableOffer.hidden || pasteQuestion.textContent !== 'Convert the pasted formatting to Markdown?') {
+      return { hidden: tableOffer.hidden, question: pasteQuestion.textContent };
+    }
+    convertPaste.click(); await wait(500);
+    const math = MathJax.startup.document.getMathItemsWithin(preview).filter(m => m.display !== null).map(m => m.math);
+    return !tableDialog.open && ta.value.includes('**Correction.**') && ta.value.includes('in the new proof.') &&
+      math.length === 1 && math[0].includes('\\\\begin{array}{cc}a & b\\\\\\\\c & d\\\\end{array}') ||
+      { value: ta.value, math, dialog: tableDialog.open };`);
+
+  await check('a standalone equation table keeps its alt text and warns in the import dialog', htmlPaste + `
+    const markup = '<table><tr><th>Metric</th><th>Definition</th></tr><tr><td>Loss</td>' +
+      '<td><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jk2cAAAAASUVORK5CYII=" alt="squared error"></td></tr></table>';
+    setSourceText('Before.\\n\\nREPLACE\\n\\nAfter.', 9, 16);
+    paste(ta, markup, 'Metric\\tDefinition\\nLoss\\tsquared error');
+    if (tableOffer.hidden || pasteQuestion.textContent !== 'Convert the pasted table to Markdown?') {
+      return { hidden: tableOffer.hidden, question: pasteQuestion.textContent };
+    }
+    convertPaste.click();
+    try {
+      if (!tableDialog.open || !tableWarnings.textContent.includes('Row 2:') ||
+          !tableWarnings.textContent.includes('equations') || !tableResult?.markdown.includes('squared error')) {
+        return { open: tableDialog.open, warnings: tableWarnings.textContent, md: tableResult?.markdown };
+      }
+      insertTableBtn.click(); await wait(100);
+      return ta.value.includes('squared error') || ta.value;
+    } finally { if (tableDialog.open) tableDialog.close(); }`);
+
   await check('math compaction becomes available when MathJax is ready, even for a cached draft', `
     const src = '$ x + \\\\frac{1}{2} $';
     setSourceText(src, 0);
@@ -693,6 +785,176 @@ try {
     const kept = ta.value === 'First draft $x$.';
     window.confirm = () => true; deleteDraft(a); await wait(50);
     return inert && focusKept && closed && kept && draftMeta.active === 'd1' || { inert, focusKept, closed, kept, active: draftMeta.active };`);
+
+  await check('Compare reads versions, other drafts and pasted edits without changing the draft or storage', `
+    const id = createDraft('Compare current', 'Our current result.');
+    const other = createDraft('Co-author', 'Our revised result.');
+    const unknown = createDraft('Still loading', '');
+    fallbackDel(keyOfDraft(unknown)); bodyState[unknown] = 'loading'; delete bodyKnown[unknown];
+    switchDraft(id);
+    keepVersion('before edits', 'Our earlier result.');
+    const stored = JSON.stringify(localStorage), meta = JSON.stringify(draftMeta);
+    const shown = () => Array.from(compareDiff.children, el => [el.tagName, el.textContent]);
+    const change = (value) => { compareSource.value = value; compareSource.dispatchEvent(new Event('change')); };
+    try {
+      draftTools.querySelector('[data-act="history"]').click();
+      document.getElementById('compareBtn').click();
+      const version = shown(), modal = !!ta.closest('[inert]') && !compareView.closest('[inert]');
+      const unavailable = compareSource.querySelector('[value="draft-' + unknown + '"]').disabled;
+      change('draft-' + other);
+      const draft = shown();
+      change('paste'); comparePaste.value = 'Our <b> result.'; comparePaste.dispatchEvent(new Event('input'));
+      const pasted = shown(), count = compareSummary.textContent;
+      document.getElementById('compareBack').click();
+      const back = compareView.hidden && !historyVersions.hidden && !!historyList.querySelector('[data-restore]');
+      document.getElementById('compareBtn').click();
+      const readOnly = stored === JSON.stringify(localStorage) && meta === JSON.stringify(draftMeta) && ta.value === 'Our current result.';
+      switchDraft('d1');
+      const closed = historyDialog.hidden && compareView.hidden && !comparePaste.value && !ta.closest('[inert]');
+      return JSON.stringify(version) === JSON.stringify([['DEL','earlier'],['INS','current']]) &&
+        JSON.stringify(draft) === JSON.stringify([['DEL','current'],['INS','revised']]) &&
+        JSON.stringify(pasted) === JSON.stringify([['DEL','current'],['INS','<b>']]) &&
+        /1 word deleted, 1 word inserted/.test(count) && modal && unavailable && back && readOnly && closed ||
+        { version, draft, pasted, count, modal, unavailable, back, readOnly, closed };
+    } finally {
+      closeHistory(); switchDraft('d1'); window.confirm = () => true;
+      [id, other, unknown].forEach(deleteDraft);
+    }`);
+
+  await check('Print prepares one or all rendered comments, isolates TeX, names omissions and only reads', String.raw`
+    const source = '  **Visible draft** $\\newcommand{\\RBprint}{7}\\RBprint$\n';
+    const id = createDraft('Proof <A>', 'Previously saved.');
+    const other = createDraft('Second proof', '$\\newcommand{\\RBprint}{9}\\RBprint$');
+    switchDraft(id);
+    ta.value = source; /* edited but not yet saved */
+    const storedList = localStorage.getItem(DRAFTS_KEY), elsewhere = JSON.parse(storedList);
+    elsewhere.list.push({ id: 'dawaitingprint', name: 'Still arriving', at: Date.now() });
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(elsewhere));
+    const before = JSON.stringify(localStorage), meta = JSON.stringify(draftMeta), calls = [];
+    const realPrint = window.print;
+    window.print = () => {
+      const root = document.getElementById('printDrafts');
+      calls.push({
+        names: [...root.querySelectorAll('.print-heading h1')].map(el => el.textContent),
+        counts: [...root.querySelectorAll('.print-heading p')].map(el => el.textContent),
+        math: root.querySelectorAll('.paper mjx-container').length,
+        values: [...root.querySelectorAll('.paper')].map(el => [!!el.querySelector('.mjx-c37'), !!el.querySelector('.mjx-c39')]),
+        bold: root.querySelector('strong')?.textContent, errors: root.querySelectorAll('mjx-merror').length,
+        omitted: root.querySelector('.print-omitted')?.textContent,
+        ready: document.body.classList.contains('printing-drafts') && !!ta.closest('[inert]'),
+      });
+    };
+    async function print(button, n) {
+      document.getElementById(button).click();
+      for (let i = 0; i < 100 && calls.length < n; i++) await wait(50);
+      window.dispatchEvent(new Event('afterprint'));
+      return !document.getElementById('printDrafts') && !document.body.classList.contains('printing-drafts');
+    }
+    try {
+      openHistory();
+      const cleanedOne = await print('printOneBtn', 1), cleanedAll = await print('printAllBtn', 2);
+      const [one, all] = calls, expected = draftMeta.list.map(d => d.name);
+      const limit = Number(limitInput.value);
+      const count = source.trim().length + (limit ? ' / ' + limit.toLocaleString('en-US') : '') + ' characters';
+      const unchanged = before === JSON.stringify(localStorage) && meta === JSON.stringify(draftMeta) && ta.value === source;
+      return cleanedOne && cleanedAll && unchanged && calls.length === 2 && one.ready && all.ready &&
+        one.names.join() === 'Proof <A>' && one.counts[0] === count && one.math === 1 && one.bold === 'Visible draft' &&
+        !one.omitted && one.errors === 0 && one.values[0][0] &&
+        JSON.stringify(all.names) === JSON.stringify(expected) && all.math === expected.length && all.errors === 0 &&
+        all.values[expected.indexOf('Proof <A>')][0] && all.values[expected.indexOf('Second proof')][1] &&
+        all.omitted.includes('Still arriving') || { calls, cleanedOne, cleanedAll, count, unchanged };
+    } finally {
+      window.print = realPrint;
+      closeHistory(); localStorage.setItem(DRAFTS_KEY, storedList);
+      switchDraft('d1'); window.confirm = () => true; [id, other].forEach(deleteDraft);
+    }`);
+
+  await check('Print all isolates forward equation references across comments and leaves the preview intact', String.raw`
+    const firstProof = 'First proof. See $\\eqref{eq:main}$.\n\n$$x=7\\tag{A}\\label{eq:main}$$';
+    const secondProof = 'Second proof. See $\\eqref{eq:main}$.\n\n$$x=9\\tag{B}\\label{eq:main}$$';
+    const a = createDraft('Ref A', firstProof), b = createDraft('Ref B', secondProof);
+    switchDraft(a);
+    for (let i = 0; i < 100 && (renderBusy || !preview.querySelector('a mjx-c')); i++) await wait(50);
+    const refOf = (el) => [...el.querySelectorAll('a mjx-c')].map(c => c.className).join(' ');
+    const A = 'mjx-c28 mjx-c41 mjx-c29', B = 'mjx-c28 mjx-c42 mjx-c29';
+    const previewBefore = refOf(preview);
+    const realPrint = window.print;
+    let printed = null;
+    window.print = () => {
+      const root = document.getElementById('printDrafts');
+      const articles = [...root.querySelectorAll('article')];
+      const find = (name) => articles.find(el => el.querySelector('h1').textContent === name);
+      printed = {
+        a: refOf(find('Ref A')),
+        b: refOf(find('Ref B')),
+        previewDuring: refOf(preview),
+      };
+    };
+    try {
+      openHistory();
+      document.getElementById('printAllBtn').click();
+      for (let i = 0; i < 100 && !printed; i++) await wait(50);
+      window.dispatchEvent(new Event('afterprint'));
+      for (let i = 0; i < 100 && (renderBusy || !preview.querySelector('a mjx-c')); i++) await wait(50);
+      const previewAfter = refOf(preview);
+      const previewItems = MathJax.startup.document.getMathItemsWithin(preview).filter(m => m.display !== null).length;
+      return previewBefore === A && printed && printed.a === A && printed.b === B &&
+        printed.previewDuring === A && previewAfter === A && previewItems === 2 ||
+        { previewBefore, printed, previewAfter, previewItems };
+    } finally {
+      window.print = realPrint;
+      closeHistory(); switchDraft('d1'); window.confirm = () => true; [a, b].forEach(deleteDraft);
+    }`);
+
+  await send('Emulation.setEmulatedMedia', { media: 'print' }, sessionId);
+  try {
+    await check('print media shows only the rendered notes, in the light palette even from dark mode', `
+      const theme = document.documentElement.dataset.theme, realPrint = window.print;
+      let layout;
+      window.print = () => {
+        const root = document.getElementById('printDrafts'), paper = root.querySelector('.paper');
+        layout = {
+          othersHidden: [...document.body.children].every(el => el === root || getComputedStyle(el).display === 'none'),
+          width: paper.getBoundingClientRect().width, visibility: getComputedStyle(root).visibility,
+          ink: getComputedStyle(paper).color, background: getComputedStyle(paper).backgroundColor,
+        };
+      };
+      try {
+        document.documentElement.dataset.theme = 'dark';
+        openHistory(); document.getElementById('printOneBtn').click();
+        for (let i = 0; i < 100 && !layout; i++) await wait(30);
+        return layout && layout.othersHidden && layout.width > 0 && layout.visibility === 'visible' &&
+          layout.ink === 'rgb(51, 51, 51)' && layout.background === 'rgb(255, 255, 255)' || layout;
+      } finally {
+        window.dispatchEvent(new Event('afterprint')); closeHistory();
+        document.documentElement.dataset.theme = theme; window.print = realPrint;
+      }`);
+  } finally { await send('Emulation.setEmulatedMedia', { media: '' }, sessionId); }
+
+  await check('switching drafts while Print typesets cancels the print and releases the preview queue', `
+    const id = createDraft('Print in progress', 'An equation $q$.');
+    switchDraft(id); openHistory();
+    const realPrint = window.print, typeset = MathJax.typesetPromise;
+    let release, started = false, printed = false;
+    const gate = new Promise(r => { release = r; });
+    window.print = () => { printed = true; };
+    MathJax.typesetPromise = function (targets) {
+      if (!targets[0].closest('#printDrafts')) return typeset.call(this, targets);
+      started = true;
+      return gate.then(() => typeset.call(this, targets));
+    };
+    try {
+      document.getElementById('printOneBtn').click();
+      for (let i = 0; i < 100 && !started; i++) await wait(30);
+      switchDraft('d1'); release();
+      for (let i = 0; i < 100 && renderBusy; i++) await wait(30);
+      return started && !printed && !renderBusy && historyDialog.hidden && !ta.closest('[inert]') &&
+        !document.getElementById('printDrafts') && !!preview.querySelector('mjx-container') ||
+        { started, printed, renderBusy, hidden: historyDialog.hidden, text: preview.textContent };
+    } finally {
+      release(); MathJax.typesetPromise = typeset; window.print = realPrint;
+      closeHistory(); switchDraft('d1'); window.confirm = () => true; deleteDraft(id);
+    }`);
 
   await check('Export names a draft that has not loaded instead of writing it as blank', `
     const id = createDraft('Loading one', 'its text'); saveDraftMeta();
@@ -953,11 +1215,11 @@ try {
   await check('an offer to convert a pasted table expires when the open draft changes', `
     const origId = draftMeta.active;
     const tsv = 'A\\tB\\n1\\t2';
-    pastedTable = { draft: origId, source: tsv, start: 0, end: tsv.length }; tableOffer.hidden = false;
+    pastedContent = { draft: origId, source: tsv, start: 0, end: tsv.length }; tableOffer.hidden = false;
     document.querySelector('#draftTools .dadd').click(); await wait(50);
-    const gone = !pastedTable && tableOffer.hidden;
+    const gone = !pastedContent && tableOffer.hidden;
     setSourceText(tsv, 0); clearTimeout(timer);
-    pastedTable = { draft: origId, source: tsv, start: 0, end: tsv.length }; /* as if left over */
+    pastedContent = { draft: origId, source: tsv, start: 0, end: tsv.length }; /* as if left over */
     document.getElementById('convertPaste').click(); await wait(50);
     const refused = !tableDialog.open;
     if (tableDialog.open) tableDialog.close();
@@ -1065,6 +1327,37 @@ try {
     setSourceText(was, 0); saveDraftNow(); updateAll();
     return rows.length === 2 && /×2 · −18$/.test(row.textContent) && first[0] === 0 && first[1] === 11 &&
       second[0] === 22 && third === 0 && /^about \\d+ to save$/.test(sum) && unchanged || { rows, first, second, third, sum };`);
+
+  await check('Promises groups drafts, selects the source across tabs and copies only future changes', `
+    const original = draftMeta.active;
+    const first = 'We will release our training scripts.';
+    const second = 'We will add an ablation to the appendix.';
+    const done = 'We have revised Section 3 accordingly.';
+    const ab = createDraft('Reviewer Ab12', '  Thanks. ' + first + ' ' + done);
+    const cd = createDraft('Reviewer Cd34', second);
+    const unknown = createDraft('Unread response', '');
+    fallbackDel(keyOfDraft(unknown)); delete draftTexts[unknown]; bodyKnown[unknown] = false;
+    switchDraft(cd);
+    promisesBox.open = true; await wait(50);
+    const group = (name) => [...promisesList.querySelectorAll('section')].find(s => s.getAttribute('aria-label') === name);
+    const kinds = (name) => [...group(name).querySelectorAll('.gain')].map(s => s.textContent).join(',');
+    const shown = kinds('Reviewer Ab12') === 'will,done' && kinds('Reviewer Cd34') === 'will' &&
+      /Not checked/i.test(group('Unread response').textContent) && promisesSum.textContent === '3 promises' && prefs.promisesOpen;
+    const selected = () => ta.value.slice(ta.selectionStart, ta.selectionEnd);
+    group('Reviewer Ab12').querySelector('[data-promise="1"]').click();
+    const switched = draftMeta.active === ab && selected() === done && document.activeElement === ta;
+    group('Reviewer Ab12').querySelector('[data-promise="0"]').click();
+    const current = selected() === first && ta.selectionStart === '  Thanks. '.length;
+    const prompt = window.prompt; window.prompt = () => 'Reviewer Ef56'; renameDraft(cd); window.prompt = prompt;
+    let copied;
+    Object.defineProperty(navigator, 'clipboard', { configurable: true,
+      value: { writeText: (text) => { copied = text; return Promise.resolve(); } } });
+    copyPromises.click();
+    const checklist = copied === '- [ ] ' + first + ' (Reviewer Ab12)\\n- [ ] ' + second + ' (Reviewer Ef56)';
+    promisesBox.open = false; switchDraft(original); window.confirm = () => true;
+    [ab, cd, unknown].forEach(deleteDraft);
+    return shown && switched && current && checklist && copyPromises.disabled ||
+      { shown, switched, current, copied, remaining: promisesSum.textContent }; `);
 
   await check('the spellcheck switch reaches the editor and survives a draft switch', `
     const was = ta.spellcheck;

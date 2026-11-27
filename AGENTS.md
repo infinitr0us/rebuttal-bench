@@ -135,6 +135,25 @@ text, discard the grid and use the regular text importer.
   Fix all button does not count it, and its card says "Not part of Fix all". Even so, verify
   in a regression case that the fixed text renders as promised.
 
+## Formatted prose paste
+
+`htmlToMarkdown(doc, options)` (pure, `tests/paste.test.js`) reads a parsed clipboard fragment
+from Google Docs, Word or a web page and shares the table importer's emphasis and grid rendering
+(`readHtmlTable`'s quirks: Docs' normal-weight `b`, Word's `mso-` lists). It escapes what would
+become Markdown but never `$` or a backslash, since authors write TeX in their documents. The
+editor asks for `keepGrid`, so a paste that is only a table still opens the table dialog, and an
+explicit HTML list wins over the tab-separated heuristic (Word puts tabs after list markers). The
+offer is bound to the captured draft, source and range, like the table offer, and applies with
+`setSourceText` for one undo. Tests check the exact Markdown, the rendered HTML and the TeX that
+reaches MathJax. Fixed after the 3.11 review (`reviews/2026-11-27/codex-review-311`, with a real
+Word clipboard fragment): superscripts and subscripts (`sup`, `sub`, `vertical-align`) go through
+the table importer's `readHtmlScript`, so `10<sup>-3</sup>` stays an exponent; spaces are kept in
+`pre`, `pre-wrap` and monospace runs (`\verb|A  B|`); a paste counts as a LaTeX table only when
+its text starts with the environment (`looksLikeTablePaste`), not when a sentence holds an
+`array`; a pasted block (table, list, heading, quote, code) is set apart from the draft text
+next to it by a blank line (`placeProsePaste`); and a table keeps an equation image's alt text,
+with the media warning, whether pasted alone or inside prose.
+
 ## Compaction
 
 `compactText(text, enabled, render, maxChecks)` rewrites the source with the tricks in
@@ -302,6 +321,17 @@ cases, Chrome probes); keep their rules:
   Export all merges, in a private copy, this window's list with the stored one (drafts another
   window just added), writes `draftsFile` with every known text and names the others before
   leaving them out; Download refuses an unknown text.
+- **Compare and Print only read.** `diffWords(a, b, details)` (pure, `tests/diff.test.js`) keeps
+  both texts exactly (the `same` and `del` runs rebuild `a`, `same` and `ins` rebuild `b`); it
+  bounds the word-level LCS, then retries by line, then falls back to one replacement, and
+  `details.mode` tells the view when its counts cover whole lines or texts. The History version
+  picker stays bound to the versions shown when Compare opened. Print reads `knownDraftText`
+  with Export's private list merge, renders through the preview's queue with a fresh TeX state
+  per comment, waits for the typeset before `window.print()`, and removes its copy on
+  `afterprint`; closing History or switching drafts cancels a pending print. MathJax updates
+  `\eqref` across one document, so Print takes the preview's math out of MathJax's list before
+  it typesets, clears each printed comment's math right after its typeset (two drafts may both
+  define `eq:main`), and re-renders the preview when printing ends.
 - **Import only adds** (`importDrafts`; pure: `readDraftsFile`, `importPlan`). Each draft of the
   file whose text no draft known here has (`knownDraftText`, after taking in the stored list)
   becomes a new tab under a name no draft has. It never replaces, changes or opens a draft and
@@ -384,6 +414,15 @@ because OpenReview typesets each comment from a fresh TeX state.
   Ctrl+F is taken only in the editor and the find bar; elsewhere the browser's find stays.
 - The editor's `spellcheck` follows `prefs.spellcheck`; a fresh editor is a clone, so it keeps it.
 
+- `promisesIn(text, spans)` (pure, `tests/promises.test.js`) finds the sentences of visible prose
+  that commit to a change of the paper (`will`) or report one (`done`), one Markdown leaf at a
+  time with `proseMask`, quotes of the review left out, offsets in the editor's text (CRLF
+  included). Precision comes before recall: it was tuned on 310 real author responses (181
+  detections read, none wrong; `reviews/2026-11-27/codex-promises`, git-ignored). Extend a
+  trigger only with a synthetic positive, a near miss and a rerun of that corpus. The panel reads
+  every tab through `knownDraftText` and reuses detections while a text is unchanged; a row of
+  another draft goes through `switchDraft` and selects the sentence once that draft is loaded.
+
 ## Venue presets
 
 `VENUES` holds each venue's limit, link rule, whether several comments are allowed (`parts`) and official source, checked on `VENUES_CHECKED`.
@@ -412,8 +451,15 @@ its block, quotes, code, general tabs and comparisons across numbering schemes (
 number) give nothing. Two Codex reviews (`reviews/2026-11-27/codex-review-38`,
 `codex-recheck-38`) found false cards in broader versions, which also checked pointers ("see our
 answer to Reviewer X, Q2") and IDs no tab has; both were dropped. Their sentences are the
-regression cases: widen a pattern only with a near-miss test, and bring pointers back only with
-a design that reads the other draft's parts, not its words. Known misses, accepted by the final
+regression cases: widen a pattern only with a near-miss test. Pointers came back in 3.11 in that
+narrow form: a cue (`see`, `cf.`, `refer to`, `as we answered in`) and "our/the
+answer/response/reply to Reviewer X" with a point label right after, right before or between
+("our response to Q1 from Reviewer X"), checked against the `labelledParts` of that reviewer's
+other drafts (which read combined headings such as `## W1 and W2`); nothing when one of those
+drafts is unread or none has labels. A precision probe on the 310 real author responses found
+only the two genuine pointers (`reviews/2026-11-27/neon-pointers`); rerun it after any change.
+The pointer card selects the missing label and needs the other drafts' texts (`others[i].text`),
+so a background read and a draft text saved in another window also refresh the cards. Known misses, accepted by the final
 review round (`codex-final-38`): a salutation in italics, or wrapped right after "Dear". At ARR,
 `[x](www.host/path)` counts as external although OpenReview would resolve it inside the forum
 (the author means to leave it). The cards are advice without fixes

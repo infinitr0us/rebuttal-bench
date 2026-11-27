@@ -69,7 +69,7 @@ window.MathJax = {
     line-gap-override: 0.00%;
     size-adjust: 106.33%;
   }
-  :root {
+  :root, #printDrafts {
     --accent: #8c1b13;            /* OpenReview maroon */
     --accent-ink: #8c1b13;
     --bg: #ffffff;
@@ -659,6 +659,7 @@ window.MathJax = {
   .section .bar { flex: none; width: 56px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
   .section .bar span { display: block; height: 100%; background: var(--accent); }
   .section .gain { font-family: var(--mono); font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+  #promisesList h3 { margin: 8px 0 2px; font-size: inherit; }
 
   /* dialogs */
   .modal {
@@ -690,6 +691,22 @@ window.MathJax = {
   .modal-opts { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 18px 10px; font-size: 12.5px; color: var(--dim); }
   .modal-opts input { accent-color: var(--accent); }
   .modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; padding: 10px 18px 14px; }
+  .history-view { display: flex; flex-direction: column; min-height: 0; }
+  #compareView { gap: 10px; padding: 4px 18px 14px; overflow: auto; }
+  #compareView label { font-size: 13px; }
+  #compareSource, #comparePaste {
+    width: 100%; margin-top: 4px; padding: 6px; border: 1px solid var(--line);
+    border-radius: 4px; background: var(--editor-bg); color: var(--text);
+  }
+  #comparePaste { resize: vertical; font-family: var(--mono); }
+  #compareSummary { margin: 0; color: var(--dim); font-size: 12.5px; }
+  #compareDiff {
+    margin: 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere;
+    font: 13px/1.6 var(--mono); border: 1px solid var(--line); border-radius: 4px;
+  }
+  #compareDiff del { color: var(--title-err); background: var(--chip-over); text-decoration: line-through; }
+  #compareDiff ins { color: var(--ok); background: var(--chip-ok); text-decoration: underline; }
+  #compareBack { align-self: flex-start; }
   .split-parts { flex: 1; min-height: 0; overflow-y: auto; padding: 0 18px; }
   .split-part { margin: 0 0 10px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .split-part-head {
@@ -924,6 +941,27 @@ window.MathJax = {
   .paper mjx-container[jax="CHTML"][display="true"]:last-child { margin-bottom: 1em; }
   .paper mjx-container[jax="CHTML"][display="true"] mjx-math { padding: 1px 0; }
 
+  /* Lay out the print copy off screen at page width so MathJax can measure
+     it even before the print dialog opens. It inherits the light note palette. */
+  #printDrafts {
+    position: fixed; left: -200vw; top: 0; visibility: hidden; width: 175mm;
+    background: white; color: var(--paper-ink); overflow-wrap: anywhere;
+  }
+  #printDrafts .paper { padding: 0; }
+  .print-heading { break-inside: avoid; break-after: avoid; margin-bottom: 16px; }
+  .print-heading h1 { margin: 0 0 4px; font-size: 18px; }
+  .print-heading p, .print-omitted { font-size: 12px; }
+  .print-heading p { margin: 0; }
+  @media print {
+    html { height: auto; }
+    body.printing-drafts { display: block; height: auto; background: white; }
+    body.printing-drafts > :not(#printDrafts) { display: none !important; }
+    #printDrafts { display: none; }
+    body.printing-drafts > #printDrafts { display: block; position: static; visibility: visible; width: auto; }
+    .printed-draft + .printed-draft { break-before: page; }
+    #printDrafts .paper pre, #printDrafts mjx-container[jax="CHTML"][display="true"] { overflow: visible; }
+  }
+
   footer {
     padding: 7px 20px 9px;
     border-top: 1px solid var(--line);
@@ -1054,7 +1092,7 @@ window.MathJax = {
       <span class="pane-tools"><button type="button" id="findBtn" title="Find and replace in the source (Ctrl+F in the editor)">Find</button><label title="Underline misspelled words in the editor, with the browser’s spellchecker"><input type="checkbox" id="spellBox"> Spellcheck</label></span></div>
     <div class="drafts" id="draftBar"><div class="dtabs" id="draftTabs" role="tablist" aria-label="Drafts"></div><div class="dtools" id="draftTools"></div></div>
     <div id="tableOffer" hidden>
-      Convert the pasted table to Markdown?
+      <span id="pasteQuestion">Convert the pasted table to Markdown?</span>
       <button id="convertPaste" type="button" aria-haspopup="dialog" aria-controls="tableDialog">Convert</button>
       <button id="dismissPaste" type="button">Dismiss</button>
     </div>
@@ -1098,6 +1136,14 @@ window.MathJax = {
       <div class="compact-body">
         <p class="compact-note">The length of each part of this draft, counted like the limit. A heading starts a part, and so does a paragraph, list item or quote that opens with a label such as <b>**W1.**</b>, <b>**Q2:**</b> or <b>W3:</b>. Click a part to go to it.</p>
         <div id="sectionsList"></div>
+      </div>
+    </details>
+    <details class="compact" id="promisesBox">
+      <summary>Promises <span id="promisesSum" class="compact-sum zero"></span></summary>
+      <div class="compact-body">
+        <p class="compact-note">Select a sentence to open it in its draft. Copy future changes as a revision checklist.</p>
+        <div id="promisesList"></div>
+        <div class="compact-actions"><button type="button" id="copyPromises" disabled>Copy as checklist</button></div>
       </div>
     </details>
     <details class="cheat">
@@ -1186,15 +1232,31 @@ window.MathJax = {
       <h3 id="historyTitle">History</h3>
       <button type="button" class="modal-x" data-close aria-label="Close">×</button>
     </div>
-    <p class="modal-note">Earlier versions are kept before <em>Fix all</em>, <em>Apply to source</em>, <em>Replace all</em>, <em>Clear</em>, <em>Load example</em> and a restore, and every 10 minutes while you edit: up to 20 per draft, in this browser only. When they take up too much room, or a draft needs the space, the oldest go first.</p>
-    <div id="historyList" class="split-parts"></div>
-    <p class="modal-note">Drafts are kept in this browser only, and the online page and a downloaded copy of it each keep their own. Export them to keep a backup, or to copy them into another browser. Import adds the drafts of an exported file as new tabs, and never replaces or changes a draft.</p>
-    <div class="modal-actions">
-      <button type="button" id="exportAllBtn" title="Every draft in one .json file, which Import reads back">Export all drafts</button>
-      <button type="button" id="exportOneBtn" title="The open draft as a Markdown file">Download this draft (.md)</button>
-      <button type="button" id="importBtn" title="The drafts of an exported .json file, or a .md or .txt file as one draft, as new tabs">Import…</button>
-      <input type="file" id="importFile" accept=".json,.md,.markdown,.txt" hidden>
-      <button type="button" data-close>Close</button>
+    <div id="historyVersions" class="history-view">
+      <p class="modal-note">Earlier versions are kept before <em>Fix all</em>, <em>Apply to source</em>, <em>Replace all</em>, <em>Clear</em>, <em>Load example</em> and a restore, and every 10 minutes while you edit: up to 20 per draft, in this browser only. When they take up too much room, or a draft needs the space, the oldest go first.</p>
+      <div id="historyList" class="split-parts"></div>
+      <p class="modal-note">Drafts are kept in this browser only, and the online page and a downloaded copy of it each keep their own. Export them to keep a backup, or to copy them into another browser. Import adds the drafts of an exported file as new tabs, and never replaces or changes a draft.</p>
+      <div class="modal-actions">
+        <button type="button" id="compareBtn">Compare…</button>
+        <button type="button" id="printOneBtn">Print this draft</button>
+        <button type="button" id="printAllBtn">Print all drafts</button>
+        <button type="button" id="exportAllBtn" title="Every draft in one .json file, which Import reads back">Export all drafts</button>
+        <button type="button" id="exportOneBtn" title="The open draft as a Markdown file">Download this draft (.md)</button>
+        <button type="button" id="importBtn" title="The drafts of an exported .json file, or a .md or .txt file as one draft, as new tabs">Import…</button>
+        <input type="file" id="importFile" accept=".json,.md,.markdown,.txt" hidden>
+        <button type="button" data-close>Close</button>
+      </div>
+    </div>
+    <div id="compareView" class="history-view" hidden>
+      <label>Compare this draft with
+        <select id="compareSource"></select>
+      </label>
+      <label id="comparePasteLabel" hidden>Paste edited text
+        <textarea id="comparePaste" rows="4" spellcheck="false"></textarea>
+      </label>
+      <p id="compareSummary" role="status"></p>
+      <pre id="compareDiff" aria-label="Changes"></pre>
+      <button type="button" id="compareBack">Back to versions</button>
     </div>
   </div>
 </div>
@@ -3370,13 +3432,15 @@ function tableCode(text) {
   /* Inside code, Marked only removes the table escape. An odd number of
      literal backslashes before a pipe cannot be expressed inside one code
      span. Put that pipe between spans instead. */
-  return text.split('|').map(function (part) {
-    if (!part) return '';
-    var ticks = (part.match(/\x60+/g) || []).reduce(function (max, run) { return Math.max(max, run.length); }, 0);
-    var fence = new Array(ticks + 2).join('\x60');
-    if (/^\x60|\x60$/.test(part) || (/^ .* $/.test(part) && /\S/.test(part))) part = ' ' + part + ' ';
-    return fence + part + fence;
-  }).join('\\|');
+  return text.split('|').map(codeSpan).join('\\|');
+}
+
+function codeSpan(text) {
+  if (!text) return '';
+  var ticks = (text.match(/\x60+/g) || []).reduce(function (max, run) { return Math.max(max, run.length); }, 0);
+  var fence = new Array(ticks + 2).join('\x60');
+  if (/^\x60|\x60$/.test(text) || (/^ .* $/.test(text) && /\S/.test(text))) text = ' ' + text + ' ';
+  return fence + text + fence;
 }
 
 var TABLE_NUMBER = '[+\\-−]?(?:(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d*)?|\\.\\d+)(?:e[+\\-]?\\d+)?';
@@ -3627,6 +3691,27 @@ function htmlTableStyle(el, inherited) {
   return (bold ? 1 : 0) + (em ? 2 : 0);
 }
 
+function htmlScriptTag(el) {
+  if (el.localName === 'sup' || el.localName === 'sub') return el.localName;
+  var align = ((el.style && el.style.verticalAlign) || '').toLowerCase();
+  return align === 'super' ? 'sup' : align === 'sub' ? 'sub' : '';
+}
+
+function htmlScriptMarkdown(kind, text) {
+  return '$' + (kind === 'sup' ? '^' : '_') + '{' + tableMath(text) + '}$';
+}
+
+/* Extract a simple semantic subscript or superscript via walkTableCell's plain
+   pass so table import and prose paste share one rule and representation. */
+function readHtmlScript(node, kind, warn) {
+  var parts = [];
+  var simple = walkTableCell(node, 0, kind, function (v) { parts.push(v); }, warn);
+  var value = parts.join('').replace(/\s+/g, ' ');
+  if (simple && /^[A-Za-z0-9+*-]{1,32}$/.test(value.trim())) return { value: value, kind: kind };
+  if (value.trim()) warn(kind, 'Kept complex ' + (kind === 'sub' ? 'subscript' : 'superscript') + ' as text.');
+  return { value: value, kind: '' };
+}
+
 /* The plain pass inside code, subscripts and superscripts follows the same rules for
    whitespace and ignored elements. The explicit stack also handles deeply
    nested wrappers in a malformed clipboard fragment. */
@@ -3637,21 +3722,27 @@ function walkTableCell(root, inherited, plain, emit, warn) {
     if (!node) { emit(' ', style); continue; }
     if (node.nodeType === 3) { emit(node.nodeValue, style); continue; }
     var tag = node.localName;
-    if (node.nodeType !== 1 || /^(img|script|style|colgroup|table|template)$/.test(tag)) continue;
-    if (plain && node !== root && (tag !== 'span' || htmlTableStyle(node, 0))) plainText = false;
+    if (node.nodeType !== 1 || /^(script|style|colgroup|table|template)$/.test(tag)) continue;
+    if (PASTE_MEDIA.test(tag)) {
+      if (plain) plainText = false;
+      warn('media', PASTE_MEDIA_WARNING);
+      emit(pasteAlt(node), style);
+      continue;
+    }
+    var script = node !== root && htmlScriptTag(node);
+    if (plain && node !== root && (tag !== 'span' || htmlTableStyle(node, 0) || (script && script !== plain))) plainText = false;
     if (tag === 'br') { emit(' ', style); continue; }
     if (tag === 'a') warn('link', 'Kept link text only (venues often forbid links).');
     style = plain ? 0 : htmlTableStyle(node, style);
-    if (!plain && /^(code|sub|sup)$/.test(tag)) {
-      var parts = [];
-      var simple = walkTableCell(node, 0, true, function (v) { parts.push(v); }, warn);
-      var value = parts.join('').replace(/\s+/g, ' ');
-      if (tag === 'code') emit(value, style, 'code');
-      else if (simple && /^[A-Za-z0-9+*-]{1,32}$/.test(value.trim())) emit(value, style, tag);
-      else if (value.trim()) {
-        warn(tag, 'Kept complex ' + (tag === 'sub' ? 'subscript' : 'superscript') + ' as text.');
-        emit(value, style);
-      } else emit(value, style);
+    if (!plain && (tag === 'code' || script)) {
+      if (tag === 'code') {
+        var parts = [];
+        walkTableCell(node, 0, true, function (v) { parts.push(v); }, warn);
+        emit(parts.join('').replace(/[\r\n]+/g, ' ').replace(/\u00a0/g, ' '), style, 'code');
+      } else {
+        var res = readHtmlScript(node, script, warn);
+        emit(res.value, style, res.kind || undefined);
+      }
       continue;
     }
     if (/^(p|div|li)$/.test(tag)) {
@@ -3675,20 +3766,10 @@ function htmlTableCell(cell, warn) {
     if (!kind && prev && !prev.kind && prev.style === fmt) prev.value += value;
     else runs.push({ value: value, style: fmt, kind: kind });
   }, warn);
-  var out = '', plain = '', space = false, open = [];
-  var touchingStyles = runs.some(function (run, i) {
-    var prev = runs[i - 1];
-    return prev && prev.style && run.style && prev.style !== run.style &&
-      /\S$/.test(prev.value) && /^\S/.test(run.value);
-  });
-  function entity(ch) { return '&#' + ch.charCodeAt(0) + ';'; }
-  runs.forEach(function (run, index) {
-    var raw = run.value.replace(/\s+/g, ' '), text = raw.trim();
-    plain += raw;
-    if (!text) { if (raw) space = true; return; }
-    var value, closed = '', opened = '';
+  var markdown = htmlStyledRuns(runs, function (run, text, index) {
+    var value;
     if (run.kind === 'code') value = tableCode(text);
-    else if (run.kind) value = '$' + (run.kind === 'sup' ? '^' : '_') + '{' + tableMath(text) + '}$';
+    else if (run.kind) value = htmlScriptMarkdown(run.kind, text);
     else {
       /* Clipboard links keep their visible label even when GFM would turn
          that label back into a URL or email link. */
@@ -3698,6 +3779,29 @@ function htmlTableCell(cell, warn) {
         value = value.replace(/(\d%?)(\*+)$/, function (_, n, stars) { return n + stars.replace(/\*/g, '\\*'); });
       }
     }
+    return value;
+  });
+  var plain = runs.map(function (run) { return run.value; }).join('');
+  return { markdown: markdown, numeric: TABLE_NUMERIC.test(plain.trim()) };
+}
+
+function htmlStyledRuns(runs, write) {
+  var out = '', space = false, open = [];
+  var touchingStyles = runs.some(function (run, i) {
+    var prev = runs[i - 1];
+    return prev && prev.style && run.style && prev.style !== run.style &&
+      /\S$/.test(prev.value) && /^\S/.test(run.value);
+  });
+  function entity(ch) { return '&#' + ch.charCodeAt(0) + ';'; }
+  runs.forEach(function (run, index) {
+    /* Monospace runs and pre / pre-wrap spans carry significant spaces
+       (byte literals, \verb|A  B|); collapse runs of whitespace elsewhere. */
+    var raw = run.keepSpaces || run.kind === 'code'
+      ? run.value.replace(/[\r\n]+/g, ' ').replace(/\u00a0/g, ' ')
+      : run.value.replace(/\s+/g, ' ');
+    var text = raw.trim();
+    if (!text) { if (raw) space = true; return; }
+    var value = write(run, text, index), closed = '', opened = '';
     /* Close only the styles that end here. Spaces at a style boundary
        belong between its delimiters so Markdown recognizes the emphasis. */
     var gap = out && (space || raw[0] === ' ') ? ' ' : '';
@@ -3724,7 +3828,7 @@ function htmlTableCell(cell, warn) {
     space = raw[raw.length - 1] === ' ';
   });
   while (open.length) out += open.pop().mark;
-  return { markdown: out, numeric: TABLE_NUMERIC.test(plain.trim()) };
+  return out;
 }
 
 function readHtmlTable(doc) {
@@ -3844,6 +3948,321 @@ function tableMarkdown(t, options) {
   }
   warnings.sort(function (a, b) { return (a.row || a.line) - (b.row || b.line); });
   return { markdown: markdown, warnings: warnings, format: t.format };
+}
+
+/* ---- formatted prose from the clipboard ---- */
+var PASTE_MEDIA = /^(img|math|m:omath|v:imagedata)$/;
+var PASTE_MEDIA_WARNING = 'Images and embedded equations cannot be converted. Check the pasted text for missing content.';
+function pasteAlt(el) {
+  return el.getAttribute('alt') || el.getAttribute('alttext') || el.getAttribute('aria-label') || '';
+}
+
+function proseLiteral(text) {
+  /* Keep the author's dollars and backslashes. Before a Markdown escape
+     (TeX \{ or a matrix row's \\), a character reference restores the one
+     backslash Marked consumes so MathJax receives the original sequence. */
+  return text.replace(/\\.|[*_\x60~[\]<&]/g, function (ch, at) {
+    if (ch.length > 1) return (isPunct(ch[1]) ? '&#92;' : '') + ch;
+    if (ch === '_' && /\w/.test(text.charAt(at - 1)) && /\w/.test(text.charAt(at + 1))) return ch;
+    if (ch === '&') return /^&(?:#\w+|\w+);/.test(text.slice(at)) ? '&amp;' : '&';
+    if (ch === '<') return '&lt;';
+    return '\\' + ch;
+  });
+}
+
+function proseLine(text) {
+  return text.replace(/^(#{1,6}(?=\s|$)|>|[-+](?=\s|$)|-(?=--+\s*$)|=(?==*\s*$))/, '\\$1')
+    .replace(/^(\d{1,9})([.)])(?=\s|$)/, '$1\\$2');
+}
+
+/* Bits 1 and 2 are htmlTableStyle's emphasis. 4 marks monospace runs,
+   8 preserves line breaks, and 16 keeps runs of spaces in pre / pre-wrap. */
+function proseStyle(el, inherited) {
+  var style = htmlTableStyle(el, inherited), css = el.getAttribute('style') || '', inline = el.style || {};
+  /* Word also emits complex-script declarations. Prefer the ordinary style
+     or semantic tag when present, even if its bidi counterpart differs. */
+  if (!inline.fontWeight && !/^(b|strong)$/.test(el.localName) && /(?:^|;)\s*mso-bidi-font-weight:\s*bold\b/i.test(css)) style |= 1;
+  if (!inline.fontStyle && !/^(i|em)$/.test(el.localName) && /(?:^|;)\s*mso-bidi-font-style:\s*italic\b/i.test(css)) style |= 2;
+  var family = inline.fontFamily || el.getAttribute('face');
+  var mono = family ? /\b(monospace|courier(?: new)?|consolas|menlo|monaco|lucida console)\b/i.test(family) : inherited & 4;
+  var ws = (inline.whiteSpace || '').toLowerCase();
+  var breaks = ws ? /^(pre|pre-wrap|pre-line|break-spaces)$/.test(ws) : inherited & 8;
+  var keepSpaces = ws ? /^(pre|pre-wrap|break-spaces)$/.test(ws) : inherited & 16;
+  return style | (mono || /^(code|pre)$/.test(el.localName) ? 4 : 0) |
+    (breaks || el.localName === 'pre' ? 8 : 0) | (keepSpaces || el.localName === 'pre' ? 16 : 0);
+}
+
+/* List levels from Docs can be structural, aria-level, or a CSS indent.
+   Compare indents instead of assuming a particular tab-stop width. */
+function proseIndent(el) {
+  var m = /^([\d.]+)(pt|px|in|cm|mm|pc|em|rem)?$/i.exec(el.style.marginLeft);
+  var units = { pt: 4 / 3, px: 1, 'in': 96, cm: 96 / 2.54, mm: 96 / 25.4, pc: 16, em: 16, rem: 16 };
+  return m ? Math.round(Number(m[1]) * (units[m[2]] || 1)) : 0;
+}
+
+function wordListItem(el) {
+  var css = el.getAttribute('style') || '';
+  var level = /(?:^|;)\s*mso-list:\s*[^;]*?\blevel(\d+)/i.exec(css);
+  if (!level && !/\bMsoListParagraph\w*\b/i.test(el.className)) return null;
+  var spans = el.getElementsByTagName('span'), marker = null;
+  for (var i = 0; i < spans.length; i++) {
+    if (/(?:^|;)\s*mso-list:\s*ignore\b/i.test(spans[i].getAttribute('style') || '')) { marker = spans[i]; break; }
+  }
+  var prefix = /^\s*(\d+[.)]|[a-z]+[.)]|[•·▪◦○●§\uf0b7\uf0a7-]|o)(?:\s+|$)/i;
+  var match = marker && prefix.exec(marker.textContent + ' '), skip = 0;
+  /* Some Word exports put the entire marker inside an Office conditional
+     comment. Its HTML is metadata, never part of the item body. */
+  if (!marker) {
+    for (var node = el.firstChild; node; node = node.nextSibling) {
+      if (node.nodeType === 8 && /supportLists/i.test(node.nodeValue)) {
+        match = prefix.exec(node.nodeValue.replace(/^\s*\[if [^\]]*\]>/i, '')
+          .replace(/<[^>]*>|&(?:nbsp|#160);/gi, ' ') + ' ');
+        break;
+      }
+    }
+    if (!match) {
+      /* A separate marker span need not leave a space in textContent. */
+      var first = el.firstChild;
+      while (first && (first.nodeType === 8 || (first.nodeType === 3 && !first.nodeValue.trim()))) first = first.nextSibling;
+      if (first && first.localName === 'span') {
+        var only = first.textContent.trim();
+        match = prefix.exec(only);
+        if (match && match[0] === only) marker = first;
+      }
+      if (!marker) {
+        match = prefix.exec(el.textContent);
+        if (match) skip = match[0].length;
+      }
+    }
+  }
+  var token = match ? match[1] : '';
+  return { level: level ? Number(level[1]) : 1, indent: proseIndent(el), marker: marker, skip: skip,
+    ordered: /[.)]$/.test(token), number: /^\d/.test(token) ? parseInt(token, 10) : null };
+}
+
+function proseList(items) {
+  var frames = [], lines = [];
+  items.forEach(function (item) {
+    function compare(frame) { return item.level - frame.level || item.indent - frame.indent; }
+    while (frames.length && compare(frames[frames.length - 1]) < 0) frames.pop();
+    var frame = frames[frames.length - 1];
+    if (!frame || compare(frame) > 0) {
+      frame = { level: item.level, indent: item.indent, prefix: frame ? frame.content : '', next: 1 };
+      frames.push(frame);
+    }
+    var n = item.number == null ? frame.next : item.number;
+    var marker = item.ordered ? n + '. ' : '- ';
+    frame.next = item.ordered ? n + 1 : 1;
+    frame.content = frame.prefix + new Array(marker.length + 1).join(' ');
+    lines.push(frame.prefix + marker + item.body.replace(/\n([^\n])/g, '\n' + frame.content + '$1'));
+  });
+  return lines.join('\n');
+}
+
+/* With keepGrid the paste offer can send a standalone grid to the table
+   dialog, which lets the author change its padding before insertion. */
+function htmlToMarkdown(doc, options) {
+  if (!doc || !doc.body) return null;
+  var warnings = [], formatted = false, hasList = false;
+  function warnOnce(message) {
+    if (!warnings.some(function (w) { return w.message === message; })) warnings.push({ message: message });
+  }
+  function flow() { return { blocks: [], lines: [], runs: [] }; }
+  function run(f, value, style, kind, markdown) {
+    if (!value) return;
+    var keepSpaces = !!(style & 16);
+    if (!kind && (style & 4)) kind = 'code';
+    if (kind === 'code') keepSpaces = true;
+    style &= 3;
+    if (f.bold) style |= 1;
+    if ((style || kind === 'code' || kind === 'sup' || kind === 'sub' || (kind === 'link' && markdown !== value.trim())) && /\S/.test(value)) formatted = true;
+    var last = f.runs[f.runs.length - 1];
+    if (last && (!kind || kind === 'code') && kind === last.kind && style === last.style && keepSpaces === !!last.keepSpaces) last.value += value;
+    else f.runs.push({ value: value, style: style, kind: kind, markdown: markdown, keepSpaces: keepSpaces });
+  }
+  function endLine(f) {
+    var line = htmlStyledRuns(f.runs, function (r, text) {
+      if (r.kind === 'link') return r.markdown;
+      if (r.kind === 'code') return codeSpan(text);
+      if (r.kind === 'sup' || r.kind === 'sub') return htmlScriptMarkdown(r.kind, text);
+      return proseLiteral(text);
+    });
+    f.lines.push(proseLine(line));
+    f.runs = [];
+  }
+  function endParagraph(f) {
+    endLine(f);
+    var text = f.lines.join('  \n').trim();
+    if (text) f.blocks.push({ text: text });
+    f.lines = [];
+  }
+  function render(f, inItem) {
+    endParagraph(f);
+    var out = '';
+    for (var i = 0; i < f.blocks.length;) {
+      var b = f.blocks[i++], text = b.text, gap = '\n\n';
+      if (b.table) {
+        var grid = b.table.rows.length >= 2 && htmlTableGrid(b.table.rows);
+        if (grid) {
+          var table = tableMarkdown(grid, options);
+          text = table.markdown;
+          warnings = warnings.concat(table.warnings);
+        } else {
+          var contents = flow();
+          children(b.table, b.style, contents);
+          text = render(contents);
+        }
+      } else if (b.item) {
+        var items = [b.item];
+        while (i < f.blocks.length && f.blocks[i].item) items.push(f.blocks[i++].item);
+        text = proseList(items);
+        if (inItem) gap = '\n'; /* A tight sublist follows its parent's text immediately. */
+      }
+      if (text) out += (out ? gap : '') + text;
+    }
+    return out;
+  }
+  function children(el, style, f, list) {
+    for (var child = el.firstChild; child; child = child.nextSibling) visit(child, style, f, list);
+  }
+  function visit(el, style, f, list) {
+    if (el.nodeType === 3) {
+      var value = el.nodeValue;
+      if (f.skip) { var cut = Math.min(f.skip, value.length); f.skip -= cut; value = value.slice(cut); }
+      if ((style & 8) && /[\r\n]/.test(value)) {
+        value.split(/\r\n?|\n/).forEach(function (line, i) { if (i) endLine(f); run(f, line, style); });
+      } else run(f, value, style);
+      return;
+    }
+    var tag = el.localName;
+    if (el.nodeType !== 1 || el === f.marker || /^(script|style|template|head)$/.test(tag) || el.hidden) return;
+    if (PASTE_MEDIA.test(tag)) {
+      warnOnce(PASTE_MEDIA_WARNING);
+      run(f, pasteAlt(el), style);
+      return;
+    }
+    style = proseStyle(el, style);
+    if (tag === 'br') { endLine(f); return; }
+    if (tag === 'a' && el.hasAttribute('href')) {
+      var href = el.getAttribute('href').trim();
+      if (href && !/[\x00-\x1f]/.test(href) && !/^(?!(?:https?|ftp|mailto):)[a-z][a-z\d+.-]*:/i.test(href)) {
+        var label = flow();
+        children(el, style & 28, label);
+        var md = render(label), raw = el.textContent.replace(/\s+/g, ' ');
+        if (md) {
+          var bare = /^(?:https?|ftp):\/\//i.test(href) && raw.trim() === href && md === proseLine(proseLiteral(href));
+          /* Angle destinations also preserve unmatched parentheses in URLs. */
+          var dest = href.replace(/&(?=(?:#\w+|\w+);)/g, '&amp;').replace(/</g, '%3C').replace(/>/g, '%3E');
+          if (/[\s()]/.test(dest)) dest = '<' + dest + '>';
+          run(f, raw.trim() ? raw : md, style & 3, 'link', bare ? href : '[' + md + '](' + dest + ')');
+        }
+        return;
+      }
+    }
+    var item = tag === 'p' && wordListItem(el);
+    if (tag === 'li' || item) {
+      endParagraph(f);
+      if (!item) {
+        item = { level: Number(el.getAttribute('aria-level')) || (list && list.level) || 1,
+          indent: proseIndent(el), ordered: !!(list && list.ordered), number: el.hasAttribute('value') ? el.value : list && list.start };
+        if (list) list.start = null;
+      }
+      var body = flow();
+      body.marker = item.marker; body.skip = item.skip;
+      children(el, style, body);
+      item.body = render(body, true);
+      if (item.body) { f.blocks.push({ item: item }); formatted = true; hasList = true; }
+      return;
+    }
+    if (tag === 'ul' || tag === 'ol') {
+      endParagraph(f);
+      children(el, style, f, { level: list ? list.level + 1 : 1, ordered: tag === 'ol',
+        start: el.hasAttribute('start') ? el.start : null });
+      endParagraph(f);
+      return;
+    }
+    if (tag === 'table' && el.rows) {
+      endParagraph(f); f.blocks.push({ table: el, style: style }); return;
+    }
+    if (/^h[1-6]$/.test(tag) || tag === 'blockquote') {
+      endParagraph(f);
+      var inner = flow();
+      inner.bold = /^h[4-6]$/.test(tag);
+      children(el, style, inner);
+      var content = render(inner);
+      if (content) {
+        if (tag === 'blockquote') content = content.replace(/^(.+)$/gm, '> $1').replace(/^$/gm, '>');
+        else if (Number(tag[1]) <= 3) content = new Array(Number(tag[1]) + 1).join('#') + ' ' + content;
+        f.blocks.push({ text: content }); formatted = true;
+      }
+      return;
+    }
+    var block = /^(p|div|pre|section|article|header|footer|tr)$/.test(tag);
+    var script = !block && !(style & 4) && htmlScriptTag(el);
+    if (script) {
+      var res = readHtmlScript(el, script, function (_kind, msg) { warnOnce(msg); });
+      run(f, res.value, style, res.kind || undefined);
+      return;
+    }
+    if (block) endParagraph(f);
+    children(el, style, f, list);
+    if (block) endParagraph(f);
+  }
+  var root = flow();
+  visit(doc.body, 0, root);
+  endParagraph(root);
+  if (root.blocks.length === 1 && root.blocks[0].table) {
+    var lone = root.blocks[0].table;
+    var keepGrid = options && options.keepGrid;
+    var grid = (lone.rows.length >= 2 && htmlTableGrid(lone.rows)) || readHtmlTable(lone);
+    return grid && keepGrid ? { grid: grid } : tableMarkdown(grid, options);
+  }
+  var markdown = render(root);
+  if (!warnings.length && !(markdown && (formatted || root.blocks.length > 1 || markdown.indexOf('  \n') >= 0))) return null;
+  var result = { markdown: markdown, warnings: warnings };
+  if (options && options.keepGrid) result.hasList = hasList;
+  return result;
+}
+
+function pasteBlocks(md) {
+  if (!md || !window.marked || typeof window.marked.lexer !== 'function') return { start: false, end: false };
+  var tokens = window.marked.lexer(md.trim()).filter(function (t) { return t.type !== 'space'; });
+  var block = /^(?:table|list|heading|blockquote|code)$/;
+  return {
+    start: !!tokens.length && block.test(tokens[0].type),
+    end: !!tokens.length && block.test(tokens[tokens.length - 1].type)
+  };
+}
+
+/* Separate a converted paste that starts or ends with a Markdown block from
+   adjacent draft text so a trailing table cannot swallow the next sentence,
+   while keeping inline conversions inline. */
+function placeProsePaste(before, md, after) {
+  var edge = pasteBlocks(md), left = '', right = '';
+  if (edge.start && before.trim()) {
+    md = md.replace(/^[ \t]+/, '');
+    var pre = before + (md.match(/^\n*/) || [''])[0];
+    left = /\n[ \t]*\n$/.test(pre) ? '' : /\n[ \t]*$/.test(pre) ? '\n' : '\n\n';
+  }
+  if (edge.end && after.trim()) {
+    md = md.replace(/[ \t]+$/, '');
+    var post = (md.match(/\n*$/) || [''])[0] + after;
+    right = /^\n[ \t]*\n/.test(post) ? '' : /^[ \t]*\n/.test(post) ? '\n' : '\n\n';
+  }
+  var prefix = before + left + md;
+  return { text: prefix + right + after, caret: prefix.length };
+}
+
+function looksLikeTablePaste(text) {
+  /* A TeX array or tabular is a table paste only when the pasted text itself
+     is that environment, not when a sentence contains an array inside math. */
+  if (/^\s*(?:%[^\n]*\n\s*)*(?:\\\[|\$\$)?\s*\\begin\s*\{(?:tabular\*?|tabularx|array|table\*?)\}/.test(text)) return true;
+  var lines = text.replace(/^\n+|\n+$/g, '').split('\n');
+  if (lines.length < 2) return false;
+  var tabs = lines[0].split('\t').length - 1;
+  if (tabs && lines.every(function (s) { return s.split('\t').length === tabs + 1; })) return true;
+  if (/\\begin\s*\{/.test(text)) return false;
+  return lines.filter(function (s) { return /&.*\\\\/.test(s); }).length >= 2;
 }
 
 /* ---- compaction (pure): fewer characters, the same rendering ----
@@ -4832,6 +5251,72 @@ function newDraftName(list) {
 
 /* ---- earlier versions of a draft, and drafts as files (pure) ---- */
 
+/* A TeX control word is one edit. Unicode letters, marks and numbers stay
+   together, including in prose that does not use the Latin alphabet. */
+var DIFF_WORD = '\\\\[A-Za-z]+|[\\p{L}\\p{M}\\p{N}]+';
+var DIFF_TOKENS = new RegExp(DIFF_WORD + '|\\s+|.', 'gu');
+var DIFF_WORDS_ONLY = new RegExp(DIFF_WORD, 'gu');
+var DIFF_LINES = /[^\r\n\u2028\u2029]*(?:\r\n|[\r\n\u2028\u2029])|[^\r\n\u2028\u2029]+/g;
+
+function diffTokenRuns(left, right) {
+  var runs = [], start = 0, endA = left.length, endB = right.length;
+  function add(op, text) {
+    if (!text) return;
+    var last = runs[runs.length - 1];
+    if (last && last.op === op) last.text += text;
+    else runs.push({ op: op, text: text });
+  }
+  /* Even a book-length draft with one local edit can get a word diff. Only
+     the unmatched middle needs the quadratic longest-common-subsequence table. */
+  while (start < endA && start < endB && left[start] === right[start]) start++;
+  while (endA > start && endB > start && left[endA - 1] === right[endB - 1]) { endA--; endB--; }
+  var rows = endA - start, cols = endB - start;
+  if (rows && cols && (rows > 3000 || cols > 3000 || rows * cols > 2250000)) return null;
+  add('same', left.slice(0, start).join(''));
+  var i = 0, j = 0;
+  if (rows && cols) {
+    var stride = cols + 1, lcs = new Uint16Array((rows + 1) * stride), at;
+    for (i = rows - 1; i >= 0; i--) {
+      for (j = cols - 1; j >= 0; j--) {
+        at = i * stride + j;
+        lcs[at] = left[start + i] === right[start + j] ? 1 + lcs[at + stride + 1]
+          : Math.max(lcs[at + stride], lcs[at + 1]);
+      }
+    }
+    i = j = 0;
+    while (i < rows && j < cols) {
+      at = i * stride + j;
+      if (left[start + i] === right[start + j]) { add('same', left[start + i]); i++; j++; }
+      else if (lcs[at + stride] >= lcs[at + 1]) { add('del', left[start + i]); i++; }
+      else { add('ins', right[start + j]); j++; }
+    }
+  }
+  add('del', left.slice(start + i, endA).join(''));
+  add('ins', right.slice(start + j, endB).join(''));
+  add('same', left.slice(endA).join(''));
+  return runs;
+}
+
+/* Each side can be recovered verbatim from its runs. The optional details
+   tell the reader when the work bound required a coarser comparison. */
+function diffWords(a, b, details) {
+  var runs, mode = 'words';
+  if (a === b) runs = a ? [{ op: 'same', text: a }] : [];
+  else {
+    runs = diffTokenRuns(a.match(DIFF_TOKENS) || [], b.match(DIFF_TOKENS) || []);
+    if (!runs) {
+      mode = 'lines';
+      runs = diffTokenRuns(a.match(DIFF_LINES) || [], b.match(DIFF_LINES) || []);
+      if (!runs) {
+        mode = 'replacement';
+        runs = [{ op: 'del', text: a }, { op: 'ins', text: b }];
+      }
+    }
+  }
+  if (details) details.mode = mode;
+  return runs;
+}
+
 /* A draft's history: its earlier texts, newest first, each {at, why, text}.
    It is kept in this browser only and capped, per draft (HISTORY_MAX,
    HISTORY_CHARS) and for all drafts together (HISTORY_BUDGET, well under
@@ -5109,16 +5594,24 @@ function blockSources(text) {
    OpenReview names an anonymous reviewer by four letters and digits
    ("Reviewer k9F2"); some authors number them ("Reviewer 2", "R2"). A draft
    whose tab is named for a reviewer should address that reviewer: an answer
-   copied from another reviewer's draft keeps the other ID in its greeting.
-   Mentioning another reviewer is usually deliberate (a shared concern, a
-   joint thanks, a cross-reference), so only what is unmistakable gets a card:
-   a salutation (Dear, Hi, Hello) naming another reviewer, a "Response to
-   Reviewer X" heading or line of its own, or thanks whose object is another
-   reviewer in the opening or closing block; and an ID in other capitals than
-   every tab's. IDs and numbers are compared only within one scheme, since a
-   tab named by ID says nothing about the numbers. Two Codex reviews tried a
-   broader check (pointers to points, IDs no tab has) and found it wrong on
-   ordinary sentences; those sentences are the regression cases. */
+   copied from another reviewer's draft keeps the other ID in its greeting,
+   and an explicit pointer into our answer to another reviewer ("see our
+   response to Reviewer k9F2, Q2") can outlive a renumbering. Mentioning
+   another reviewer is usually deliberate (a shared concern, a joint thanks,
+   a cross-reference), so only what is unmistakable gets a card: a salutation
+   (Dear, Hi, Hello) naming another reviewer, a "Response to Reviewer X"
+   heading or line of its own, or thanks whose object is another reviewer in
+   the opening or closing block; an ID in other capitals than every tab's;
+   and an explicit pointer (see, cf., refer to, as answered/discussed in) to
+   our/the answer, response, reply or rebuttal to another reviewer naming a
+   point label that the other reviewer's drafts do not label (read via
+   labelledParts, skipping unreadable or unlabelled drafts). Mentions of a
+   reviewer's own points without "our/the answer/response/reply" stay quiet,
+   as do technical terms ("L2 regularization", "W2V"), quarter-years ("Q1
+   2025") and bare counts ("3 additional examples"): two Codex reviews of 3.8
+   found broader pointer checks wrong on those sentences, which stay as
+   regression cases. IDs and numbers are compared only within one scheme for
+   addressing, since a tab named by ID says nothing about the numbers. */
 var REVIEWER_ID = /^(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{4}$/;
 /* A four-character word is taken for an ID only with a letter and a digit,
    or with small letters and a capital after the first: "k9F2", "xKpQ", not
@@ -5168,41 +5661,200 @@ function reviewerRef(text, i, known) {
 
 /* A point's name as Sections and the review's points write it, made
    comparable: "W1", "Weakness 1" and "weakness #1" are all W1. */
-var POINT_NAME = new RegExp('^(?:\\*\\*|__)?[\\[(]?(' + REVIEW_NAME + ')', 'iu');
+var POINT_NAME = new RegExp('^(?:\\*\\*|__)?[\\[(]?((?:weaknesses[ \\t]*#?\\d+(?![\\p{L}\\p{N}])|' + REVIEW_NAME + '))', 'iu');
 function pointName(s) {
   var m = POINT_NAME.exec(s);
   return m ? m[1].charAt(0).toUpperCase() + m[1].match(/\d+$/)[0].replace(/^0+(?=\d)/, '') : null;
 }
 
 /* Read the original first line. Sections abbreviates titles for display,
-   and a combined heading can have several labels beyond that abbreviation. */
+   and a combined heading can have several labels beyond that abbreviation
+   ("W1 and W2", "Questions 2 and 9", "(Weakness1, Question1)"). */
 function labelledParts(text) {
   var r = commentSections(text, true), out = [];
   (r ? r.sections : []).forEach(function (s) {
     if (s.kind === 'opening') return;
     var stop = text.indexOf('\n', s.start);
-    var line = text.slice(s.start, stop < 0 ? text.length : stop).replace(/^\s*(?:#{1,6}\s+|>\s*|(?:[*+-]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?/, '');
-    var m;
-    while ((m = POINT_NAME.exec(line))) {
-      out.push({ label: pointName(m[1]), start: s.start, end: s.end });
-      var comma = /^[)\]]?(?:\*\*|__)?\s*,\s*/.exec(line.slice(m[0].length));
-      if (!comma) break;
-      line = line.slice(m[0].length + comma[0].length);
+    var raw = text.slice(s.start, stop < 0 ? text.length : stop).replace(/\r$/, '');
+    var line = raw.replace(/^\s*(?:#{1,6}\s+|>\s*|(?:[*+-]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?/, '');
+    if (/^ {0,3}#{1,6}(?=\s|$)/.test(raw)) line = line.replace(/\s+#+\s*$/, '');
+    var m = POINT_NAME.exec(line), letter = '';
+    while (m) {
+      var lbl = m[1] ? pointName(m[1]) : letter + m[2].replace(/^0+(?=\d)/, '');
+      letter = lbl.charAt(0);
+      out.push({ label: lbl, start: s.start, end: s.end });
+      var rest = line.slice(m[0].length);
+      var sep = /^[)\]]?(?:\*\*|__)?(?:\s*,\s*(?:(?:and|&)\s+)?|\s+(?:and|&)\s+|\s*[&\/]\s*)/i.exec(rest);
+      if (!sep) break;
+      line = rest.slice(sep[0].length);
+      m = POINT_NAME.exec(line);
+      if (!m && letter) {
+        /* A bare number continues the same kind ("Questions 2 and 9", "W1, 2,
+           and 3"), unless a word follows ("W1 and 3 additional baselines"). */
+        var num = /^(?:\*\*|__)?#?(\d+)(?![\p{L}\p{N}])(?:\*\*|__)?(?=$|[ \t]*(?:[,.:;!?)\]&\/\u2013\u2014(-]|(?:and|&)(?![\p{L}\p{N}])))/iu.exec(line);
+        if (num) m = [num[0], null, num[1]];
+      }
     }
   });
   return out;
 }
 
+/* A point label inside an explicit pointer: W, Q, L or C + digits, or
+   Weakness, Question, Limitation or Comment + number, ending at a
+   non-alphanumeric character and not a quarter-year ("Q1 2025"). Emphasis
+   is excluded from the span so the card selects the label alone. */
+var POINTER_TOKEN = /^(\*{1,2}|_{1,2})?(?:([WQLC])(\d+)|(weakness(?:es)?|questions?|limitations?|comments?)[ \t]*#?[ \t]*(\d+))(?![\p{L}\p{N}])(\*{1,2}|_{1,2})?(?![ \t\/-]+(?:19|20)\d\d(?![\p{L}\p{N}]))/iu;
+var POINTER_SEP = /^[ \t]*(?:\n[ \t]*)?(?:,[ \t]*(?:\n[ \t]*)?(?:(?:and|or|&)[ \t]*(?:\n[ \t]*)?)?|(?:and|or)[ \t]+(?:\n[ \t]*)?|[&\/][ \t]*(?:\n[ \t]*)?)/i;
+/* Short tokens and bare list numbers must end at punctuation, a list
+   conjunction or a post-pointer word, not a noun phrase ("L2 regularization",
+   "3 additional examples") or a hyphenated compound ("L2-norm"). */
+var POINTER_BOUNDARY = /^(?:$|[ \t]*(?:\n[ \t]*)?(?:[,.;:!?)\]&\/\u2013\u2014(\n]|-(?![\p{L}\p{N}])|$|(?:for|of|in|on|from|to|at|by|with|about|regarding|concerning|where|which|that|as|above|below|here|there|also|too|respectively|and|or)(?![\p{L}\p{N}])))/iu;
+var POINTER_BARE_NUM = /^(\*{1,2}|_{1,2})?#?(\d+)(?![\p{L}\p{N}])(\*{1,2}|_{1,2})?/u;
+
+/* Read one or more point labels starting at `i` ("Q2", "W1 and Q3",
+   "questions 2 and 9", "**Q9**"). Returns { items: [{label, start, end}],
+   end } or null. */
+function pointerPoints(text, i) {
+  var items = [], letter = '', pos = i, after = i;
+  for (;;) {
+    var slice = text.slice(pos, pos + 80);
+    var m = POINTER_TOKEN.exec(slice);
+    if (m) {
+      var tEnd = pos + m[0].length;
+      if (m[2] && !POINTER_BOUNDARY.test(text.slice(tEnd, tEnd + 30))) break;
+      var lead = m[1] ? m[1].length : 0, trail = m[6] ? m[6].length : 0;
+      var num = (m[3] || m[5]).replace(/^0+(?=\d)/, '');
+      letter = (m[2] || m[4]).charAt(0).toUpperCase();
+      items.push({ label: letter + num, start: pos + lead, end: tEnd - trail });
+      pos = tEnd;
+      after = pos;
+    } else if (items.length && (m = POINTER_BARE_NUM.exec(slice))) {
+      var nEnd = pos + m[0].length;
+      if (!POINTER_BOUNDARY.test(text.slice(nEnd, nEnd + 30))) break;
+      var nLead = m[1] ? m[1].length : 0, nTrail = m[3] ? m[3].length : 0;
+      items.push({ label: letter + m[2].replace(/^0+(?=\d)/, ''), start: pos + nLead, end: nEnd - nTrail });
+      pos = nEnd;
+      after = pos;
+    } else {
+      break;
+    }
+    var sep = POINTER_SEP.exec(text.slice(pos, pos + 20));
+    if (!sep) break;
+    pos += sep[0].length;
+  }
+  return items.length ? { items: items, end: after } : null;
+}
+
+/* Explicit pointers into our answer to another reviewer: a cue (see, cf.,
+   refer to, as (we) answered/discussed/... in) followed closely by "our/the
+   (answer|response|reply|rebuttal) to Reviewer X" with a point list right
+   after it (", Q2", " (W1 and Q3)", "'s Q2"), or the point list right before
+   it ("Q2 of our response to Reviewer X"), or "our response to Q1 from/of
+   Reviewer X". Bare mentions of a reviewer's points without "our/the
+   answer/response/reply" are never matched. */
+var POINTER_CUE = /\b(?:see(?:[ \t]+also)?\b|cf\.|refer(?:s|red|ring)?[ \t]*(?:\n[ \t]*)?(?:(?:the[ \t]+reviewer|you)[ \t]*(?:\n[ \t]*)?)?to\b|as[ \t]*(?:\n[ \t]*)?(?:we[ \t]*(?:\n[ \t]*)?(?:have[ \t]*(?:\n[ \t]*)?)?)?(?:answered|discussed|explained|detailed|shown|addressed|noted|described)[ \t]*(?:\n[ \t]*)?in\b)/gi;
+var POINTER_ANS_TO = /^(?:\*{1,2}|_{1,2})?(?:our|the)(?:[ \t]+|[ \t]*\n[ \t]*)(?:\*{1,2}|_{1,2})?(?:answer|response|reply|rebuttal)(?:[ \t]+|[ \t]*\n[ \t]*)to(?:[ \t]+|[ \t]*\n[ \t]*)/i;
+var POINTER_PRE_OF = /^[ \t]*(?:\n[ \t]*)?(?:of|in)(?:[ \t]+|[ \t]*\n[ \t]*)(?:\*{1,2}|_{1,2})?(?:our|the)(?:[ \t]+|[ \t]*\n[ \t]*)(?:\*{1,2}|_{1,2})?(?:answer|response|reply|rebuttal)(?:[ \t]+|[ \t]*\n[ \t]*)to(?:[ \t]+|[ \t]*\n[ \t]*)/i;
+
+function findAnswerPointers(text, known) {
+  var out = [], m;
+  POINTER_CUE.lastIndex = 0;
+  while ((m = POINTER_CUE.exec(text))) {
+    var asClause = /^as\b/i.test(m[0]);
+    var gap = /^(?:[ \t]+|[ \t]*\n[ \t]*)/.exec(text.slice(m.index + m[0].length, m.index + m[0].length + 20));
+    if (!gap) continue;
+    var at = m.index + m[0].length + gap[0].length;
+    var ans = POINTER_ANS_TO.exec(text.slice(at, at + 80));
+    if (ans) {
+      var afterAns = at + ans[0].length;
+      var r = reviewerRef(text, afterAns, known);
+      if (r) {
+        var tail = text.slice(r.after, r.after + 100), close = null, comma = false;
+        var conn = /^['\u2019]s(?:\*{1,2}|_{1,2})?[ \t]*(?:\n[ \t]*)?/i.exec(tail);
+        if (!conn) {
+          conn = /^[ \t]*(?:\n[ \t]*)?(\(|\[)[ \t]*(?:\n[ \t]*)?/.exec(tail);
+          if (conn) close = conn[1] === '(' ? ')' : ']';
+        }
+        if (!conn) {
+          conn = /^[ \t]*(?:[,:]|[ \t]+[\u2013\u2014-])[ \t]*(?:\n[ \t]*)?/.exec(tail);
+          if (conn) comma = true;
+        }
+        if (conn) {
+          var pts = pointerPoints(text, r.after + conn[0].length);
+          if (pts) {
+            var rest = text.slice(pts.end, pts.end + 30);
+            /* Parenthesized lists must close right after the labels; an "as
+               discussed in ..., X," comma clause must end at punctuation so a
+               main-clause subject ("L2 on ImageNet is ...") is never read as a
+               point label. */
+            var ok = close
+              ? new RegExp('^[ \\t]*(?:\\n[ \\t]*)?\\' + close).test(rest)
+              : (asClause && comma ? /^[ \t]*(?:[,.;:!?)\]\u2013\u2014(\r\n]|$)/.test(rest) : POINTER_BOUNDARY.test(rest));
+            if (ok) out.push({ start: m.index, end: Math.max(r.end, pts.end), ref: r, items: pts.items });
+          }
+        }
+      } else {
+        /* "refer to our response to Q1 from Reviewer X" */
+        var pts3 = pointerPoints(text, afterAns);
+        if (pts3) {
+          var from = /^[ \t]*(?:\n[ \t]*)?(?:from|of)(?:[ \t]+|[ \t]*\n[ \t]*)/i.exec(text.slice(pts3.end, pts3.end + 25));
+          if (from) {
+            var r3 = reviewerRef(text, pts3.end + from[0].length, known);
+            if (r3) out.push({ start: m.index, end: Math.max(r3.end, pts3.end), ref: r3, items: pts3.items });
+          }
+        }
+      }
+    } else {
+      /* "see Q2 of our response to Reviewer X" */
+      var pts2 = pointerPoints(text, at);
+      if (pts2) {
+        var pre = POINTER_PRE_OF.exec(text.slice(pts2.end, pts2.end + 100));
+        if (pre) {
+          var r2 = reviewerRef(text, pts2.end + pre[0].length, known);
+          if (r2) out.push({ start: m.index, end: Math.max(r2.end, pts2.end), ref: r2, items: pts2.items });
+        }
+      }
+    }
+  }
+  return out;
+}
+
 /* Cards for a draft (`text`, as posted) whose tab is named `self`, given the
-   other tabs' names (`others`: [{name}]). `spans`: the formulas analyze found
-   (computed here when not given). */
+   other tabs (`others`: [{name, text}], where `text` is null while unknown).
+   `spans`: the formulas analyze found (computed here when not given). */
 function reviewerIssues(text, self, others, spans) {
   var none = [];
   if (typeof text !== 'string' || !text.trim()) return none;
+  if (/\r/.test(text)) {
+    /* Marked locates LF text. Translate both ends of its half-open ranges. */
+    var offsets = [], lf = text.replace(/\r\n?|\n|[^\r\n]+/g, function (run, start) {
+      var count = run === '\r\n' ? 1 : run.length;
+      for (var j = 0; j < count; j++) offsets.push(start + j);
+      return run.charAt(0) === '\r' ? '\n' : run;
+    });
+    offsets.push(text.length);
+    return reviewerIssues(lf, self, others).map(function (iss) {
+      iss.start = offsets[iss.start];
+      iss.end = offsets[iss.end];
+      return iss;
+    });
+  }
+  var lead = text.length - text.replace(/^\s+/, '').length;
+  var trimEnd = Math.max(lead, text.replace(/\s+$/, '').length);
+  if (lead || trimEnd < text.length) {
+    var shifted = spans ? spans.map(function (sp) {
+      return { start: sp.start - lead, end: sp.end - lead, recovered: sp.recovered };
+    }) : undefined;
+    return reviewerIssues(text.slice(lead, trimEnd), self, others, shifted).map(function (iss) {
+      iss.start += lead;
+      iss.end += lead;
+      return iss;
+    });
+  }
   var model = collectMarkedRanges(text);
   if (!model) return none;
   var me = draftReviewer(self), tabs = (others || []).map(function (o) {
-    return { name: o && o.name, who: draftReviewer(o && o.name) };
+    return { name: o && o.name, who: draftReviewer(o && o.name), text: o ? o.text : null };
   });
   /* Every spelling of every tab's ID: an exact one wins over a match in
      other capitals ("Ab12" here and "ab12 (follow-up)" there). */
@@ -5263,47 +5915,82 @@ function reviewerIssues(text, self, others, spans) {
     }
   }
 
-  if (!me.ids.length && !me.nums.length) return issues;
-  var first = blocks[0], last = blocks[blocks.length - 1];
-  function edge(at) {
-    return (!!first && at >= first.start && at < first.end) || (!!last && at >= last.start && at < last.end);
-  }
-  /* A salutation can stand anywhere (after a title); a "Response to" line
-     only as a heading, whatever follows ("## Reply to Reviewer X:
-     Calibration"), or as a paragraph of its own ("Our response to Reviewer
-     X contains the table", even wrapped, points to it); thanks only in the
-     opening or closing, with that reviewer as its only object: "We thank
-     Reviewer X and Reviewer Y", "... as well as the other reviewers" thank
-     several. A salutation is joint only with "and" ("Dear Reviewer X,
-     Reviewer Y raised ..." still greets X). */
-  var JOINT_THANKS = /^\s*(?:,\s*(?:and\s+)?|and\s+|&\s*|as\s+well\s+as\s+)(?:(?:the|all|both|other|our)\s+)*(?:reviewers?\b|rev\.?\s*\d|r?\d{1,2}(?![A-Za-z0-9])|([A-Za-z0-9]{4})(?![A-Za-z0-9]))/i;
-  var JOINT_SALUTATION = /^\s*(?:and\s+|&\s*|as\s+well\s+as\s+)(?:(?:the|all|both|other)\s+)*(?:reviewers?\b|rev\.?\s*\d|r?\d{1,2}(?![A-Za-z0-9]))/i;
-  var triggers = [
-    { re: /(?:^|[.!?][ \t]+|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:dear|hi|hello)[ \t]+/gi, joint: JOINT_SALUTATION },
-    { re: /(?:^|\n)[ \t]*(#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:our[ \t]+)?(?:author[ \t]+)?(?:response|reply|answer|rebuttal)s?[ \t]+to[ \t]+(?:the[ \t]+)?/gi, line: true, joint: JOINT_SALUTATION },
-    { re: /\b(?:(?:we|i)[ \t]+(?:(?:sincerely|warmly|again|truly|deeply|also|would like to)[ \t]+)?thank|thank[ \t]+you|thanks)[ \t]*,?[ \t]*(?:again[ \t]*,?[ \t]*)?(?:dear[ \t]+)?/gi, edge: true, joint: JOINT_THANKS }
-  ];
-  triggers.forEach(function (tr) {
-    while ((m = tr.re.exec(text))) {
-      var r = reviewerRef(text, m.index + m[0].length, known);
-      if (!r || !visible(m.index + m[0].search(/\S/), r.end) || (tr.edge && !edge(r.start))) continue;
-      if (tr.line && !m[1]) {
-        /* A paragraph of its own: it starts its block ("see our\nresponse to
-           Reviewer X." is a wrapped sentence) and ends after the name. */
-        var lineAt = m.index + m[0].search(/\S/), own = blockOf(lineAt);
-        if (!own || own.start !== text.lastIndexOf('\n', lineAt - 1) + 1 ||
-            !/^[ \t]*(?:\*\*|__)?[ \t]*[:.!]?[ \t]*(?:\*\*|__)?[ \t]*(?:\n[ \t]*\n|\n?[ \t]*$)/.test(text.slice(r.after, r.after + 40))) continue;
-      }
-      var also = tr.joint.exec(text.slice(r.after, r.after + 60));
-      if (also && (!also[1] || known[also[1].toLowerCase()] || idShaped(also[1]))) continue;
-      if (caseCard(r) || isFor(me, r) || !sameScheme(me, r)) continue;
-      var theirs = tabs.filter(function (t) { return isFor(t.who, r); })[0];
-      card('This draft addresses another reviewer',
-        'The tab is named for ' + escHtml(self) + ', but this addresses ' + escHtml(label(r)) +
-          (theirs ? ', who has a draft of their own (' + escHtml(theirs.name) + ')' : '') +
-          '. An answer copied from another draft keeps its reviewer: change the ID, or rename the tab if it is the tab that is wrong.',
-        r.start, r.end);
+  if (me.ids.length || me.nums.length) {
+    var first = blocks[0], last = blocks[blocks.length - 1];
+    function edge(at) {
+      return (!!first && at >= first.start && at < first.end) || (!!last && at >= last.start && at < last.end);
     }
+    /* A salutation can stand anywhere (after a title); a "Response to" line
+       only as a heading, whatever follows ("## Reply to Reviewer X:
+       Calibration"), or as a paragraph of its own ("Our response to Reviewer
+       X contains the table", even wrapped, points to it); thanks only in the
+       opening or closing, with that reviewer as its only object: "We thank
+       Reviewer X and Reviewer Y", "... as well as the other reviewers" thank
+       several. A salutation is joint only with "and" ("Dear Reviewer X,
+       Reviewer Y raised ..." still greets X). */
+    var JOINT_THANKS = /^\s*(?:,\s*(?:and\s+)?|and\s+|&\s*|as\s+well\s+as\s+)(?:(?:the|all|both|other|our)\s+)*(?:reviewers?\b|rev\.?\s*\d|r?\d{1,2}(?![A-Za-z0-9])|([A-Za-z0-9]{4})(?![A-Za-z0-9]))/i;
+    var JOINT_SALUTATION = /^\s*(?:and\s+|&\s*|as\s+well\s+as\s+)(?:(?:the|all|both|other)\s+)*(?:reviewers?\b|rev\.?\s*\d|r?\d{1,2}(?![A-Za-z0-9]))/i;
+    var triggers = [
+      { re: /(?:^|[.!?][ \t]+|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:dear|hi|hello)[ \t]+/gi, joint: JOINT_SALUTATION },
+      { re: /(?:^|\n)[ \t]*(#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:our[ \t]+)?(?:author[ \t]+)?(?:response|reply|answer|rebuttal)s?[ \t]+to[ \t]+(?:the[ \t]+)?/gi, line: true, joint: JOINT_SALUTATION },
+      { re: /\b(?:(?:we|i)[ \t]+(?:(?:sincerely|warmly|again|truly|deeply|also|would like to)[ \t]+)?thank|thank[ \t]+you|thanks)[ \t]*,?[ \t]*(?:again[ \t]*,?[ \t]*)?(?:dear[ \t]+)?/gi, edge: true, joint: JOINT_THANKS }
+    ];
+    triggers.forEach(function (tr) {
+      while ((m = tr.re.exec(text))) {
+        var r = reviewerRef(text, m.index + m[0].length, known);
+        if (!r || !visible(m.index + m[0].search(/\S/), r.end) || (tr.edge && !edge(r.start))) continue;
+        if (tr.line && !m[1]) {
+          /* A paragraph of its own: it starts its block ("see our\nresponse to
+             Reviewer X." is a wrapped sentence) and ends after the name. */
+          var lineAt = m.index + m[0].search(/\S/), own = blockOf(lineAt);
+          if (!own || own.start !== text.lastIndexOf('\n', lineAt - 1) + 1 ||
+              !/^[ \t]*(?:\*\*|__)?[ \t]*[:.!]?[ \t]*(?:\*\*|__)?[ \t]*(?:\n[ \t]*\n|\n?[ \t]*$)/.test(text.slice(r.after, r.after + 40))) continue;
+        }
+        var also = tr.joint.exec(text.slice(r.after, r.after + 60));
+        if (also && (!also[1] || known[also[1].toLowerCase()] || idShaped(also[1]))) continue;
+        if (caseCard(r) || isFor(me, r) || !sameScheme(me, r)) continue;
+        var theirs = tabs.filter(function (t) { return isFor(t.who, r); })[0];
+        card('This draft addresses another reviewer',
+          'The tab is named for ' + escHtml(self) + ', but this addresses ' + escHtml(label(r)) +
+            (theirs ? ', who has a draft of their own (' + escHtml(theirs.name) + ')' : '') +
+            '. An answer copied from another draft keeps its reviewer: change the ID, or rename the tab if it is the tab that is wrong.',
+          r.start, r.end);
+      }
+    });
+  }
+
+  /* Explicit pointers into our answer to another reviewer: check each
+     pointed-to label against the destination draft's labelledParts. */
+  var labelCache = Object.create(null);
+  function targetLabels(r) {
+    var key = r.id ? 'i:' + r.id : 'n:' + r.num;
+    if (Object.prototype.hasOwnProperty.call(labelCache, key)) return labelCache[key];
+    var theirs = tabs.filter(function (t) { return isFor(t.who, r); });
+    if (!theirs.length || theirs.some(function (t) { return typeof t.text !== 'string'; })) {
+      return (labelCache[key] = null);
+    }
+    var list = [], has = Object.create(null);
+    theirs.forEach(function (t) {
+      labelledParts(t.text.replace(/\r\n?/g, '\n').trim()).forEach(function (p) {
+        if (!has[p.label]) { has[p.label] = true; list.push(p.label); }
+      });
+    });
+    return (labelCache[key] = list.length ? { theirs: theirs, list: list, has: has } : null);
+  }
+  findAnswerPointers(text, known).forEach(function (ptr) {
+    if (!visible(ptr.start, ptr.end) || isFor(me, ptr.ref)) return;
+    var target = targetLabels(ptr.ref);
+    if (!target) return;
+    var shown = target.list.slice(0, 8).join(', ') + (target.list.length > 8 ? ', \u2026' : '');
+    var dest = escHtml(target.theirs[0].name) + (target.theirs.length > 1 ? ' and its other drafts' : '');
+    var verb = target.theirs.length > 1 ? ' label their parts ' : ' labels its parts ';
+    ptr.items.forEach(function (pt) {
+      if (target.has[pt.label]) return;
+      card('Pointer to a point the other draft does not have',
+        'This points to ' + escHtml(pt.label) + ' in our answer to ' + escHtml(label(ptr.ref)) + ', but ' +
+          dest + verb + escHtml(shown) + '. If that answer moved or was renumbered, update the pointer.',
+        pt.start, pt.end);
+    });
   });
   issues.sort(function (a, b) { return a.start - b.start; });
   return issues;
@@ -5684,6 +6371,123 @@ function looseFenceRanges(text) {
   return out;
 }
 
+/* Find sentences within each Markdown leaf so list items and table cells
+   never run together. Offsets refer to the draft as typed. */
+function leadOf(text) { return text.length - text.replace(/^\s+/, '').length; }
+var PROMISE_ACTION = '(?:add|include|clarify|revise|discuss|move|release|report|expand|correct|update|incorporate|fix|remove|rewrite|cite|publish|provide|rename|rephrase|document|replace|upload|modify|state|proofread)';
+var PROMISE_EDIT = '(?:added|included|clarified|revised|discussed|moved|released|reported|expanded|corrected|updated|incorporated|fixed|removed|rewritten|cited|published|provided|renamed|rephrased|documented|replaced|uploaded|modified|stated|proofread)';
+var PROMISE_VERSION = '(?:(?:revised|final|updated|camera[- ]ready) (?:version|paper|manuscript|draft|submission)|revision|camera[- ]ready)';
+var PROMISE_ADVERB = '(?:(?:also|now|further|explicitly|carefully|clearly|already|accordingly|thoroughly) )*';
+var PROMISE_FUTURE = new RegExp("\\bwe(?: will|['’]ll) " + PROMISE_ADVERB + PROMISE_ACTION + '\\b', 'i');
+var PROMISE_PAST = new RegExp("\\bwe(?: have|['’]ve) " + PROMISE_ADVERB + PROMISE_EDIT + '\\b', 'i');
+var PROMISE_PASSIVE = new RegExp('\\bwill ' + PROMISE_ADVERB + 'be ' + PROMISE_EDIT + '\\b', 'i');
+var PROMISE_IN_VERSION = new RegExp('\\bin (?:the|our) (?:final|camera[- ]ready) (?:version|paper|manuscript|draft|submission),? we ' + PROMISE_ADVERB + PROMISE_ACTION + '\\b', 'i');
+var PROMISE_VERSION_NOW = new RegExp('\\b(?:the|our) ' + PROMISE_VERSION + ' now (?:includes|contains|explains|discusses|reports|clarifies|provides|lists|describes|cites)\\b', 'i');
+var PROMISE_IN_REVISION = new RegExp('\\b' + PROMISE_VERSION + '\\b', 'i');
+var PROMISE_PART = '(?:paper|manuscript|draft|appendi(?:x|ces)|supplement(?:ary)?|main text|(?:figures?|tables?|fig\\.?) (?=\\d)|(?:sub)?sections?|sec\\.?|paragraph|caption|footnote|repository|readme|codebase|abstract|introduction|typos?|wording|writing)';
+var PROMISE_PAPER = new RegExp('\\b' + PROMISE_PART + '\\b', 'i');
+var PROMISE_DESTINATION = new RegExp('\\b(?:in|into|to|throughout|under) (?:the |our |this )?(?:(?:main|new|corresponding) )?' + PROMISE_PART + '\\b', 'i');
+var PROMISE_MATERIAL = /\b(?:details?|discussions?|explanations?|clarifications?|descriptions?|definitions?|citations?|references?|results?|comparisons?|experiments?|ablations?|baselines?|analysis|analyses|limitations?|proofs?|plots?|figures?|tables?|pseudocode|code|scripts?|datasets?|weights|notation|terminology|derivations?|seed sweep)\b/i;
+function promiseKind(sentence) {
+  var s = sentence.replace(/\s+/g, ' ').replace(/\*\*|__/g, '');
+  /* A proposed edit, a hypothetical and a demonstration in this reply can
+     all use exactly the same verbs as a commitment to the manuscript. */
+  if (/\?|\b(?:if|unless|whether|suppose|imagine|depending on|provided (?:that|with)|might|maybe|hypothetically|not sure|uncertain|doubt|deny|unlikely)\b|\b(?:that|which)\s*$/i.test(s) ||
+      /\b(?:below|here|(?:this|next|new|follow[- ]up) (?:author )?(?:reply|response|comment|rebuttal)|(?:following|next) table|in (?:a |our )?future work)\b/i.test(s)) return '';
+  if (PROMISE_IN_VERSION.test(s)) return 'will';
+  if (PROMISE_VERSION_NOW.test(s)) return 'done';
+  var revision = PROMISE_IN_REVISION.test(s);
+  var passive = PROMISE_PASSIVE.exec(s);
+  if (passive && (revision || s.slice(passive.index + passive[0].length).trim().search(PROMISE_DESTINATION) === 0)) return 'will';
+  if (/\b(?:code|scripts?|weights|dataset|artifacts?) will be (?:publicly )?(?:released|published)\b/i.test(s)) return 'will';
+  var future = PROMISE_FUTURE.exec(s), verb = future || PROMISE_PAST.exec(s);
+  if (!verb) return '';
+  /* "We will" can be embedded in someone else's question or an author's
+     uncertainty. Prefer a main clause, also after a revision preamble. */
+  var before = s.slice(0, verb.index).trim();
+  if (before && !/(?:[,;:*\u2013\u2014]|\b(?:and|but|so|therefore|thus|version|revision|manuscript|paper|camera[- ]ready))$/i.test(before)) return '';
+  /* Read the object before its modifiers: adding noise to a dataset and
+     adding the dataset to an appendix are quite different operations. */
+  var after = s.slice(verb.index + verb[0].length);
+  var destination = PROMISE_DESTINATION.test(after) || before.search(PROMISE_DESTINATION) === 0;
+  var object = after.split(/\b(?:in|of|to|on|with|after|and|as|for|by|before|from|but|that|at|which|while)\b|[,;:.!?]/i)[0];
+  if (future) return revision || destination || PROMISE_PAPER.test(object) || PROMISE_MATERIAL.test(object) ? 'will' : '';
+  /* "We have discussed/provided X in the paper" may describe the original
+     submission. These verbs need explicit evidence of a revision. */
+  if (revision) return 'done';
+  if (/\b(?:included|discussed|provided|reported|stated|documented)\b$/i.test(verb[0]) && !/\bnow\b/i.test(verb[0])) return '';
+  if (destination || PROMISE_PAPER.test(object)) return 'done';
+  return '';
+}
+
+function promisesIn(text, spans) {
+  if (typeof text !== 'string' || !/\b(?:we|will|now)\b/i.test(text)) return [];
+  var lead = leadOf(text), posted = text.trim(), source = posted, offsets = null;
+  /* Marked normalizes CRLF before lexing. Imported drafts can still have
+     the original line endings, including inside the sentence we select. */
+  if (posted.indexOf('\r') >= 0) {
+    offsets = [];
+    for (var i = 0; i < posted.length; i++) {
+      offsets.push(i);
+      if (posted[i] === '\r' && posted[i + 1] === '\n') i++;
+    }
+    offsets.push(posted.length);
+    source = posted.replace(/\r\n?/g, '\n');
+  }
+  var model = collectMarkedRanges(source);
+  if (!model) return [];
+  var math = spans && !offsets ? spans.map(function (sp) {
+    return { start: sp.start - lead, end: sp.end - lead, recovered: sp.recovered };
+  }) : analyze(source).spans;
+  var mask = proseMask(source, math, model), displayEnds = Object.create(null), out = [];
+  /* An author can put a sentence's final period inside a display formula.
+     Keep the closing delimiter with it and the next prose sentence separate. */
+  math.forEach(function (sp) {
+    if (!sp.recovered && /[.!?]\s*\$\$$/.test(source.slice(sp.start, sp.end))) displayEnds[sp.end] = true;
+  });
+  /* Words on either side of a visible link label can form a commitment.
+     Its Markdown delimiters and destination contribute no words. */
+  model.hidden.forEach(function (r) {
+    for (var i = r.start; i < r.end; i++) mask[i] = 2;
+  });
+  model.ranges.forEach(function (r) {
+    if (r.type === 'del') for (var i = r.start; i < r.end; i++) mask[i] = 1;
+  });
+  model.leaves.forEach(function (leaf) {
+    if (!leaf.exact || leaf.dropped || leaf.html) return;
+    var raw = source.slice(leaf.start, leaf.end);
+    /* Preserve positions, and leave a non-word barrier so hidden words
+       cannot complete a trigger or supply the manuscript context. */
+    var chars = raw.split('');
+    for (var j = 0; j < chars.length; j++) {
+      var skip = mask[leaf.start + j];
+      if (skip) chars[j] = skip === 2 ? ' ' : '\x01';
+    }
+    var visible = chars.join('').replace(/"[^"]*(?:"|$)|“[^”]*(?:”|$)|‘[\s\S]*?(?:’(?!\w)|$)|(?:^|[\s(])'(?=\S)[\s\S]*?(?:'(?!\w)|$)/g, function (quote) {
+      return quote.replace(/[^\s]/g, '\x01');
+    });
+    function consider(a, b) {
+      var kind = promiseKind(visible.slice(a, b));
+      if (!kind) return;
+      while (a < b && /\s/.test(raw[a])) a++;
+      while (b > a && /\s/.test(raw[b - 1])) b--;
+      a += leaf.start; b += leaf.start;
+      var start = lead + (offsets ? offsets[a] : a), end = lead + (offsets ? offsets[b] : b);
+      out.push({ start: start, end: end, kind: kind, sentence: text.slice(start, end) });
+    }
+    var from = 0, stops = /[.?!]+[)"'”’\]*_]*(?=\s|$)|\$\$(?=\s+[A-Z])|\.(?=We\b)| {2,}\n|\n(?=[ \t]*\[(?:[Aa]uthors?|[Rr]eviewer)\]\s*:)/g, stop;
+    while ((stop = stops.exec(raw))) {
+      if (stop[0] === '$$' ? !displayEnds[leaf.start + stops.lastIndex] : mask[leaf.start + stop.index]) continue;
+      if (raw[stop.index] === '.' && /\b(?:e\.g|i\.e|sec|secs|fig|figs|eq|eqs|tab|dr|prof|vs|et al)$/i.test(raw.slice(Math.max(0, stop.index - 7), stop.index)) &&
+          !/^\s+(?:We|The|Our|In|This|It|These)\b/.test(raw.slice(stops.lastIndex))) continue;
+      consider(from, stops.lastIndex);
+      from = stops.lastIndex;
+    }
+    consider(from, raw.length);
+  });
+  return out;
+}
+
 /* {hints, saves}: one hint per phrase, {kind: 'filler' | 'name', text, say,
    at: [{start, end}], saves}; `saves` in total, an estimate. `spans`: the
    formulas analyze found (computed here when not given). A name is a run of
@@ -6042,6 +6846,10 @@ var wordingList = document.getElementById('wordingList');
 var sectionsBox = document.getElementById('sectionsBox');
 var sectionsSum = document.getElementById('sectionsSum');
 var sectionsList = document.getElementById('sectionsList');
+var promisesBox = document.getElementById('promisesBox');
+var promisesSum = document.getElementById('promisesSum');
+var promisesList = document.getElementById('promisesList');
+var copyPromises = document.getElementById('copyPromises');
 
 /* Listeners on the editor go through onEditor, so that a fresh textarea (a
    draft switch puts one in, see openDraft) gets every one of them. */
@@ -6152,7 +6960,7 @@ var FS_STEPS = { fsEditor: 1, zoomPreview: 10 };
    not stay on after switching to another. */
 var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, ownLimit: 5000, sync: true, venue: '',
   compact: compactDefaults(), compactOpen: false, wordingOpen: false, sectionsOpen: false, spellcheck: false,
-  view: 'preview', skeletonQuotes: true };
+  promisesOpen: false, view: 'preview', skeletonQuotes: true };
 
 function applyPrefs() {
   document.documentElement.setAttribute('data-theme', prefs.theme === 'dark' ? 'dark' : 'light');
@@ -6172,6 +6980,7 @@ function applyPrefs() {
   compactBox.open = !!prefs.compactOpen;
   wordingBox.open = !!prefs.wordingOpen;
   sectionsBox.open = !!prefs.sectionsOpen;
+  promisesBox.open = !!prefs.promisesOpen;
   spellBox.checked = !!prefs.spellcheck;
   ta.spellcheck = !!prefs.spellcheck;
   refreshFind(); /* the editor's font size moves the text under find's boxes */
@@ -6495,6 +7304,15 @@ var EXAMPLE = [
 
 /* ---- rendering ---- */
 var renderBusy = false, renderQueued = false;
+var printRoot = null, printQueued = false;
+
+/* The preview, table import and printed comments share the input jax. Only
+   its owner may reset definitions or start another typeset. */
+function finishRender() {
+  renderBusy = false;
+  if (printQueued && window.MJ_READY) renderPrint();
+  else if (renderQueued) { renderQueued = false; renderPreview(); }
+}
 
 function setMathStatus(text, kind) {
   mjStatus.textContent = text;
@@ -6652,8 +7470,7 @@ function renderPreview() {
 
   var done = function () {
     scroller.scrollTop = keep;
-    renderBusy = false;
-    if (renderQueued) { renderQueued = false; renderPreview(); }
+    finishRender();
   };
 
   clearOldMath(target); /* MathJax must forget old items before their DOM is removed. */
@@ -6718,6 +7535,9 @@ if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then =
 
 /* ---- stats + lint ---- */
 function fmt(n) { return n.toLocaleString('en-US'); }
+function characterStat(chars, limit) {
+  return (limit > 0 ? fmt(chars) + ' / ' + fmt(limit) : fmt(chars)) + ' characters';
+}
 
 function updateAll() {
   var text = ta.value;
@@ -6733,7 +7553,7 @@ function updateAll() {
   var words = (text.trim().match(/\S+/g) || []).length;
   var limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
 
-  charStat.textContent = limit > 0 ? fmt(chars) + ' / ' + fmt(limit) + ' characters' : fmt(chars) + ' characters';
+  charStat.textContent = characterStat(chars, limit);
   var pct = limit > 0 ? Math.min(100, (chars / limit) * 100) : 0;
   charFill.style.width = pct + '%';
   charChip.classList.toggle('over', limit > 0 && chars > limit);
@@ -6746,6 +7566,7 @@ function updateAll() {
   renderIssues();
   renderWording(text, res.spans);
   renderSections(text, chars);
+  renderPromises();
   renderReview(); /* which points the draft labels or quotes */
   refreshFind(); /* a draft switch puts in another text */
   scheduleCompaction();
@@ -6758,7 +7579,6 @@ var wordingShown = null, wordingHintsShown = [];
 /* Both panels read the comment as posted (trimmed, as the preview shows
    it: an indented first line is no code block there), and point into the
    editor's text. */
-function leadOf(text) { return text.length - text.replace(/^\s+/, '').length; }
 function renderWording(text, spans) {
   var lead = leadOf(text);
   var r = wordingHints(text.trim(), spans.map(function (sp) { return { start: sp.start - lead, end: sp.end - lead, recovered: sp.recovered }; })), html = '';
@@ -6809,16 +7629,18 @@ function renderSections(text, total) {
   sectionsList.innerHTML = html;
 }
 
-/* Reviewer IDs in the open draft against the other tabs' names
-   (reviewerIssues), read as posted. The cards depend on those names, so
-   whatever changes the list (a rename or deletion here or in another window,
-   an import, a list merged on saving) calls refreshReviewerCards. */
+/* Reviewer IDs in the open draft against the other tabs (reviewerIssues),
+   read as posted. A draft whose text is not known yet (still loading) is not
+   checked against. The cards depend on the other tabs too, so whatever
+   changes them (a rename or deletion here or in another window, an import,
+   a list merged on saving, a text read in the background) calls
+   refreshReviewerCards. */
 function reviewerCards(text, spans) {
   var self = draftReady ? draftById(draftMeta.active) : null;
   if (!self || !text.trim()) return [];
   var lead = leadOf(text);
   var others = draftMeta.list.filter(function (d) { return d.id !== self.id; }).map(function (d) {
-    return { name: d.name };
+    return { name: d.name, text: knownDraftText(d.id) };
   });
   return reviewerIssues(text.trim(), self.name, others, spans.map(function (sp) {
     return { start: sp.start - lead, end: sp.end - lead, recovered: sp.recovered };
@@ -6828,9 +7650,55 @@ function reviewerCards(text, spans) {
     return iss;
   });
 }
+/* Only changed bodies need another pass through Marked. An unknown body
+   stays distinct from an empty one, including during background reads. */
+var promisesByDraft = Object.create(null), promisesHtml = '', pendingPromise = null;
+function renderPromises() {
+  var next = Object.create(null), html = '', count = 0, checklist = [];
+  if (!draftReady) return checklist;
+  draftMeta.list.forEach(function (d) {
+    var text = knownDraftText(d.id);
+    if (text !== null) text = text.replace(/\r\n?/g, '\n'); /* textarea offsets when opened */
+    var entry = promisesByDraft[d.id];
+    if (!entry || entry.text !== text) {
+      entry = { text: text, rows: promisesIn(text, lastAnalysis && analyzedText === text ? lastAnalysis.spans : null) };
+    }
+    next[d.id] = entry;
+    if (text !== null && !entry.rows.length) return;
+    html += '<section aria-label="' + escAttr(d.name) + '"><h3>' + escHtml(d.name) + '</h3>';
+    if (text === null) html += '<p class="compact-note">Not checked</p>';
+    entry.rows.forEach(function (p, i) {
+      var sentence = p.sentence.replace(/\s+/g, ' ');
+      html += '<button type="button" class="section" data-draft="' + escAttr(d.id) + '" data-promise="' + i +
+        '" title="' + escAttr(sentence) + '"><span class="name">' + escHtml(sentence) +
+        '</span><span class="gain">' + p.kind + '</span></button>';
+      if (p.kind === 'will') checklist.push('- [ ] ' + sentence + ' (' + d.name + ')');
+    });
+    count += entry.rows.length;
+    html += '</section>';
+  });
+  promisesByDraft = next;
+  if (!html) html = '<div class="lint-empty">No promises found in these drafts.</div>';
+  if (promisesHtml !== html) { promisesList.innerHTML = html; promisesHtml = html; }
+  promisesSum.textContent = count + (count === 1 ? ' promise' : ' promises');
+  promisesSum.classList.toggle('zero', !count);
+  copyPromises.disabled = !checklist.length;
+  return checklist;
+}
+function selectPromise(target) {
+  if (ta.value !== target.text) {
+    renderPromises();
+    showToast('The draft has changed since this sentence was listed.');
+    return;
+  }
+  ta.focus();
+  ta.setSelectionRange(target.row.start, target.row.end);
+  revealOffset(target.row.start);
+}
 function refreshReviewerCards() {
   if (lastAnalysis && analyzedText === ta.value) renderIssues();
   renderReview(); /* its note compares the review's reviewer with the tab's name */
+  renderPromises();
 }
 
 /* The analyzer's hazards for analyzedText plus what MathJax reported in the
@@ -6913,6 +7781,11 @@ function startBodyLoad(id) {
     if (!res.failed && id !== draftMeta.active) draftTexts[id] = typeof res.value === 'string' ? res.value : '';
     /* Bring the store up to date with a local copy it never got. */
     if (res.pending && id !== draftMeta.active && typeof res.value === 'string') storeDraft(res.value, key);
+    /* Its text is known now: the Promises panel and the pointer cards read it. */
+    if (id !== draftMeta.active) {
+      if (draftReady) renderPromises();
+      refreshReviewerCards();
+    }
     return res;
   });
   return bodyLoads[id];
@@ -7066,13 +7939,14 @@ function renderDraftTabs() {
    whose text has not been read yet (or could not be) is read first, with the
    editor locked meanwhile. */
 function openDraft(id) {
+  pendingPromise = null;
   /* Dialogs work on the draft being left: History's versions, Split's parts,
      the table about to be inserted. */
   if (historyDialog && !historyDialog.hidden) closeHistory();
   restoreSeq++; /* a restore still checking the store belongs to the draft left */
   if (splitDialog && !splitDialog.hidden) closeSplit();
   if (tableDialog && tableDialog.open) tableDialog.close();
-  if (tableOffer) { pastedTable = null; tableOffer.hidden = true; } /* an offer to convert a paste into the draft left */
+  if (tableOffer) { pastedContent = null; tableOffer.hidden = true; } /* an offer to convert a paste into the draft left */
   flushReview(); /* the review in the box belongs to the draft left */
   var local = fallbackGet(keyOfDraft(id)); /* read before `id` becomes the open draft */
   var text = typeof local === 'string' ? local : (draftTexts[id] || '');
@@ -7110,6 +7984,7 @@ function unlockDraft(id, res) {
   ta.placeholder = TA_PLACEHOLDER;
   updateAll();
   renderPreview();
+  if (pendingPromise) { selectPromise(pendingPromise); pendingPromise = null; }
 }
 
 function switchDraft(id) {
@@ -7267,6 +8142,12 @@ function takeInList(json) {
 }
 window.addEventListener('storage', function (e) {
   if (e.key === DRAFTS_KEY) takeInList(e.newValue);
+  /* Another window saved a draft's text: the Promises panel reads every
+     draft, a pointer card the drafts other than the open one. */
+  else if (draftReady && draftMeta.list.some(function (d) { return e.key === keyOfDraft(d.id); })) {
+    renderPromises();
+    if (e.key !== draftKey) refreshReviewerCards();
+  }
 });
 /* A page restored from the back/forward cache got no storage events while it
    was away: it takes in the list as this browser stores it now, so its open
@@ -7370,6 +8251,12 @@ var memHistory = {};     /* without readable localStorage: this window's version
 var historyNewest = {};  /* id -> time of its newest version, so the autosave need not read the list */
 var historyShown = [];   /* the versions the dialog lists */
 var historyFor = null;   /* and the draft they belong to */
+var historyVersions = document.getElementById('historyVersions');
+var compareView = document.getElementById('compareView');
+var compareSource = document.getElementById('compareSource');
+var comparePaste = document.getElementById('comparePaste');
+var compareDiff = document.getElementById('compareDiff');
+var compareSummary = document.getElementById('compareSummary');
 
 function readHistory(id) {
   var list = memHistory[id] || [];
@@ -7552,6 +8439,9 @@ function versionTime(at) {
 /* Redrawn while open (a rename, a version from another window), the list
    keeps the focus on the same version's button, or on the dialog. */
 function renderHistory() {
+  /* Keep the version picker bound to the texts the author saw on opening
+     Compare. A new version in another window can move every list index. */
+  if (!compareView.hidden) return;
   var el = document.activeElement, keep = null;
   if (el && historyList.contains(el)) {
     var attr = el.hasAttribute('data-restore') ? 'data-restore' : el.hasAttribute('data-copy-version') ? 'data-copy-version' : null;
@@ -7605,10 +8495,106 @@ function openHistory() {
 function closeHistory() {
   if (historyDialog.hidden) return;
   historyDialog.hidden = true;
+  discardPrint();
+  leaveCompare();
   setModal(historyDialog, false);
   var btn = draftTools.querySelector('.dtool[data-act="history"]');
   (btn || ta).focus();
 }
+
+function openCompare() {
+  if (historyDialog.hidden || historyFor !== draftMeta.active) return;
+  historyVersions.hidden = true;
+  compareView.hidden = false;
+  historyTitle.textContent = 'Compare “' + draftById(historyFor).name + '”';
+  function group(label) {
+    var g = document.createElement('optgroup');
+    g.label = label;
+    compareSource.appendChild(g);
+    return g;
+  }
+  compareSource.textContent = '';
+  if (historyShown.length) {
+    var versions = group('Earlier versions');
+    historyShown.forEach(function (v, i) {
+      versions.appendChild(new Option(versionTime(v.at) + ' · ' + v.why, 'version-' + i));
+    });
+  }
+  compareSource.add(new Option('Pasted text', 'paste'));
+  var others = draftMeta.list.filter(function (d) { return d.id !== historyFor; });
+  if (others.length) {
+    var drafts = group('Other drafts');
+    others.forEach(function (d) {
+      var opt = new Option(d.name, 'draft-' + d.id);
+      function available() {
+        opt.disabled = knownDraftText(d.id) === null;
+        opt.textContent = d.name + (opt.disabled ? ' (text unavailable)' : '');
+      }
+      available();
+      drafts.appendChild(opt);
+      if (opt.disabled && bodyLoads[d.id]) bodyLoads[d.id].then(available);
+    });
+  }
+  drawCompare();
+  compareSource.focus();
+}
+
+function drawCompare() {
+  if (historyDialog.hidden || compareView.hidden || historyFor !== draftMeta.active) return;
+  var source = compareSource.value, pasting = source === 'paste', historical = source.indexOf('version-') === 0;
+  document.getElementById('comparePasteLabel').hidden = !pasting;
+  var base = knownDraftText(historyFor);
+  if (base !== null && !ta.readOnly) base = ta.value; /* compare what the author sees in the editor */
+  var other = pasting ? comparePaste.value : null, direction;
+  if (historical) {
+    other = historyShown[Number(source.slice(8))].text;
+    direction = 'Earlier version → current draft';
+  } else if (pasting) {
+    direction = 'Current draft → pasted text';
+  } else {
+    var d = draftById(source.slice(6));
+    if (d) other = knownDraftText(d.id);
+    direction = 'Current draft → “' + (d ? d.name : 'other draft') + '”';
+  }
+  compareDiff.textContent = '';
+  if (base === null || other === null) {
+    compareSummary.textContent = 'The text of this draft is unavailable for comparison.';
+    return;
+  }
+  var details = {}, counts = { del: 0, ins: 0 }, fragment = document.createDocumentFragment();
+  var runs = historical ? diffWords(other, base, details) : diffWords(base, other, details);
+  runs.forEach(function (run) {
+    if (run.op === 'same') fragment.appendChild(document.createTextNode(run.text));
+    else {
+      var mark = document.createElement(run.op);
+      mark.textContent = run.text;
+      fragment.appendChild(mark);
+      counts[run.op] += (run.text.match(DIFF_WORDS_ONLY) || []).length;
+    }
+  });
+  compareDiff.appendChild(fragment);
+  function words(n) { return fmt(n) + (n === 1 ? ' word' : ' words'); }
+  compareSummary.textContent = direction + ' · ' + (base === other ? 'Identical texts.'
+    : words(counts.del) + ' deleted, ' + words(counts.ins) + ' inserted.') +
+    (details.mode === 'lines' ? ' Large edit shown by line. Counts include every word in changed lines.'
+      : details.mode === 'replacement' ? ' Large edit shown as one replacement. Counts include both full texts.' : '');
+}
+
+function leaveCompare() {
+  compareView.hidden = true;
+  historyVersions.hidden = false;
+  comparePaste.value = '';
+  compareSource.textContent = compareDiff.textContent = compareSummary.textContent = '';
+}
+
+document.getElementById('compareBtn').addEventListener('click', openCompare);
+compareSource.addEventListener('change', drawCompare);
+comparePaste.addEventListener('input', drawCompare);
+document.getElementById('compareBack').addEventListener('click', function () {
+  leaveCompare();
+  renderHistory();
+  document.getElementById('compareBtn').focus();
+});
 
 /* A restore is one more edit: one undo brings the text back, and the text
    it replaces is kept as a version first. */
@@ -7690,17 +8676,17 @@ function fileSafe(name) {
   return name.replace(/[\\\/:*?"<>|\u0000-\u001f]+/g, '-').replace(/^[\s.]+|[\s.]+$/g, '') || 'draft';
 }
 
-/* Every draft whose text is known; the others are named and left out only
-   if the author agrees. */
-/* Export only reads. The drafts are this window's list merged, in a private
-   copy, with the one stored here, which can name drafts another window added
-   since: nothing is adopted or saved on the way. */
-function exportAllDrafts() {
-  if (!draftReady) return;
+/* Export and Print read a private copy of the list, including drafts another
+   window has just added, without adopting that list or flushing any edits. */
+function draftsForOutput() {
   var meta = parseDraftMeta(JSON.stringify(draftMeta)), stored = storedValue(DRAFTS_KEY);
   if (typeof stored === 'string') meta = mergeDraftMeta(meta, parseDraftMeta(stored), Date.now());
+  return meta.list;
+}
+function exportAllDrafts() {
+  if (!draftReady) return;
   var drafts = [], missing = [];
-  meta.list.forEach(function (d) {
+  draftsForOutput().forEach(function (d) {
     var text = knownDraftText(d.id);
     if (text === null) missing.push('“' + d.name + '”');
     else drafts.push({ name: d.name, text: text });
@@ -7723,6 +8709,89 @@ function exportOpenDraft() {
   if (text === null) { showToast('This draft has not loaded yet: try again in a moment'); return; }
   if (!downloadFile(fileSafe(d ? d.name : 'draft') + '.md', text, 'text/markdown')) showToast('The browser did not allow the download');
 }
+
+function discardPrint() {
+  var had = !!printRoot;
+  printQueued = false;
+  document.body.classList.remove('printing-drafts');
+  if (printRoot) printRoot.remove();
+  printRoot = null;
+  if (had) renderPreview();
+}
+
+function renderPrint() {
+  var root = printRoot, papers = root.querySelectorAll('.printed-draft > .paper'), at = 0;
+  printQueued = false;
+  renderBusy = true;
+  /* Detach the open preview's MathItems first so typesetting a printed draft's
+     \label cannot overwrite a forward \eqref in the preview. */
+  clearOldMath(preview);
+  function next() {
+    /* Closing History or switching drafts cancels even a typeset in flight. */
+    if (root !== printRoot) return;
+    if (at === papers.length) return document.fonts && document.fonts.ready;
+    var paper = papers[at++];
+    resetTeXState();
+    return MathJax.typesetPromise([paper]).then(function () {
+      /* Take this comment's math out of MathJax's document right away so a
+         later comment's \label cannot overwrite its forward \eqref. */
+      clearOldMath(paper);
+      return next();
+    });
+  }
+  Promise.resolve().then(next).then(function () {
+    clearOldMath(root); /* release any MathItems left on cancellation */
+    if (root !== printRoot) return;
+    document.body.classList.add('printing-drafts');
+    window.print();
+  }).catch(function (err) {
+    clearOldMath(root);
+    if (root !== printRoot) return;
+    discardPrint();
+    showToast('Could not print the drafts: ' + (err.message || err));
+  }).then(finishRender);
+}
+
+function printDrafts(all) {
+  if (historyDialog.hidden || historyFor !== draftMeta.active || printRoot) return;
+  var drafts = all ? draftsForOutput() : [draftById(historyFor)];
+  var root = document.createElement('div'), missing = [];
+  root.id = 'printDrafts';
+  var limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
+  try {
+    drafts.forEach(function (d) {
+      var text = knownDraftText(d.id);
+      if (text === null) { missing.push('“' + d.name + '”'); return; }
+      text = text.trim();
+      var article = document.createElement('article');
+      article.className = 'printed-draft';
+      article.innerHTML = '<div class="print-heading"><h1>' + escHtml(d.name) + '</h1><p>' +
+        characterStat(text.length, limit) + '</p></div><div class="paper">' + renderOpenReviewMarkdown(text) + '</div>';
+      root.appendChild(article);
+    });
+  } catch (err) {
+    showToast('Could not render the drafts for printing: ' + (err.message || err));
+    return;
+  }
+  if (missing.length) {
+    var note = document.createElement('p');
+    note.className = 'print-omitted';
+    note.textContent = 'Left out because the text has not loaded: ' + missing.join(', ') + '.';
+    if (!root.firstChild) { showToast(note.textContent); return; }
+    root.insertBefore(note, root.firstChild);
+  }
+  document.body.appendChild(root);
+  printRoot = root;
+  printQueued = true;
+  showToast(window.MJ_READY ? 'Preparing the rendered drafts for printing…' : 'Waiting for MathJax before printing…');
+  if (window.MJ_READY && !renderBusy) renderPrint();
+}
+
+document.getElementById('printOneBtn').addEventListener('click', function () { printDrafts(false); });
+document.getElementById('printAllBtn').addEventListener('click', function () { printDrafts(true); });
+window.addEventListener('afterprint', function () {
+  if (document.body.classList.contains('printing-drafts')) discardPrint();
+});
 
 /* Import only adds: each draft of the file whose text no draft here has yet
    becomes a new tab, under a name no draft has yet. It never replaces,
@@ -7950,6 +9019,26 @@ sectionsList.addEventListener('click', function (e) {
   ta.focus();
   ta.setSelectionRange(at, at);
   revealOffset(at);
+});
+
+promisesBox.addEventListener('toggle', function () {
+  prefs.promisesOpen = promisesBox.open;
+  savePrefs();
+});
+promisesList.addEventListener('click', function (e) {
+  var button = e.target.closest('[data-promise]');
+  if (!button) return;
+  var id = button.getAttribute('data-draft'), entry = promisesByDraft[id];
+  if (!entry || !draftById(id)) return;
+  var target = { text: entry.text, row: entry.rows[Number(button.getAttribute('data-promise'))] };
+  switchDraft(id);
+  if (draftMeta.active !== id) return;
+  if (ta.readOnly) pendingPromise = target; /* unlockDraft checks the text it actually read */
+  else selectPromise(target);
+});
+copyPromises.addEventListener('click', function () {
+  var lines = renderPromises(); /* include edits and renames since the last analysis */
+  if (lines.length) copyText(lines.join('\n'), 'Copied the revision checklist', copyPromises);
 });
 
 /* ---- the review each draft answers ----
@@ -8837,7 +9926,9 @@ var tableWarnings = document.getElementById('tableWarnings');
 var tablePad = document.getElementById('tablePad');
 var insertTableBtn = document.getElementById('insertTable');
 var tableOffer = document.getElementById('tableOffer');
-var tableResult = null, tableTarget = null, pastedTable = null, dialogHtmlTable = null;
+var convertPaste = document.getElementById('convertPaste');
+var pasteQuestion = document.getElementById('pasteQuestion');
+var tableResult = null, tableTarget = null, pastedContent = null, dialogHtmlTable = null;
 
 function clipboardHtmlTable(data, text) {
   var html = data && data.getData('text/html');
@@ -8903,52 +9994,75 @@ insertTableBtn.addEventListener('click', function () {
   var prefix = before + left + tableResult.markdown;
   tableDialog.close(); /* the editor must be focusable for its undo transaction */
   setSourceText(prefix + right + after, prefix.length);
-  pastedTable = null;
+  pastedContent = null;
   tableOffer.hidden = true;
   afterSourceChange();
   showToast('Table inserted. ' + UNDO_HINT + ' undoes it.');
 });
 
-function looksLikeTablePaste(text) {
-  if (/\\begin\s*\{(?:tabular\*?|tabularx|array)\}/.test(text)) return true;
-  var lines = text.replace(/^\n+|\n+$/g, '').split('\n');
-  if (lines.length < 2) return false;
-  var tabs = lines[0].split('\t').length - 1;
-  if (tabs && lines.every(function (s) { return s.split('\t').length === tabs + 1; })) return true;
-  return lines.filter(function (s) { return /&.*\\\\/.test(s); }).length >= 2;
-}
-
 /* Let the native paste happen, including its undo entry. The offer belongs
    to that exact draft and range and expires on the next change. */
 onEditor('paste', function (e) {
-  var text = e.clipboardData && e.clipboardData.getData('text/plain').replace(/\r\n?/g, '\n');
-  pastedTable = null;
+  pastedContent = null;
   tableOffer.hidden = true;
-  if (ta.readOnly) return;
-  var htmlTable = clipboardHtmlTable(e.clipboardData, text);
-  if (!htmlTable && (!text || !looksLikeTablePaste(text))) return;
+  if (ta.readOnly || !e.clipboardData) return;
+  var text = e.clipboardData.getData('text/plain').replace(/\r\n?/g, '\n');
+  var html = e.clipboardData.getData('text/html');
+  var content = html && htmlToMarkdown(new DOMParser().parseFromString(html, 'text/html'), { pad: tablePad.checked, keepGrid: true });
+  var htmlTable = content && content.grid ? { grid: content.grid, text: text } : null;
+  /* Word also puts tabs between list markers and their text. Its explicit
+     HTML list identifies these rows even when the plain text resembles TSV. */
+  var tablePaste = htmlTable || (text && !(content && content.hasList) && looksLikeTablePaste(text));
+  var prose = tablePaste ? null : content;
+  if (!tablePaste && !prose) return;
+  if (prose) {
+    /* A partial paragraph selection can include the space that separates it
+       from the next word. The native text records those selection edges. */
+    if (prose.markdown && text.trim()) {
+      prose.markdown = text.replace(/\u00a0/g, ' ').replace(/\S[\s\S]*\S|\S/, function () { return prose.markdown; });
+    }
+    if (!prose.markdown || prose.markdown === text) {
+      if (prose.warnings.length) showToast(prose.warnings.map(function (w) { return w.message; }).join(' '));
+      return;
+    }
+  }
+  pasteQuestion.textContent = prose ? 'Convert the pasted formatting to Markdown?' : 'Convert the pasted table to Markdown?';
+  if (prose) {
+    convertPaste.removeAttribute('aria-haspopup');
+    convertPaste.removeAttribute('aria-controls');
+  } else {
+    convertPaste.setAttribute('aria-haspopup', 'dialog');
+    convertPaste.setAttribute('aria-controls', 'tableDialog');
+  }
   var start = ta.selectionStart;
-  pastedTable = {
-    draft: draftMeta.active, htmlTable: htmlTable,
+  pastedContent = {
+    draft: draftMeta.active, htmlTable: htmlTable, prose: prose,
     source: ta.value.slice(0, start) + text + ta.value.slice(text ? ta.selectionEnd : start),
     start: start, end: start + text.length
   };
   if (!text) tableOffer.hidden = false; /* HTML alone has no native text insertion to trigger input. */
 });
 onEditor('input', function () {
-  if (pastedTable && pastedTable.source !== ta.value) pastedTable = null;
-  tableOffer.hidden = !pastedTable;
+  if (pastedContent && pastedContent.source !== ta.value) pastedContent = null;
+  tableOffer.hidden = !pastedContent;
 });
-document.getElementById('convertPaste').addEventListener('click', function () {
-  if (pastedTable && pastedTable.draft === draftMeta.active && pastedTable.source === ta.value) {
-    openTableImport(pastedTable, ta.value.slice(pastedTable.start, pastedTable.end));
-  } else {
-    pastedTable = null;
-    tableOffer.hidden = true;
+convertPaste.addEventListener('click', function () {
+  var paste = pastedContent;
+  if (paste && !ta.readOnly && paste.draft === draftMeta.active && paste.source === ta.value) {
+    if (!paste.prose) {
+      openTableImport(paste, ta.value.slice(paste.start, paste.end));
+      return;
+    }
+    var placed = placeProsePaste(ta.value.slice(0, paste.start), paste.prose.markdown, ta.value.slice(paste.end));
+    setSourceText(placed.text, placed.caret);
+    afterSourceChange();
+    showToast(['Formatting converted.'].concat(paste.prose.warnings.map(function (w) { return w.message; })).join(' '));
   }
+  pastedContent = null;
+  tableOffer.hidden = true;
 });
 document.getElementById('dismissPaste').addEventListener('click', function () {
-  pastedTable = null;
+  pastedContent = null;
   tableOffer.hidden = true;
   ta.focus();
 });
@@ -8988,6 +10102,7 @@ storeGet(PREFS_KEY).then(function (v) {
       if (typeof p.compactOpen === 'boolean') restore('compactOpen', p.compactOpen);
       if (typeof p.wordingOpen === 'boolean') restore('wordingOpen', p.wordingOpen);
       if (typeof p.sectionsOpen === 'boolean') restore('sectionsOpen', p.sectionsOpen);
+      if (typeof p.promisesOpen === 'boolean') restore('promisesOpen', p.promisesOpen);
       if (typeof p.spellcheck === 'boolean') restore('spellcheck', p.spellcheck);
       if (p.view === 'preview' || p.view === 'review') restore('view', p.view);
       if (typeof p.skeletonQuotes === 'boolean') restore('skeletonQuotes', p.skeletonQuotes);
