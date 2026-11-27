@@ -390,20 +390,21 @@ When a call for papers changes, update the entry, its sources and the date toget
 ## Reviewer IDs across drafts
 
 `reviewerIssues(text, self, others, spans)` (pure, `tests/reviewers.test.js`) reads the open
-draft as posted against the tabs' names (`draftReviewer`: an ID after "Reviewer", a bare word
-with an ID's shape, a whole-word number) and the other drafts' texts (`others[i].text`, null
-while unknown). **Only what is unmistakable gets a card**: a salutation or a "Response to" line
-naming another reviewer anywhere, thanks with that reviewer as its object in the opening or
-closing block; an ID in other capitals than a tab's; a pointer (a cue such as "see" and points
-right after or before "Reviewer X") naming a point that reviewer's drafts never mention
-(`mentionsPoint`, any spelling). Mentions in passing, joint thanks ("Reviewers A and B"), text in
-quotation marks, quotes, code, tables without such a pattern, general tabs and comparisons across
-numbering schemes (ID against number) give nothing. The first version was broader and a Codex
-review found a dozen false cards (`reviews/2026-11-27/codex-review-38`); its sentences are the
-regression cases, so widen a pattern only with a near-miss test. The cards are advice without
-fixes and come from `renderIssues` (`reviewerCards`), not from `analyze`, so Fix all, compaction
-and the macro check never see them. They depend on the other tabs, so a rename, a deletion, an
-import, a list or text saved in another window and a background read call
+draft as posted against the tabs' names (`draftReviewer`: an ID-shaped word after "Reviewer", a
+bare ID-shaped word with a small letter, a whole-word number). **Only what is unmistakable gets
+a card**: a salutation naming another reviewer anywhere, a "Response to Reviewer X" heading or
+line of its own, thanks with that reviewer as its object (and no other reviewer named with it)
+in the opening or closing block; an ID that no tab spells so but one does in other capitals.
+The card selects the ID alone. Mentions in passing, joint thanks, text in quotation marks within
+its block, quotes, code, general tabs and comparisons across numbering schemes (ID against
+number) give nothing. Two Codex reviews (`reviews/2026-11-27/codex-review-38`,
+`codex-recheck-38`) found false cards in broader versions, which also checked pointers ("see our
+answer to Reviewer X, Q2") and IDs no tab has; both were dropped. Their sentences are the
+regression cases: widen a pattern only with a near-miss test, and bring pointers back only with
+a design that reads the other draft's parts, not its words. The cards are advice without fixes
+and come from `renderIssues` (`reviewerCards`), not from `analyze`, so Fix all, compaction and
+the macro check never see them. They depend on the tabs' names, so a rename, a deletion, an
+import, a list taken in from another window and a list merged on saving call
 `refreshReviewerCards`.
 
 ## Staying in sync with OpenReview

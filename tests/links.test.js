@@ -32,8 +32,11 @@ test('NeurIPS and AAAI: every link is an error, ARR: every external one; a label
     assert.deepEqual(hazards('See [the logs](https://example.org/logs) and https://example.org/b.', venue),
       ['err ' + title, 'err ' + title]);
   }
-  // ARR forbids external links: one into the forum is not external.
-  assert.deepEqual(hazards('As in [our reply](/forum?id=abc&noteId=def) and https://openreview.net/forum?id=abc.', 'arr'), []);
+  // ARR forbids external links: one into the forum is not external, however it is written;
+  // a protocol-relative //host leaves OpenReview.
+  assert.deepEqual(hazards('As in [our reply](/forum?id=abc&noteId=def), [this](?id=abc&noteId=x), [that](./forum?id=abc), ' +
+    '[above](#reply) and https://openreview.net/forum?id=abc.', 'arr'), []);
+  assert.deepEqual(hazards('See [results](//example.org/results).', 'arr'), ['err External links are not allowed at ACL ARR']);
   const res = A.analyze('See [the logs](https://example.org/logs).', { venue: 'neurips' });
   const iss = [...res.issues].find((i) => /not allowed/.test(i.title));
   assert.equal(iss.fix.manual, true);
@@ -68,10 +71,12 @@ test('the NeurIPS link card names the one exception, a code link for the AC', ()
   const iss = [...A.analyze('See [code](https://example.org/c).', { venue: 'neurips' }).issues]
     .find((i) => /not allowed/.test(i.title));
   assert.match(iss.detail, /Official Comment/);
-  // A link into the forum: no claim that the rule "makes no exception".
-  const own = [...A.analyze('See [our reply](/forum?id=abc).', { venue: 'neurips' }).issues].find((i) => /not allowed/.test(i.title));
-  assert.equal(own.sev, 'warn');
-  assert.doesNotMatch(own.detail, /makes no exception/);
+  // A link into the forum: a warning, and no promise that it may be tolerated.
+  for (const venue of ['neurips', 'aaai']) {
+    const own = [...A.analyze('See [our reply](/forum?id=abc).', { venue }).issues].find((i) => /not allowed/.test(i.title));
+    assert.equal(own.sev, 'warn', venue);
+    assert.doesNotMatch(own.detail, /tolerated|makes no exception/, venue);
+  }
 });
 
 test('every venue preset names its rule, the year of its rules and an official source', () => {

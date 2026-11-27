@@ -1853,7 +1853,7 @@ var VENUES = [
     parts: 'ICML has one response per discussion round: a split may not be accepted.' },
   { id: 'aaai', name: 'AAAI-26', label: 'AAAI-26', limit: 2500, unit: 'for all reviews',
     links: 'none', linksBrief: 'no URLs',
-    rule: 'one rebuttal of 2,500 characters for all reviews; responses with URLs may be withheld; no new results (AAAI-26 FAQ; AAAI-27 published no character limit)',
+    rule: 'one rebuttal of 2,500 characters for all reviews; responses with URLs may be withheld; no new results (AAAI-26 FAQ; the AAAI-27 call states no character limit)',
     source: 'https://aaai.org/conference/aaai/aaai-26/aaai-26-faq-for-authors-rebuttal/',
     parts: 'AAAI-26 allowed a single rebuttal for all reviews: a split will not be accepted.' },
   { id: 'arr', name: 'ACL ARR (ACL, NAACL, EMNLP)', label: 'ACL ARR', limit: 5000, unit: 'per response',
@@ -1863,7 +1863,7 @@ var VENUES = [
     parts: 'ARR allows one response per review (plus one general response): a split may not be accepted.' },
   { id: 'iclr', name: 'ICLR', label: 'ICLR 2027', limit: null, unit: null,
     links: 'anon', linksBrief: 'anonymous links only',
-    rule: 'the author guide mentions a limit per comment but no number (read it off the counter under the OpenReview comment box) and no limit on the number of comments; a code or demo link must be anonymous, and its host must not track visitors',
+    rule: 'the author guide mentions a limit per comment but no number (read it off the counter under the OpenReview comment box) and no limit on the number of comments; code goes to an anonymous repository, and a demo’s host must not track visitors',
     source: 'https://iclr.cc/Conferences/2027/AuthorGuidelines' },
   { id: 'or-comment', name: 'OpenReview default comment', label: 'OpenReview default', limit: 5000, unit: 'per comment',
     links: 'any', linksBrief: '',
@@ -2661,7 +2661,9 @@ function analyzeText(src, opts) {
   markedRanges.forEach(function (r) {
     if (r.type !== 'link' || !r.token || typeof r.token.href !== 'string') return;
     var href = r.token.href, host = linkHost(href), raw = src.slice(r.start, r.end);
-    var own = href.charAt(0) === '/' || host === 'openreview.net';
+    /* Into this forum: a relative destination (a path, a query, a fragment;
+       not //host, which leaves OpenReview) or openreview.net itself. */
+    var own = host ? host === 'openreview.net' || /\.openreview\.net$/.test(host) : !/^[a-z][a-z0-9+.-]*:/i.test(href);
     /* 'external' forbids links outside OpenReview: a link into the forum is
        not one. 'none' forbids every link, so even that one gets a warning. */
     if (venue && (venue.links === 'none' || (venue.links === 'external' && !own))) {
@@ -2670,13 +2672,13 @@ function analyzeText(src, opts) {
         raw.indexOf('[' + r.token.text + ']') === 0 ? r.token.text : null;
       push(own ? 'warn' : 'err', (venue.links === 'external' ? 'External links are' : 'Links are') + ' not allowed at ' + venue.name.replace(/ \(.*\)$/, ''),
         escHtml(venue.name) + ': ' + escHtml(venue.rule) + '.' +
-        (own ? ' A link to this OpenReview forum may be tolerated; the rule does not mention one.' : ''),
+        (own ? ' The rule names no exception for a link to this OpenReview forum.' : ''),
         r.start, r.end, label ? manual('keep the link text', r.start, r.end, label) : null);
       return;
     }
     if (LINK_SHORTENERS.test(host)) {
       push(venue && venue.noShorteners ? 'err' : 'warn', 'Shortened URL',
-        'A shortener hides where the link goes and can log who opens it, which can identify a reviewer. ICML forbids them in responses, and ICLR asks for links whose host does not track visitors; give the full URL.',
+        'A shortener hides where the link goes and can log who opens it, which can identify a reviewer. ICML forbids them in responses, and ICLR asks that a demo’s host not track visitors; give the full URL.',
         r.start, r.end);
     } else if (!own && linkMayReveal(href, host)) {
       push(venue && venue.links === 'anon' ? 'warn' : 'note', 'This link may reveal who the authors are',
@@ -4911,15 +4913,16 @@ function blockSources(text) {
    OpenReview names an anonymous reviewer by four letters and digits
    ("Reviewer k9F2"); some authors number them ("Reviewer 2", "R2"). A draft
    whose tab is named for a reviewer should address that reviewer: an answer
-   copied from another reviewer's draft keeps the other ID in its greeting,
-   and a pointer such as "see our answer to Reviewer k9F2, Q2" can outlive a
-   renumbering. Only what is unmistakable gets a card, since mentioning
-   another reviewer is usually deliberate (a shared concern, a joint thanks):
-   a salutation, a "Response to Reviewer X" line, or thanks whose object is
-   the reviewer, in the draft's opening or closing; an ID in other capitals
-   than a tab's; a pointer (see, cf., refer to) naming a point the other
-   draft never mentions. IDs and numbers are compared only within one scheme,
-   since a tab named by ID says nothing about the numbers. Advice only. */
+   copied from another reviewer's draft keeps the other ID in its greeting.
+   Mentioning another reviewer is usually deliberate (a shared concern, a
+   joint thanks, a cross-reference), so only what is unmistakable gets a card:
+   a salutation (Dear, Hi, Hello) naming another reviewer, a "Response to
+   Reviewer X" heading or line of its own, or thanks whose object is another
+   reviewer in the opening or closing block; and an ID in other capitals than
+   every tab's. IDs and numbers are compared only within one scheme, since a
+   tab named by ID says nothing about the numbers. Two Codex reviews tried a
+   broader check (pointers to points, IDs no tab has) and found it wrong on
+   ordinary sentences; those sentences are the regression cases. */
 var REVIEWER_ID = /^(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{4}$/;
 /* A four-character word is taken for an ID only with a letter and a digit,
    or with small letters and a capital after the first: "k9F2", "xKpQ", not
@@ -4928,16 +4931,17 @@ function idShaped(w) {
   return REVIEWER_ID.test(w) && (/\d/.test(w) || (/[a-z]/.test(w) && /[A-Z]/.test(w.slice(1))));
 }
 
-/* {ids, nums}: whom a tab name is for. "Reviewer abcd" says so outright; a
-   bare word needs an ID's shape; numbers come from "Reviewer 2", "Rev. 2",
-   "R2", as a whole word. */
+/* {ids, nums}: whom a tab name is for. An ID after "Reviewer" needs an ID's
+   shape ("Reviewer list" names no one); a bare word needs a small letter as
+   well ("k9F2", not "GPT4"); numbers come from "Reviewer 2", "Rev. 2", "R2",
+   as a whole word. */
 function draftReviewer(name) {
   var out = { ids: [], nums: [] }, m;
   if (typeof name !== 'string') return out;
   var re = /\breviewer[\s_#:-]*([A-Za-z0-9]{4})(?![A-Za-z0-9])/gi;
-  while ((m = re.exec(name))) if (REVIEWER_ID.test(m[1]) && out.ids.indexOf(m[1]) < 0) out.ids.push(m[1]);
+  while ((m = re.exec(name))) if (idShaped(m[1]) && out.ids.indexOf(m[1]) < 0) out.ids.push(m[1]);
   name.split(/[^A-Za-z0-9]+/).forEach(function (w) {
-    if (w.length === 4 && idShaped(w) && out.ids.indexOf(w) < 0) out.ids.push(w);
+    if (w.length === 4 && idShaped(w) && /[a-z]/.test(w) && out.ids.indexOf(w) < 0) out.ids.push(w);
   });
   re = /\b(?:reviewer|rev\.?|r)[ \t_#-]*(\d{1,2})(?![A-Za-z0-9])/gi;
   while ((m = re.exec(name))) if (out.nums.indexOf(+m[1]) < 0) out.nums.push(+m[1]);
@@ -4947,100 +4951,73 @@ function draftReviewer(name) {
 /* The reviewer named at `i` in `text`: "Reviewer Ab12", "Reviewer 3",
    "Rev. 3", "R3", or a tab's ID on its own ("Dear Ab12"), with emphasis
    around it and a soft line break after "Reviewer" allowed. {id | num,
-   start, end} or null; "Reviewers ..." (several) is null. `known` maps tab
-   IDs in lower case to themselves. */
+   start, end, after} or null, where start and end cover the ID or number
+   alone (a selection that leaves the emphasis whole) and `after` is where
+   the reference ends; "Reviewers ..." (several) is null. `known` maps tab IDs
+   in lower case to a spelling. */
 function reviewerRef(text, i, known) {
   var m = /^(\*{1,2}|_{1,2})?(?:(reviewers?|rev\.?)[ \t]*(?:\n[ \t]*)?#?[ \t]*(\*{1,2}|_{1,2})?)?([A-Za-z0-9]{1,4})(?![A-Za-z0-9])(\*{1,2}|_{1,2})?/i.exec(text.slice(i, i + 40));
   if (!m) return null;
-  var word = m[2], tok = m[4], start = i + (m[1] ? m[1].length : 0), end = i + m[0].length - (m[5] ? m[5].length : 0);
+  var word = m[2], tok = m[4], end = i + m[0].length - (m[5] ? m[5].length : 0), start = end - tok.length;
   if (word && /s$/i.test(word)) return null;
-  var num = /^(r?)(\d{1,2})$/i.exec(tok);
-  if (num) return word || num[1] ? { num: +num[2], start: start, end: end } : null;
-  if (tok.length !== 4 || !REVIEWER_ID.test(tok)) return null;
-  if (word ? idShaped(tok) || known[tok.toLowerCase()] : known[tok.toLowerCase()]) return { id: tok, start: start, end: end };
-  return null;
-}
-
-/* Points named in a pointer, with their places: "Q2", "W1 and Q9",
-   "questions 2 and 9", "**Q9**". `key` compares like with like: W, Q and L
-   with their long names, other words only with themselves ("concern 1" is
-   not "comment 1"). A quarter ("Q1 2025") is no point. */
-var POINT_TOKEN = /^(\*{1,2}|_{1,2})?(?:([WQL])(\d{1,2})|(weakness|question|limitation|comment|concern|point|issue)(?:e?s)?[ \t]*#?[ \t]*(\d{1,2}))(\*{1,2}|_{1,2})?(?![A-Za-z0-9])(?![ \t]+(?:19|20)\d\d(?!\d))/i;
-var POINT_WORD_LETTER = { weakness: 'W', question: 'Q', limitation: 'L' };
-function pointKey(word, n) {
-  var w = word.toLowerCase();
-  if (w.length === 1) return w.toUpperCase() + n;
-  return (POINT_WORD_LETTER[w] || w) + n;
-}
-function pointList(text, i) {
-  var out = [], kind = null, pos = i, first = true;
-  for (;;) {
-    var s = text.slice(pos, pos + 60), m = POINT_TOKEN.exec(s), lead = m && m[1] ? m[1].length : 0;
-    if (m) {
-      var word = m[2] || m[4], n = +(m[3] || m[5]);
-      kind = word;
-      out.push({ key: pointKey(word, n), start: pos + lead, end: pos + m[0].length - (m[6] ? m[6].length : 0) });
-      pos += m[0].length;
-    } else if (!first && kind && (m = /^(\d{1,2})(?![A-Za-z0-9])/.exec(s))) {
-      out.push({ key: pointKey(kind, +m[1]), start: pos, end: pos + m[1].length });
-      pos += m[0].length;
-    } else break;
-    first = false;
-    var sep = /^[ \t]*(?:,[ \t]*(?:and[ \t]+|or[ \t]+)?|and[ \t]+|or[ \t]+|&[ \t]*|\/[ \t]*)/i.exec(text.slice(pos, pos + 12));
-    if (!sep) break;
-    pos += sep[0].length;
+  var ref = null, num = /^(r?)(\d{1,2})$/i.exec(tok);
+  if (num) {
+    if (word || num[1]) ref = { num: +num[2], start: num[1] ? start : end - num[2].length, end: end };
+  } else if (tok.length === 4 && REVIEWER_ID.test(tok) && (word ? idShaped(tok) || known[tok.toLowerCase()] : known[tok.toLowerCase()])) {
+    ref = { id: tok, start: start, end: end };
   }
-  return out;
-}
-/* Whether a draft's text mentions point `key` at all: any spelling, any
-   place (a heading "W1 and W2", a line "W2: ..."), so a pointer is held only
-   to points the other draft never names. */
-function mentionsPoint(text, key) {
-  var m = /^([A-Za-z]+?)(\d+)$/.exec(key), n = '0*' + (+m[2]) + '(?!\\d)';
-  var word = m[1].length === 1 ? { W: 'weakness', Q: 'question', L: 'limitation' }[m[1]] : m[1];
-  var re = m[1].length === 1
-    ? new RegExp('(?:\\b' + m[1] + n + ')|(?:\\b' + word + '(?:e?s)?[ \\t]*#?[ \\t]*' + n + ')', 'i')
-    : new RegExp('\\b' + word + 's?[ \\t]*#?[ \\t]*' + n, 'i');
-  return re.test(text);
+  if (ref) ref.after = i + m[0].length;
+  return ref;
 }
 
 /* Cards for a draft (`text`, as posted) whose tab is named `self`, given the
-   other tabs [{name, text}] (`text`: null while it is unknown). `spans`: the
-   formulas analyze found (computed here when not given). */
+   other tabs' names (`others`: [{name}]). `spans`: the formulas analyze found
+   (computed here when not given). */
 function reviewerIssues(text, self, others, spans) {
   var none = [];
   if (typeof text !== 'string' || !text.trim()) return none;
   var model = collectMarkedRanges(text);
   if (!model) return none;
   var me = draftReviewer(self), tabs = (others || []).map(function (o) {
-    return { name: o.name, who: draftReviewer(o.name), text: o.text };
+    return { name: o && o.name, who: draftReviewer(o && o.name) };
   });
-  var known = Object.create(null);
-  me.ids.forEach(function (id) { known[id.toLowerCase()] = id; });
-  tabs.forEach(function (t) { t.who.ids.forEach(function (id) { known[id.toLowerCase()] = id; }); });
+  /* Every spelling of every tab's ID: an exact one wins over a match in
+     other capitals ("Ab12" here and "ab12 (follow-up)" there). */
+  var known = Object.create(null), exact = Object.create(null);
+  [me].concat(tabs.map(function (t) { return t.who; })).forEach(function (who) {
+    who.ids.forEach(function (id) { known[id.toLowerCase()] = id; exact[id] = true; });
+  });
   var mask = proseMask(text, spans || analyze(text).spans, model);
-  /* Visible, and not inside quotation marks on its line ("The review reads,
-     'We thank Reviewer X'" quotes someone). */
+  var blocks = blockSources(text);
+  function blockOf(at) {
+    for (var k = 0; k < blocks.length; k++) if (at >= blocks[k].start && at < blocks[k].end) return blocks[k];
+    return null;
+  }
+  /* Visible, and not inside quotation marks in its block ("The review reads,
+     'We thank Reviewer X'" quotes someone else's words). */
   function visible(a, b) {
     if (maskHits(mask, a, b)) return false;
-    var line = text.slice(text.lastIndexOf('\n', a - 1) + 1, a);
-    var curly = line.lastIndexOf('“') > line.lastIndexOf('”');
-    return !curly && (line.split('"').length - 1) % 2 === 0;
+    var blk = blockOf(a), before = text.slice(blk ? blk.start : text.lastIndexOf('\n', a - 1) + 1, a);
+    if ((before.split('"').length - 1) % 2) return false;
+    if (before.split('“').length > before.split('”').length) return false;
+    var opens = before.split('‘').length - 1, closes = (before.match(/’(?![A-Za-z])/g) || []).length;
+    return opens <= closes;
   }
   function isFor(who, r) { return r.id ? who.ids.indexOf(r.id) >= 0 : who.nums.indexOf(r.num) >= 0; }
   function sameScheme(who, r) { return r.id ? who.ids.length > 0 : who.nums.length > 0; }
   function label(r) { return 'Reviewer ' + (r.id || r.num); }
   var issues = [], seen = Object.create(null);
-  function card(sev, title, detail, start, end) {
+  function card(title, detail, start, end) {
     if (seen[start + ':' + title]) return;
     seen[start + ':' + title] = true;
-    issues.push({ sev: sev, title: title, detail: detail, start: start, end: end, fix: null, math: false });
+    issues.push({ sev: 'warn', title: title, detail: detail, start: start, end: end, fix: null, math: false });
   }
-  /* An ID typed in other capitals is another ID to OpenReview. */
+  /* An ID no tab spells this way, though one does in other capitals:
+     OpenReview IDs are case-sensitive. */
   function caseCard(r) {
-    if (!r || !r.id || !known[r.id.toLowerCase()] || known[r.id.toLowerCase()] === r.id) return false;
-    card('warn', 'Reviewer ID written differently from its tab',
-      escHtml(label(r)) + ' differs only in capitals from the tab’s ID ' + escHtml(known[r.id.toLowerCase()]) +
+    if (!r || !r.id || exact[r.id] || !known[r.id.toLowerCase()]) return false;
+    card('Reviewer ID written differently from its tab',
+      'Reviewer ' + escHtml(r.id) + ' differs only in capitals from the tab’s ID ' + escHtml(known[r.id.toLowerCase()]) +
         '. OpenReview IDs are case-sensitive, so reviewers read it as someone else.', r.start, r.end);
     return true;
   }
@@ -5048,7 +5025,7 @@ function reviewerIssues(text, self, others, spans) {
   while ((m = re.exec(text))) {
     var at = m.index + m[0].length - 4;
     if (!visible(m.index, at + 4)) continue;
-    caseCard({ id: m[1], start: m.index, end: at + 4 });
+    caseCard({ id: m[1], start: at, end: at + 4 });
     /* "Reviewers k9F2, Ab12 and Cd34" */
     var tail = at + 4, more;
     while (/^reviewers/i.test(m[0]) &&
@@ -5059,80 +5036,37 @@ function reviewerIssues(text, self, others, spans) {
     }
   }
 
-  /* Addressing another reviewer. A salutation or a "Response to" line can
-     stand anywhere (after a title, between parts); thanks only in the
-     opening or closing, and only with the reviewer as its object: "thank
-     you for raising the same concern as Reviewer X" thanks someone else. */
-  if (me.ids.length || me.nums.length) {
-    var blocks = blockSources(text), first = blocks[0], last = blocks[blocks.length - 1];
-    var edge = function (at) {
-      return (!!first && at >= first.start && at < first.end) || (!!last && at >= last.start && at < last.end);
-    };
-    var triggers = [
-      { re: /(?:^|[.!?][ \t]+|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:dear|hi|hello)[ \t]+/gi, edge: false },
-      { re: /(?:^|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:our[ \t]+)?(?:author[ \t]+)?(?:response|reply|answer|rebuttal)s?[ \t]+to[ \t]+(?:the[ \t]+)?/gi, edge: false },
-      { re: /\b(?:(?:we|i)[ \t]+(?:(?:sincerely|warmly|again|truly|deeply|also|would like to)[ \t]+)?thank|thank[ \t]+you|thanks)[ \t]*,?[ \t]*(?:again[ \t]*,?[ \t]*)?(?:dear[ \t]+)?/gi, edge: true }
-    ];
-    triggers.forEach(function (tr) {
-      tr.re.lastIndex = 0;
-      while ((m = tr.re.exec(text))) {
-        var end = m.index + m[0].length, r = reviewerRef(text, end, known);
-        if (m[0].length === 0) tr.re.lastIndex++;
-        if (!r || !visible(m.index + m[0].search(/\S/) , r.end) || (tr.edge && !edge(r.start))) continue;
-        if (caseCard(r) || isFor(me, r) || !sameScheme(me, r)) continue;
-        var theirs = tabs.filter(function (t) { return isFor(t.who, r); })[0];
-        card('warn', 'This draft addresses another reviewer',
-          'The tab is named for ' + escHtml(self) + ', but this addresses ' + escHtml(label(r)) +
-            (theirs ? ', who has a draft of their own (' + escHtml(theirs.name) + ')' : '') +
-            '. An answer copied from another draft keeps its reviewer: change the ID, or rename the tab if it is the tab that is wrong.',
-          r.start, r.end);
-      }
-    });
+  if (!me.ids.length && !me.nums.length) return issues;
+  var first = blocks[0], last = blocks[blocks.length - 1];
+  function edge(at) {
+    return (!!first && at >= first.start && at < first.end) || (!!last && at >= last.start && at < last.end);
   }
-
-  /* Pointers into another reviewer's draft: a cue (see, cf., refer to, as
-     answered in, in our answer to), then "Reviewer X" with its points after
-     it ("Reviewer X, Q2", "Reviewer X's W1 and Q9") or before it ("W3 of
-     Reviewer X"), in the same sentence. */
-  var cue = /\b(?:see|cf\.|refer(?:s|red)? to|as (?:answered|discussed|explained|detailed|shown) in|in our (?:answer|response|reply|rebuttal) to)\b/gi;
-  while ((m = cue.exec(text))) {
-    if (!visible(m.index, m.index + m[0].length)) continue;
-    var stop = text.slice(m.index).search(/[.!?](?:\s|$)|\n\n/);
-    var sent = stop < 0 ? text.length : m.index + stop;
-    var rr = /\breviewer[ \t]*(?:\n[ \t]*)?/gi, hit;
-    rr.lastIndex = m.index;
-    while ((hit = rr.exec(text)) && hit.index < sent) {
-      var r = reviewerRef(text, hit.index, known);
-      if (!r || r.end > sent || !visible(r.start, r.end) || isFor(me, r)) continue;
-      var after = /^(?:['’]s)?[ \t]*[,:(\[]?[ \t]*/.exec(text.slice(r.end, r.end + 6));
-      var pts = pointList(text, r.end + after[0].length);
-      if (!pts.length) {
-        /* "W9 and W1 of Reviewer X": the list ends right before " of". */
-        var before = text.slice(m.index, r.start);
-        var link = /[ \t]+(?:of|from|by|in|for)[ \t]+(?:(?:our|the)[ \t]+(?:answer|response|reply|rebuttal)[ \t]+to[ \t]+)?$/i.exec(before);
-        if (link) {
-          var listEnd = m.index + link.index, scan = m.index + m[0].length;
-          for (var p = scan; p < listEnd && !pts.length; p++) {
-            if (!/[A-Za-z*_]/.test(text[p]) || /[A-Za-z0-9]/.test(text[p - 1] || '')) continue;
-            var cand = pointList(text, p);
-            if (cand.length && cand[cand.length - 1].end >= listEnd - 2 &&
-                !/\S/.test(text.slice(cand[cand.length - 1].end, listEnd).replace(/[*_]/g, ''))) pts = cand;
-          }
-        }
-      }
-      if (!pts.length) continue;
-      var theirs = tabs.filter(function (t) { return isFor(t.who, r); });
-      if (!theirs.length || theirs.some(function (t) { return typeof t.text !== 'string'; })) continue;
-      var all = theirs.map(function (t) { return t.text; }).join('\n\n');
-      pts.forEach(function (pt) {
-        if (mentionsPoint(all, pt.key)) return;
-        card('warn', 'Pointer to a point the other draft does not have',
-          'This points to ' + escHtml(text.slice(pt.start, pt.end)) + ' in the answer to ' + escHtml(label(r)) + ', but ' +
-            escHtml(theirs[0].name) + (theirs.length > 1 ? ' and its other drafts' : '') +
-            ' never mention it. If that answer moved or was renumbered, update the pointer.', pt.start, pt.end);
-      });
+  /* A salutation can stand anywhere (after a title); a "Response to" line
+     only as a heading or a line of its own ("Our response to Reviewer X
+     contains the table" points to it); thanks only in the opening or
+     closing, with that reviewer as its object and no other named with it
+     ("We thank Reviewer X and Reviewer Y"). */
+  var triggers = [
+    { re: /(?:^|[.!?][ \t]+|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:dear|hi|hello)[ \t]+/gi },
+    { re: /(?:^|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:our[ \t]+)?(?:author[ \t]+)?(?:response|reply|answer|rebuttal)s?[ \t]+to[ \t]+(?:the[ \t]+)?/gi, line: true },
+    { re: /\b(?:(?:we|i)[ \t]+(?:(?:sincerely|warmly|again|truly|deeply|also|would like to)[ \t]+)?thank|thank[ \t]+you|thanks)[ \t]*,?[ \t]*(?:again[ \t]*,?[ \t]*)?(?:dear[ \t]+)?/gi, edge: true }
+  ];
+  triggers.forEach(function (tr) {
+    while ((m = tr.re.exec(text))) {
+      var r = reviewerRef(text, m.index + m[0].length, known);
+      if (!r || !visible(m.index + m[0].search(/\S/), r.end) || (tr.edge && !edge(r.start))) continue;
+      if (tr.line && !/^[ \t]*(?:\*\*|__)?[ \t]*[:.!]?[ \t]*(?:\*\*|__)?[ \t]*(?:\n|$)/.test(text.slice(r.after, r.after + 12))) continue;
+      var also = /^[ \t]*(?:,[ \t]*(?:and[ \t]+)?|and[ \t]+|&[ \t]*)/.exec(text.slice(r.after, r.after + 12));
+      if (also && reviewerRef(text, r.after + also[0].length, known)) continue;
+      if (caseCard(r) || isFor(me, r) || !sameScheme(me, r)) continue;
+      var theirs = tabs.filter(function (t) { return isFor(t.who, r); })[0];
+      card('This draft addresses another reviewer',
+        'The tab is named for ' + escHtml(self) + ', but this addresses ' + escHtml(label(r)) +
+          (theirs ? ', who has a draft of their own (' + escHtml(theirs.name) + ')' : '') +
+          '. An answer copied from another draft keeps its reviewer: change the ID, or rename the tab if it is the tab that is wrong.',
+        r.start, r.end);
     }
-  }
+  });
   issues.sort(function (a, b) { return a.start - b.start; });
   return issues;
 }
@@ -6317,17 +6251,16 @@ function renderSections(text, total) {
   sectionsList.innerHTML = html;
 }
 
-/* Reviewer IDs in the open draft against the other tabs (reviewerIssues),
-   read as posted. A draft whose text is not known yet (still loading) is not
-   checked against. The cards depend on the other tabs too, so whatever
-   changes them (a rename or deletion here or in another window, an import,
-   a text read in the background) calls refreshReviewerCards. */
+/* Reviewer IDs in the open draft against the other tabs' names
+   (reviewerIssues), read as posted. The cards depend on those names, so
+   whatever changes the list (a rename or deletion here or in another window,
+   an import, a list merged on saving) calls refreshReviewerCards. */
 function reviewerCards(text, spans) {
   var self = draftReady ? draftById(draftMeta.active) : null;
   if (!self || !text.trim()) return [];
   var lead = leadOf(text);
   var others = draftMeta.list.filter(function (d) { return d.id !== self.id; }).map(function (d) {
-    return { name: d.name, text: knownDraftText(d.id) };
+    return { name: d.name };
   });
   return reviewerIssues(text.trim(), self.name, others, spans.map(function (sp) {
     return { start: sp.start - lead, end: sp.end - lead, recovered: sp.recovered };
@@ -6421,7 +6354,6 @@ function startBodyLoad(id) {
     if (!res.failed && id !== draftMeta.active) draftTexts[id] = typeof res.value === 'string' ? res.value : '';
     /* Bring the store up to date with a local copy it never got. */
     if (res.pending && id !== draftMeta.active && typeof res.value === 'string') storeDraft(res.value, key);
-    if (id !== draftMeta.active) refreshReviewerCards(); /* its text is known now */
     return res;
   });
   return bodyLoads[id];
@@ -6505,6 +6437,7 @@ function saveDraftMeta() {
       draftMeta.list.forEach(function (d) { if (!bodyState[d.id]) startBodyLoad(d.id); });
       pruneHistory();
       renderDraftTabs();
+      refreshReviewerCards(); /* a rename from another device */
     }
     return true;
   });
@@ -6772,9 +6705,6 @@ function takeInList(json) {
 }
 window.addEventListener('storage', function (e) {
   if (e.key === DRAFTS_KEY) takeInList(e.newValue);
-  /* Another window saved the text of a draft not open here: a pointer card
-     reads it. */
-  else if (draftReady && typeof e.key === 'string' && e.key.indexOf(DRAFT_KEY) === 0 && e.key !== draftKey) refreshReviewerCards();
 });
 /* A page restored from the back/forward cache got no storage events while it
    was away: it takes in the list as this browser stores it now, so its open
