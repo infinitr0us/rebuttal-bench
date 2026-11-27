@@ -1092,7 +1092,7 @@ window.MathJax = {
       <span class="pane-tools"><button type="button" id="findBtn" title="Find and replace in the source (Ctrl+F in the editor)">Find</button><label title="Underline misspelled words in the editor, with the browser’s spellchecker"><input type="checkbox" id="spellBox"> Spellcheck</label></span></div>
     <div class="drafts" id="draftBar"><div class="dtabs" id="draftTabs" role="tablist" aria-label="Drafts"></div><div class="dtools" id="draftTools"></div></div>
     <div id="tableOffer" hidden>
-      Convert the pasted table to Markdown?
+      <span id="pasteQuestion">Convert the pasted table to Markdown?</span>
       <button id="convertPaste" type="button" aria-haspopup="dialog" aria-controls="tableDialog">Convert</button>
       <button id="dismissPaste" type="button">Dismiss</button>
     </div>
@@ -3432,13 +3432,15 @@ function tableCode(text) {
   /* Inside code, Marked only removes the table escape. An odd number of
      literal backslashes before a pipe cannot be expressed inside one code
      span. Put that pipe between spans instead. */
-  return text.split('|').map(function (part) {
-    if (!part) return '';
-    var ticks = (part.match(/\x60+/g) || []).reduce(function (max, run) { return Math.max(max, run.length); }, 0);
-    var fence = new Array(ticks + 2).join('\x60');
-    if (/^\x60|\x60$/.test(part) || (/^ .* $/.test(part) && /\S/.test(part))) part = ' ' + part + ' ';
-    return fence + part + fence;
-  }).join('\\|');
+  return text.split('|').map(codeSpan).join('\\|');
+}
+
+function codeSpan(text) {
+  if (!text) return '';
+  var ticks = (text.match(/\x60+/g) || []).reduce(function (max, run) { return Math.max(max, run.length); }, 0);
+  var fence = new Array(ticks + 2).join('\x60');
+  if (/^\x60|\x60$/.test(text) || (/^ .* $/.test(text) && /\S/.test(text))) text = ' ' + text + ' ';
+  return fence + text + fence;
 }
 
 var TABLE_NUMBER = '[+\\-−]?(?:(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d*)?|\\.\\d+)(?:e[+\\-]?\\d+)?';
@@ -3692,21 +3694,25 @@ function htmlTableStyle(el, inherited) {
 /* The plain pass inside code, subscripts and superscripts follows the same rules for
    whitespace and ignored elements. The explicit stack also handles deeply
    nested wrappers in a malformed clipboard fragment. */
-function walkTableCell(root, inherited, plain, emit, warn) {
+function walkTableCell(root, inherited, plain, emit, warn, keepMediaText) {
   var stack = [{ node: root, style: inherited }], plainText = true;
   while (stack.length) {
     var item = stack.pop(), node = item.node, style = item.style;
     if (!node) { emit(' ', style); continue; }
     if (node.nodeType === 3) { emit(node.nodeValue, style); continue; }
     var tag = node.localName;
-    if (node.nodeType !== 1 || /^(img|script|style|colgroup|table|template)$/.test(tag)) continue;
+    if (node.nodeType !== 1 || /^(script|style|colgroup|table|template)$/.test(tag)) continue;
+    if (PASTE_MEDIA.test(tag)) {
+      if (keepMediaText) { warn('media', PASTE_MEDIA_WARNING); emit(pasteAlt(node), style); }
+      if (keepMediaText || tag === 'img') continue;
+    }
     if (plain && node !== root && (tag !== 'span' || htmlTableStyle(node, 0))) plainText = false;
     if (tag === 'br') { emit(' ', style); continue; }
     if (tag === 'a') warn('link', 'Kept link text only (venues often forbid links).');
     style = plain ? 0 : htmlTableStyle(node, style);
     if (!plain && /^(code|sub|sup)$/.test(tag)) {
       var parts = [];
-      var simple = walkTableCell(node, 0, true, function (v) { parts.push(v); }, warn);
+      var simple = walkTableCell(node, 0, true, function (v) { parts.push(v); }, warn, keepMediaText);
       var value = parts.join('').replace(/\s+/g, ' ');
       if (tag === 'code') emit(value, style, 'code');
       else if (simple && /^[A-Za-z0-9+*-]{1,32}$/.test(value.trim())) emit(value, style, tag);
@@ -3727,7 +3733,7 @@ function walkTableCell(root, inherited, plain, emit, warn) {
   return plainText;
 }
 
-function htmlTableCell(cell, warn) {
+function htmlTableCell(cell, warn, keepMediaText) {
   var ancestors = [], style = 0, runs = [];
   for (var el = cell.parentElement; el; el = el.parentElement) ancestors.push(el);
   while (ancestors.length) style = htmlTableStyle(ancestors.pop(), style);
@@ -3736,19 +3742,9 @@ function htmlTableCell(cell, warn) {
     var prev = runs[runs.length - 1];
     if (!kind && prev && !prev.kind && prev.style === fmt) prev.value += value;
     else runs.push({ value: value, style: fmt, kind: kind });
-  }, warn);
-  var out = '', plain = '', space = false, open = [];
-  var touchingStyles = runs.some(function (run, i) {
-    var prev = runs[i - 1];
-    return prev && prev.style && run.style && prev.style !== run.style &&
-      /\S$/.test(prev.value) && /^\S/.test(run.value);
-  });
-  function entity(ch) { return '&#' + ch.charCodeAt(0) + ';'; }
-  runs.forEach(function (run, index) {
-    var raw = run.value.replace(/\s+/g, ' '), text = raw.trim();
-    plain += raw;
-    if (!text) { if (raw) space = true; return; }
-    var value, closed = '', opened = '';
+  }, warn, keepMediaText);
+  var markdown = htmlStyledRuns(runs, function (run, text, index) {
+    var value;
     if (run.kind === 'code') value = tableCode(text);
     else if (run.kind) value = '$' + (run.kind === 'sup' ? '^' : '_') + '{' + tableMath(text) + '}$';
     else {
@@ -3760,6 +3756,24 @@ function htmlTableCell(cell, warn) {
         value = value.replace(/(\d%?)(\*+)$/, function (_, n, stars) { return n + stars.replace(/\*/g, '\\*'); });
       }
     }
+    return value;
+  });
+  var plain = runs.map(function (run) { return run.value; }).join('');
+  return { markdown: markdown, numeric: TABLE_NUMERIC.test(plain.trim()) };
+}
+
+function htmlStyledRuns(runs, write) {
+  var out = '', space = false, open = [];
+  var touchingStyles = runs.some(function (run, i) {
+    var prev = runs[i - 1];
+    return prev && prev.style && run.style && prev.style !== run.style &&
+      /\S$/.test(prev.value) && /^\S/.test(run.value);
+  });
+  function entity(ch) { return '&#' + ch.charCodeAt(0) + ';'; }
+  runs.forEach(function (run, index) {
+    var raw = run.value.replace(/\s+/g, ' '), text = raw.trim();
+    if (!text) { if (raw) space = true; return; }
+    var value = write(run, text, index), closed = '', opened = '';
     /* Close only the styles that end here. Spaces at a style boundary
        belong between its delimiters so Markdown recognizes the emphasis. */
     var gap = out && (space || raw[0] === ' ') ? ' ' : '';
@@ -3786,7 +3800,7 @@ function htmlTableCell(cell, warn) {
     space = raw[raw.length - 1] === ' ';
   });
   while (open.length) out += open.pop().mark;
-  return { markdown: out, numeric: TABLE_NUMERIC.test(plain.trim()) };
+  return out;
 }
 
 function readHtmlTable(doc) {
@@ -3800,7 +3814,7 @@ function readHtmlTable(doc) {
   return null;
 }
 
-function htmlTableGrid(trs) {
+function htmlTableGrid(trs, keepMediaText) {
   var rows = [], warnings = [], warned = {}, occupied = [], align = [], numbers = [];
   var headers = 0, width = 0, group, r;
   function warn(kind, message) {
@@ -3833,7 +3847,7 @@ function htmlTableGrid(trs) {
       for (var j = 0; j < cols; j++) {
         if (occupied[col + j] > r) { col += j + 1; j = -1; }
       }
-      var content = htmlTableCell(cell, warn), cellAlign = alignment(cell) || rowAlign;
+      var content = htmlTableCell(cell, warn, keepMediaText), cellAlign = alignment(cell) || rowAlign;
       for (j = 0; j < cols; j++, col++) {
         cells[col] = j ? '' : content.markdown;
         if (height > 1) occupied[col] = r + height;
@@ -3906,6 +3920,263 @@ function tableMarkdown(t, options) {
   }
   warnings.sort(function (a, b) { return (a.row || a.line) - (b.row || b.line); });
   return { markdown: markdown, warnings: warnings, format: t.format };
+}
+
+/* ---- formatted prose from the clipboard ---- */
+var PASTE_MEDIA = /^(img|math|m:omath|v:imagedata)$/;
+var PASTE_MEDIA_WARNING = 'Images and embedded equations cannot be converted. Check the pasted text for missing content.';
+function pasteAlt(el) {
+  return el.getAttribute('alt') || el.getAttribute('alttext') || el.getAttribute('aria-label') || '';
+}
+
+function proseLiteral(text) {
+  /* Keep the author's dollars and backslashes. Before a Markdown escape
+     (TeX \{ or a matrix row's \\), a character reference restores the one
+     backslash Marked consumes so MathJax receives the original sequence. */
+  return text.replace(/\\.|[*_\x60~[\]<&]/g, function (ch, at) {
+    if (ch.length > 1) return (isPunct(ch[1]) ? '&#92;' : '') + ch;
+    if (ch === '_' && /\w/.test(text.charAt(at - 1)) && /\w/.test(text.charAt(at + 1))) return ch;
+    if (ch === '&') return /^&(?:#\w+|\w+);/.test(text.slice(at)) ? '&amp;' : '&';
+    if (ch === '<') return '&lt;';
+    return '\\' + ch;
+  });
+}
+
+function proseLine(text) {
+  return text.replace(/^(#{1,6}(?=\s|$)|>|[-+](?=\s|$)|-(?=--+\s*$)|=(?==*\s*$))/, '\\$1')
+    .replace(/^(\d{1,9})([.)])(?=\s|$)/, '$1\\$2');
+}
+
+/* Bits 1 and 2 are htmlTableStyle's emphasis. 4 marks monospace runs,
+   8 preserves line breaks in the pre-wrap spans Docs puts on the clipboard. */
+function proseStyle(el, inherited) {
+  var style = htmlTableStyle(el, inherited), css = el.getAttribute('style') || '', inline = el.style || {};
+  /* Word also emits complex-script declarations. Prefer the ordinary style
+     or semantic tag when present, even if its bidi counterpart differs. */
+  if (!inline.fontWeight && !/^(b|strong)$/.test(el.localName) && /(?:^|;)\s*mso-bidi-font-weight:\s*bold\b/i.test(css)) style |= 1;
+  if (!inline.fontStyle && !/^(i|em)$/.test(el.localName) && /(?:^|;)\s*mso-bidi-font-style:\s*italic\b/i.test(css)) style |= 2;
+  var family = inline.fontFamily || el.getAttribute('face');
+  var mono = family ? /\b(monospace|courier(?: new)?|consolas|menlo|monaco|lucida console)\b/i.test(family) : inherited & 4;
+  var breaks = inline.whiteSpace ? /^(pre|pre-wrap|pre-line|break-spaces)$/.test(inline.whiteSpace) : inherited & 8;
+  return style | (mono || /^(code|pre)$/.test(el.localName) ? 4 : 0) | (breaks || el.localName === 'pre' ? 8 : 0);
+}
+
+/* List levels from Docs can be structural, aria-level, or a CSS indent.
+   Compare indents instead of assuming a particular tab-stop width. */
+function proseIndent(el) {
+  var m = /^([\d.]+)(pt|px|in|cm|mm|pc|em|rem)?$/i.exec(el.style.marginLeft);
+  var units = { pt: 4 / 3, px: 1, 'in': 96, cm: 96 / 2.54, mm: 96 / 25.4, pc: 16, em: 16, rem: 16 };
+  return m ? Math.round(Number(m[1]) * (units[m[2]] || 1)) : 0;
+}
+
+function wordListItem(el) {
+  var css = el.getAttribute('style') || '';
+  var level = /(?:^|;)\s*mso-list:\s*[^;]*?\blevel(\d+)/i.exec(css);
+  if (!level && !/\bMsoListParagraph\w*\b/i.test(el.className)) return null;
+  var spans = el.getElementsByTagName('span'), marker = null;
+  for (var i = 0; i < spans.length; i++) {
+    if (/(?:^|;)\s*mso-list:\s*ignore\b/i.test(spans[i].getAttribute('style') || '')) { marker = spans[i]; break; }
+  }
+  var prefix = /^\s*(\d+[.)]|[a-z]+[.)]|[•·▪◦○●§\uf0b7\uf0a7-]|o)(?:\s+|$)/i;
+  var match = marker && prefix.exec(marker.textContent + ' '), skip = 0;
+  /* Some Word exports put the entire marker inside an Office conditional
+     comment. Its HTML is metadata, never part of the item body. */
+  if (!marker) {
+    for (var node = el.firstChild; node; node = node.nextSibling) {
+      if (node.nodeType === 8 && /supportLists/i.test(node.nodeValue)) {
+        match = prefix.exec(node.nodeValue.replace(/^\s*\[if [^\]]*\]>/i, '')
+          .replace(/<[^>]*>|&(?:nbsp|#160);/gi, ' ') + ' ');
+        break;
+      }
+    }
+    if (!match) {
+      /* A separate marker span need not leave a space in textContent. */
+      var first = el.firstChild;
+      while (first && (first.nodeType === 8 || (first.nodeType === 3 && !first.nodeValue.trim()))) first = first.nextSibling;
+      if (first && first.localName === 'span') {
+        var only = first.textContent.trim();
+        match = prefix.exec(only);
+        if (match && match[0] === only) marker = first;
+      }
+      if (!marker) {
+        match = prefix.exec(el.textContent);
+        if (match) skip = match[0].length;
+      }
+    }
+  }
+  var token = match ? match[1] : '';
+  return { level: level ? Number(level[1]) : 1, indent: proseIndent(el), marker: marker, skip: skip,
+    ordered: /[.)]$/.test(token), number: /^\d/.test(token) ? parseInt(token, 10) : null };
+}
+
+function proseList(items) {
+  var frames = [], lines = [];
+  items.forEach(function (item) {
+    function compare(frame) { return item.level - frame.level || item.indent - frame.indent; }
+    while (frames.length && compare(frames[frames.length - 1]) < 0) frames.pop();
+    var frame = frames[frames.length - 1];
+    if (!frame || compare(frame) > 0) {
+      frame = { level: item.level, indent: item.indent, prefix: frame ? frame.content : '', next: 1 };
+      frames.push(frame);
+    }
+    var n = item.number == null ? frame.next : item.number;
+    var marker = item.ordered ? n + '. ' : '- ';
+    frame.next = item.ordered ? n + 1 : 1;
+    frame.content = frame.prefix + new Array(marker.length + 1).join(' ');
+    lines.push(frame.prefix + marker + item.body.replace(/\n([^\n])/g, '\n' + frame.content + '$1'));
+  });
+  return lines.join('\n');
+}
+
+/* With keepGrid the paste offer can send a standalone grid to the table
+   dialog, which lets the author change its padding before insertion. */
+function htmlToMarkdown(doc, options) {
+  if (!doc || !doc.body) return null;
+  var warnings = [], formatted = false, hasList = false;
+  function flow() { return { blocks: [], lines: [], runs: [] }; }
+  function run(f, value, style, kind, markdown) {
+    if (!value) return;
+    if (!kind && (style & 4)) kind = 'code';
+    style &= 3;
+    if (f.bold) style |= 1;
+    if ((style || kind === 'code' || (kind === 'link' && markdown !== value.trim())) && /\S/.test(value)) formatted = true;
+    var last = f.runs[f.runs.length - 1];
+    if (last && kind !== 'link' && kind === last.kind && style === last.style) last.value += value;
+    else f.runs.push({ value: value, style: style, kind: kind, markdown: markdown });
+  }
+  function endLine(f) {
+    var line = htmlStyledRuns(f.runs, function (r, text) {
+      return r.kind === 'link' ? r.markdown : r.kind === 'code' ? codeSpan(text) : proseLiteral(text);
+    });
+    f.lines.push(proseLine(line));
+    f.runs = [];
+  }
+  function endParagraph(f) {
+    endLine(f);
+    var text = f.lines.join('  \n').trim();
+    if (text) f.blocks.push({ text: text });
+    f.lines = [];
+  }
+  function render(f, inItem) {
+    endParagraph(f);
+    var out = '';
+    for (var i = 0; i < f.blocks.length;) {
+      var b = f.blocks[i++], text = b.text, gap = '\n\n';
+      if (b.table) {
+        var grid = b.table.rows.length >= 2 && htmlTableGrid(b.table.rows, true);
+        if (grid) {
+          var table = tableMarkdown(grid, options);
+          text = table.markdown;
+          warnings = warnings.concat(table.warnings);
+        } else {
+          var contents = flow();
+          children(b.table, b.style, contents);
+          text = render(contents);
+        }
+      } else if (b.item) {
+        var items = [b.item];
+        while (i < f.blocks.length && f.blocks[i].item) items.push(f.blocks[i++].item);
+        text = proseList(items);
+        if (inItem) gap = '\n'; /* A tight sublist follows its parent's text immediately. */
+      }
+      if (text) out += (out ? gap : '') + text;
+    }
+    return out;
+  }
+  function children(el, style, f, list) {
+    for (var child = el.firstChild; child; child = child.nextSibling) visit(child, style, f, list);
+  }
+  function visit(el, style, f, list) {
+    if (el.nodeType === 3) {
+      var value = el.nodeValue;
+      if (f.skip) { var cut = Math.min(f.skip, value.length); f.skip -= cut; value = value.slice(cut); }
+      if ((style & 8) && /[\r\n]/.test(value)) {
+        value.split(/\r\n?|\n/).forEach(function (line, i) { if (i) endLine(f); run(f, line, style); });
+      } else run(f, value, style);
+      return;
+    }
+    var tag = el.localName;
+    if (el.nodeType !== 1 || el === f.marker || /^(script|style|template|head)$/.test(tag) || el.hidden) return;
+    if (PASTE_MEDIA.test(tag)) {
+      if (!warnings.some(function (w) { return w.message === PASTE_MEDIA_WARNING; })) warnings.push({ message: PASTE_MEDIA_WARNING });
+      run(f, pasteAlt(el), style);
+      return;
+    }
+    style = proseStyle(el, style);
+    if (tag === 'br') { endLine(f); return; }
+    if (tag === 'a' && el.hasAttribute('href')) {
+      var href = el.getAttribute('href').trim();
+      if (href && !/[\x00-\x1f]/.test(href) && !/^(?!(?:https?|ftp|mailto):)[a-z][a-z\d+.-]*:/i.test(href)) {
+        var label = flow();
+        children(el, style & 12, label);
+        var md = render(label), raw = el.textContent.replace(/\s+/g, ' ');
+        if (md) {
+          var bare = /^(?:https?|ftp):\/\//i.test(href) && raw.trim() === href && md === proseLine(proseLiteral(href));
+          /* Angle destinations also preserve unmatched parentheses in URLs. */
+          var dest = href.replace(/&(?=(?:#\w+|\w+);)/g, '&amp;').replace(/</g, '%3C').replace(/>/g, '%3E');
+          if (/[\s()]/.test(dest)) dest = '<' + dest + '>';
+          run(f, raw.trim() ? raw : md, style & 3, 'link', bare ? href : '[' + md + '](' + dest + ')');
+        }
+        return;
+      }
+    }
+    var item = tag === 'p' && wordListItem(el);
+    if (tag === 'li' || item) {
+      endParagraph(f);
+      if (!item) {
+        item = { level: Number(el.getAttribute('aria-level')) || (list && list.level) || 1,
+          indent: proseIndent(el), ordered: !!(list && list.ordered), number: el.hasAttribute('value') ? el.value : list && list.start };
+        if (list) list.start = null;
+      }
+      var body = flow();
+      body.marker = item.marker; body.skip = item.skip;
+      children(el, style, body);
+      item.body = render(body, true);
+      if (item.body) { f.blocks.push({ item: item }); formatted = true; hasList = true; }
+      return;
+    }
+    if (tag === 'ul' || tag === 'ol') {
+      endParagraph(f);
+      children(el, style, f, { level: list ? list.level + 1 : 1, ordered: tag === 'ol',
+        start: el.hasAttribute('start') ? el.start : null });
+      endParagraph(f);
+      return;
+    }
+    if (tag === 'table' && el.rows) {
+      endParagraph(f); f.blocks.push({ table: el, style: style }); return;
+    }
+    if (/^h[1-6]$/.test(tag) || tag === 'blockquote') {
+      endParagraph(f);
+      var inner = flow();
+      inner.bold = /^h[4-6]$/.test(tag);
+      children(el, style, inner);
+      var content = render(inner);
+      if (content) {
+        if (tag === 'blockquote') content = content.replace(/^(.+)$/gm, '> $1').replace(/^$/gm, '>');
+        else if (Number(tag[1]) <= 3) content = new Array(Number(tag[1]) + 1).join('#') + ' ' + content;
+        f.blocks.push({ text: content }); formatted = true;
+      }
+      return;
+    }
+    var block = /^(p|div|pre|section|article|header|footer|tr)$/.test(tag);
+    if (block) endParagraph(f);
+    children(el, style, f, list);
+    if (block) endParagraph(f);
+  }
+  var root = flow();
+  visit(doc.body, 0, root);
+  endParagraph(root);
+  if (root.blocks.length === 1 && root.blocks[0].table) {
+    var lone = root.blocks[0].table;
+    var keepGrid = options && options.keepGrid;
+    var grid = (lone.rows.length >= 2 && htmlTableGrid(lone.rows, !keepGrid)) || readHtmlTable(lone);
+    return grid && keepGrid ? { grid: grid } : tableMarkdown(grid, options);
+  }
+  var markdown = render(root);
+  if (!warnings.length && !(markdown && (formatted || root.blocks.length > 1 || markdown.indexOf('  \n') >= 0))) return null;
+  var result = { markdown: markdown, warnings: warnings };
+  if (options && options.keepGrid) result.hasList = hasList;
+  return result;
 }
 
 /* ---- compaction (pure): fewer characters, the same rendering ----
@@ -7381,7 +7652,7 @@ function openDraft(id) {
   restoreSeq++; /* a restore still checking the store belongs to the draft left */
   if (splitDialog && !splitDialog.hidden) closeSplit();
   if (tableDialog && tableDialog.open) tableDialog.close();
-  if (tableOffer) { pastedTable = null; tableOffer.hidden = true; } /* an offer to convert a paste into the draft left */
+  if (tableOffer) { pastedContent = null; tableOffer.hidden = true; } /* an offer to convert a paste into the draft left */
   flushReview(); /* the review in the box belongs to the draft left */
   var local = fallbackGet(keyOfDraft(id)); /* read before `id` becomes the open draft */
   var text = typeof local === 'string' ? local : (draftTexts[id] || '');
@@ -9345,7 +9616,9 @@ var tableWarnings = document.getElementById('tableWarnings');
 var tablePad = document.getElementById('tablePad');
 var insertTableBtn = document.getElementById('insertTable');
 var tableOffer = document.getElementById('tableOffer');
-var tableResult = null, tableTarget = null, pastedTable = null, dialogHtmlTable = null;
+var convertPaste = document.getElementById('convertPaste');
+var pasteQuestion = document.getElementById('pasteQuestion');
+var tableResult = null, tableTarget = null, pastedContent = null, dialogHtmlTable = null;
 
 function clipboardHtmlTable(data, text) {
   var html = data && data.getData('text/html');
@@ -9411,7 +9684,7 @@ insertTableBtn.addEventListener('click', function () {
   var prefix = before + left + tableResult.markdown;
   tableDialog.close(); /* the editor must be focusable for its undo transaction */
   setSourceText(prefix + right + after, prefix.length);
-  pastedTable = null;
+  pastedContent = null;
   tableOffer.hidden = true;
   afterSourceChange();
   showToast('Table inserted. ' + UNDO_HINT + ' undoes it.');
@@ -9429,34 +9702,66 @@ function looksLikeTablePaste(text) {
 /* Let the native paste happen, including its undo entry. The offer belongs
    to that exact draft and range and expires on the next change. */
 onEditor('paste', function (e) {
-  var text = e.clipboardData && e.clipboardData.getData('text/plain').replace(/\r\n?/g, '\n');
-  pastedTable = null;
+  pastedContent = null;
   tableOffer.hidden = true;
-  if (ta.readOnly) return;
-  var htmlTable = clipboardHtmlTable(e.clipboardData, text);
-  if (!htmlTable && (!text || !looksLikeTablePaste(text))) return;
+  if (ta.readOnly || !e.clipboardData) return;
+  var text = e.clipboardData.getData('text/plain').replace(/\r\n?/g, '\n');
+  var html = e.clipboardData.getData('text/html');
+  var content = html && htmlToMarkdown(new DOMParser().parseFromString(html, 'text/html'), { pad: tablePad.checked, keepGrid: true });
+  var htmlTable = content && content.grid ? { grid: content.grid, text: text } : null;
+  /* Word also puts tabs between list markers and their text. Its explicit
+     HTML list identifies these rows even when the plain text resembles TSV. */
+  var tablePaste = htmlTable || (text && !(content && content.hasList) && looksLikeTablePaste(text));
+  var prose = tablePaste ? null : content;
+  if (!tablePaste && !prose) return;
+  if (prose) {
+    /* A partial paragraph selection can include the space that separates it
+       from the next word. The native text records those selection edges. */
+    if (prose.markdown && text.trim()) {
+      prose.markdown = text.replace(/\u00a0/g, ' ').replace(/\S[\s\S]*\S|\S/, function () { return prose.markdown; });
+    }
+    if (!prose.markdown || prose.markdown === text) {
+      if (prose.warnings.length) showToast(prose.warnings.map(function (w) { return w.message; }).join(' '));
+      return;
+    }
+  }
+  pasteQuestion.textContent = prose ? 'Convert the pasted formatting to Markdown?' : 'Convert the pasted table to Markdown?';
+  if (prose) {
+    convertPaste.removeAttribute('aria-haspopup');
+    convertPaste.removeAttribute('aria-controls');
+  } else {
+    convertPaste.setAttribute('aria-haspopup', 'dialog');
+    convertPaste.setAttribute('aria-controls', 'tableDialog');
+  }
   var start = ta.selectionStart;
-  pastedTable = {
-    draft: draftMeta.active, htmlTable: htmlTable,
+  pastedContent = {
+    draft: draftMeta.active, htmlTable: htmlTable, prose: prose,
     source: ta.value.slice(0, start) + text + ta.value.slice(text ? ta.selectionEnd : start),
     start: start, end: start + text.length
   };
   if (!text) tableOffer.hidden = false; /* HTML alone has no native text insertion to trigger input. */
 });
 onEditor('input', function () {
-  if (pastedTable && pastedTable.source !== ta.value) pastedTable = null;
-  tableOffer.hidden = !pastedTable;
+  if (pastedContent && pastedContent.source !== ta.value) pastedContent = null;
+  tableOffer.hidden = !pastedContent;
 });
-document.getElementById('convertPaste').addEventListener('click', function () {
-  if (pastedTable && pastedTable.draft === draftMeta.active && pastedTable.source === ta.value) {
-    openTableImport(pastedTable, ta.value.slice(pastedTable.start, pastedTable.end));
-  } else {
-    pastedTable = null;
-    tableOffer.hidden = true;
+convertPaste.addEventListener('click', function () {
+  var paste = pastedContent;
+  if (paste && !ta.readOnly && paste.draft === draftMeta.active && paste.source === ta.value) {
+    if (!paste.prose) {
+      openTableImport(paste, ta.value.slice(paste.start, paste.end));
+      return;
+    }
+    var prefix = ta.value.slice(0, paste.start) + paste.prose.markdown;
+    setSourceText(prefix + ta.value.slice(paste.end), prefix.length);
+    afterSourceChange();
+    showToast(['Formatting converted.'].concat(paste.prose.warnings.map(function (w) { return w.message; })).join(' '));
   }
+  pastedContent = null;
+  tableOffer.hidden = true;
 });
 document.getElementById('dismissPaste').addEventListener('click', function () {
-  pastedTable = null;
+  pastedContent = null;
   tableOffer.hidden = true;
   ta.focus();
 });

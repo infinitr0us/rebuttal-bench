@@ -455,6 +455,49 @@ try {
         'missing HTML-only preview';
     } finally { if (tableDialog.open) tableDialog.close(); }`);
 
+  await check('formatted prose converts its native paste in place, warns about an equation and takes one undo', htmlPaste + `
+    setSourceText('before X after', 7, 8);
+    paste(ta, '<p>Our <b>result</b> <img alt="x"></p>', 'Our result x');
+    const native = 'before Our result x after';
+    if (ta.value !== native || tableOffer.hidden || pasteQuestion.textContent !== 'Convert the pasted formatting to Markdown?') {
+      return { value: ta.value, hidden: tableOffer.hidden, question: pasteQuestion.textContent };
+    }
+    ta.setSelectionRange(0, 0);
+    convertPaste.click();
+    if (ta.value !== 'before Our **result** x after' || tableDialog.open || !tableOffer.hidden ||
+        !toast.textContent.includes('equations')) return { value: ta.value, msg: toast.textContent };
+    ta.focus(); document.execCommand('undo');
+    return ta.value === native || ta.value;`);
+
+  await check('a draft switch drops a formatting offer even when both drafts contain the pasted text', htmlPaste + `
+    const original = draftMeta.active, id = createDraft('Clipboard check', 'same');
+    try {
+      setSourceText('X', 0, 1); paste(ta, '<strong>same</strong>', 'same');
+      if (tableOffer.hidden) return 'missing offer';
+      switchDraft(id);
+      convertPaste.click();
+      return tableOffer.hidden && ta.value === 'same' && !tableDialog.open || ta.value;
+    } finally { switchDraft(original); window.confirm = () => true; deleteDraft(id); }`);
+
+  await check('plain clipboard HTML and formatting already present in the native text have no offer', htmlPaste + `
+    for (const [markup, text] of [['<p>Literal *star*</p>', 'Literal *star*'], ['<b>word</b>', '**word**'],
+        ['<img src="unavailable">', 'Equation']]) {
+      setSourceText('X', 0, 1); paste(ta, markup, text);
+      if (ta.value !== text || !tableOffer.hidden) return { text, value: ta.value, hidden: tableOffer.hidden };
+    }
+    return true;`);
+
+  await check('Word list markers followed by tabs convert to a list and inline selections keep their edge spaces', htmlPaste + `
+    setSourceText('X', 0, 1);
+    paste(ta, '<p class="MsoListParagraph">1. First</p><p class="MsoListParagraph">2. Next</p>', '1.\\tFirst\\n2.\\tNext');
+    if (tableOffer.hidden) return 'missing Word list offer';
+    convertPaste.click();
+    if (tableDialog.open || ta.value !== '1. First\\n2. Next') return ta.value;
+    setSourceText('aXb', 1, 2);
+    paste(ta, '<b> word </b>', ' word ');
+    convertPaste.click();
+    return ta.value === 'a **word** b' || ta.value;`);
+
   await check('math compaction becomes available when MathJax is ready, even for a cached draft', `
     const src = '$ x + \\\\frac{1}{2} $';
     setSourceText(src, 0);
@@ -1086,11 +1129,11 @@ try {
   await check('an offer to convert a pasted table expires when the open draft changes', `
     const origId = draftMeta.active;
     const tsv = 'A\\tB\\n1\\t2';
-    pastedTable = { draft: origId, source: tsv, start: 0, end: tsv.length }; tableOffer.hidden = false;
+    pastedContent = { draft: origId, source: tsv, start: 0, end: tsv.length }; tableOffer.hidden = false;
     document.querySelector('#draftTools .dadd').click(); await wait(50);
-    const gone = !pastedTable && tableOffer.hidden;
+    const gone = !pastedContent && tableOffer.hidden;
     setSourceText(tsv, 0); clearTimeout(timer);
-    pastedTable = { draft: origId, source: tsv, start: 0, end: tsv.length }; /* as if left over */
+    pastedContent = { draft: origId, source: tsv, start: 0, end: tsv.length }; /* as if left over */
     document.getElementById('convertPaste').click(); await wait(50);
     const refused = !tableDialog.open;
     if (tableDialog.open) tableDialog.close();
