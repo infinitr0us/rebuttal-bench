@@ -3691,10 +3691,31 @@ function htmlTableStyle(el, inherited) {
   return (bold ? 1 : 0) + (em ? 2 : 0);
 }
 
+function htmlScriptTag(el) {
+  if (el.localName === 'sup' || el.localName === 'sub') return el.localName;
+  var align = ((el.style && el.style.verticalAlign) || '').toLowerCase();
+  return align === 'super' ? 'sup' : align === 'sub' ? 'sub' : '';
+}
+
+function htmlScriptMarkdown(kind, text) {
+  return '$' + (kind === 'sup' ? '^' : '_') + '{' + tableMath(text) + '}$';
+}
+
+/* Extract a simple semantic subscript or superscript via walkTableCell's plain
+   pass so table import and prose paste share one rule and representation. */
+function readHtmlScript(node, kind, warn) {
+  var parts = [];
+  var simple = walkTableCell(node, 0, kind, function (v) { parts.push(v); }, warn);
+  var value = parts.join('').replace(/\s+/g, ' ');
+  if (simple && /^[A-Za-z0-9+*-]{1,32}$/.test(value.trim())) return { value: value, kind: kind };
+  if (value.trim()) warn(kind, 'Kept complex ' + (kind === 'sub' ? 'subscript' : 'superscript') + ' as text.');
+  return { value: value, kind: '' };
+}
+
 /* The plain pass inside code, subscripts and superscripts follows the same rules for
    whitespace and ignored elements. The explicit stack also handles deeply
    nested wrappers in a malformed clipboard fragment. */
-function walkTableCell(root, inherited, plain, emit, warn, keepMediaText) {
+function walkTableCell(root, inherited, plain, emit, warn) {
   var stack = [{ node: root, style: inherited }], plainText = true;
   while (stack.length) {
     var item = stack.pop(), node = item.node, style = item.style;
@@ -3703,23 +3724,25 @@ function walkTableCell(root, inherited, plain, emit, warn, keepMediaText) {
     var tag = node.localName;
     if (node.nodeType !== 1 || /^(script|style|colgroup|table|template)$/.test(tag)) continue;
     if (PASTE_MEDIA.test(tag)) {
-      if (keepMediaText) { warn('media', PASTE_MEDIA_WARNING); emit(pasteAlt(node), style); }
-      if (keepMediaText || tag === 'img') continue;
+      if (plain) plainText = false;
+      warn('media', PASTE_MEDIA_WARNING);
+      emit(pasteAlt(node), style);
+      continue;
     }
-    if (plain && node !== root && (tag !== 'span' || htmlTableStyle(node, 0))) plainText = false;
+    var script = node !== root && htmlScriptTag(node);
+    if (plain && node !== root && (tag !== 'span' || htmlTableStyle(node, 0) || (script && script !== plain))) plainText = false;
     if (tag === 'br') { emit(' ', style); continue; }
     if (tag === 'a') warn('link', 'Kept link text only (venues often forbid links).');
     style = plain ? 0 : htmlTableStyle(node, style);
-    if (!plain && /^(code|sub|sup)$/.test(tag)) {
-      var parts = [];
-      var simple = walkTableCell(node, 0, true, function (v) { parts.push(v); }, warn, keepMediaText);
-      var value = parts.join('').replace(/\s+/g, ' ');
-      if (tag === 'code') emit(value, style, 'code');
-      else if (simple && /^[A-Za-z0-9+*-]{1,32}$/.test(value.trim())) emit(value, style, tag);
-      else if (value.trim()) {
-        warn(tag, 'Kept complex ' + (tag === 'sub' ? 'subscript' : 'superscript') + ' as text.');
-        emit(value, style);
-      } else emit(value, style);
+    if (!plain && (tag === 'code' || script)) {
+      if (tag === 'code') {
+        var parts = [];
+        walkTableCell(node, 0, true, function (v) { parts.push(v); }, warn);
+        emit(parts.join('').replace(/[\r\n]+/g, ' ').replace(/\u00a0/g, ' '), style, 'code');
+      } else {
+        var res = readHtmlScript(node, script, warn);
+        emit(res.value, style, res.kind || undefined);
+      }
       continue;
     }
     if (/^(p|div|li)$/.test(tag)) {
@@ -3733,7 +3756,7 @@ function walkTableCell(root, inherited, plain, emit, warn, keepMediaText) {
   return plainText;
 }
 
-function htmlTableCell(cell, warn, keepMediaText) {
+function htmlTableCell(cell, warn) {
   var ancestors = [], style = 0, runs = [];
   for (var el = cell.parentElement; el; el = el.parentElement) ancestors.push(el);
   while (ancestors.length) style = htmlTableStyle(ancestors.pop(), style);
@@ -3742,11 +3765,11 @@ function htmlTableCell(cell, warn, keepMediaText) {
     var prev = runs[runs.length - 1];
     if (!kind && prev && !prev.kind && prev.style === fmt) prev.value += value;
     else runs.push({ value: value, style: fmt, kind: kind });
-  }, warn, keepMediaText);
+  }, warn);
   var markdown = htmlStyledRuns(runs, function (run, text, index) {
     var value;
     if (run.kind === 'code') value = tableCode(text);
-    else if (run.kind) value = '$' + (run.kind === 'sup' ? '^' : '_') + '{' + tableMath(text) + '}$';
+    else if (run.kind) value = htmlScriptMarkdown(run.kind, text);
     else {
       /* Clipboard links keep their visible label even when GFM would turn
          that label back into a URL or email link. */
@@ -3771,7 +3794,12 @@ function htmlStyledRuns(runs, write) {
   });
   function entity(ch) { return '&#' + ch.charCodeAt(0) + ';'; }
   runs.forEach(function (run, index) {
-    var raw = run.value.replace(/\s+/g, ' '), text = raw.trim();
+    /* Monospace runs and pre / pre-wrap spans carry significant spaces
+       (byte literals, \verb|A  B|); collapse runs of whitespace elsewhere. */
+    var raw = run.keepSpaces || run.kind === 'code'
+      ? run.value.replace(/[\r\n]+/g, ' ').replace(/\u00a0/g, ' ')
+      : run.value.replace(/\s+/g, ' ');
+    var text = raw.trim();
     if (!text) { if (raw) space = true; return; }
     var value = write(run, text, index), closed = '', opened = '';
     /* Close only the styles that end here. Spaces at a style boundary
@@ -3814,7 +3842,7 @@ function readHtmlTable(doc) {
   return null;
 }
 
-function htmlTableGrid(trs, keepMediaText) {
+function htmlTableGrid(trs) {
   var rows = [], warnings = [], warned = {}, occupied = [], align = [], numbers = [];
   var headers = 0, width = 0, group, r;
   function warn(kind, message) {
@@ -3847,7 +3875,7 @@ function htmlTableGrid(trs, keepMediaText) {
       for (var j = 0; j < cols; j++) {
         if (occupied[col + j] > r) { col += j + 1; j = -1; }
       }
-      var content = htmlTableCell(cell, warn, keepMediaText), cellAlign = alignment(cell) || rowAlign;
+      var content = htmlTableCell(cell, warn), cellAlign = alignment(cell) || rowAlign;
       for (j = 0; j < cols; j++, col++) {
         cells[col] = j ? '' : content.markdown;
         if (height > 1) occupied[col] = r + height;
@@ -3948,7 +3976,7 @@ function proseLine(text) {
 }
 
 /* Bits 1 and 2 are htmlTableStyle's emphasis. 4 marks monospace runs,
-   8 preserves line breaks in the pre-wrap spans Docs puts on the clipboard. */
+   8 preserves line breaks, and 16 keeps runs of spaces in pre / pre-wrap. */
 function proseStyle(el, inherited) {
   var style = htmlTableStyle(el, inherited), css = el.getAttribute('style') || '', inline = el.style || {};
   /* Word also emits complex-script declarations. Prefer the ordinary style
@@ -3957,8 +3985,11 @@ function proseStyle(el, inherited) {
   if (!inline.fontStyle && !/^(i|em)$/.test(el.localName) && /(?:^|;)\s*mso-bidi-font-style:\s*italic\b/i.test(css)) style |= 2;
   var family = inline.fontFamily || el.getAttribute('face');
   var mono = family ? /\b(monospace|courier(?: new)?|consolas|menlo|monaco|lucida console)\b/i.test(family) : inherited & 4;
-  var breaks = inline.whiteSpace ? /^(pre|pre-wrap|pre-line|break-spaces)$/.test(inline.whiteSpace) : inherited & 8;
-  return style | (mono || /^(code|pre)$/.test(el.localName) ? 4 : 0) | (breaks || el.localName === 'pre' ? 8 : 0);
+  var ws = (inline.whiteSpace || '').toLowerCase();
+  var breaks = ws ? /^(pre|pre-wrap|pre-line|break-spaces)$/.test(ws) : inherited & 8;
+  var keepSpaces = ws ? /^(pre|pre-wrap|break-spaces)$/.test(ws) : inherited & 16;
+  return style | (mono || /^(code|pre)$/.test(el.localName) ? 4 : 0) |
+    (breaks || el.localName === 'pre' ? 8 : 0) | (keepSpaces || el.localName === 'pre' ? 16 : 0);
 }
 
 /* List levels from Docs can be structural, aria-level, or a CSS indent.
@@ -4033,20 +4064,28 @@ function proseList(items) {
 function htmlToMarkdown(doc, options) {
   if (!doc || !doc.body) return null;
   var warnings = [], formatted = false, hasList = false;
+  function warnOnce(message) {
+    if (!warnings.some(function (w) { return w.message === message; })) warnings.push({ message: message });
+  }
   function flow() { return { blocks: [], lines: [], runs: [] }; }
   function run(f, value, style, kind, markdown) {
     if (!value) return;
+    var keepSpaces = !!(style & 16);
     if (!kind && (style & 4)) kind = 'code';
+    if (kind === 'code') keepSpaces = true;
     style &= 3;
     if (f.bold) style |= 1;
-    if ((style || kind === 'code' || (kind === 'link' && markdown !== value.trim())) && /\S/.test(value)) formatted = true;
+    if ((style || kind === 'code' || kind === 'sup' || kind === 'sub' || (kind === 'link' && markdown !== value.trim())) && /\S/.test(value)) formatted = true;
     var last = f.runs[f.runs.length - 1];
-    if (last && kind !== 'link' && kind === last.kind && style === last.style) last.value += value;
-    else f.runs.push({ value: value, style: style, kind: kind, markdown: markdown });
+    if (last && (!kind || kind === 'code') && kind === last.kind && style === last.style && keepSpaces === !!last.keepSpaces) last.value += value;
+    else f.runs.push({ value: value, style: style, kind: kind, markdown: markdown, keepSpaces: keepSpaces });
   }
   function endLine(f) {
     var line = htmlStyledRuns(f.runs, function (r, text) {
-      return r.kind === 'link' ? r.markdown : r.kind === 'code' ? codeSpan(text) : proseLiteral(text);
+      if (r.kind === 'link') return r.markdown;
+      if (r.kind === 'code') return codeSpan(text);
+      if (r.kind === 'sup' || r.kind === 'sub') return htmlScriptMarkdown(r.kind, text);
+      return proseLiteral(text);
     });
     f.lines.push(proseLine(line));
     f.runs = [];
@@ -4063,7 +4102,7 @@ function htmlToMarkdown(doc, options) {
     for (var i = 0; i < f.blocks.length;) {
       var b = f.blocks[i++], text = b.text, gap = '\n\n';
       if (b.table) {
-        var grid = b.table.rows.length >= 2 && htmlTableGrid(b.table.rows, true);
+        var grid = b.table.rows.length >= 2 && htmlTableGrid(b.table.rows);
         if (grid) {
           var table = tableMarkdown(grid, options);
           text = table.markdown;
@@ -4098,7 +4137,7 @@ function htmlToMarkdown(doc, options) {
     var tag = el.localName;
     if (el.nodeType !== 1 || el === f.marker || /^(script|style|template|head)$/.test(tag) || el.hidden) return;
     if (PASTE_MEDIA.test(tag)) {
-      if (!warnings.some(function (w) { return w.message === PASTE_MEDIA_WARNING; })) warnings.push({ message: PASTE_MEDIA_WARNING });
+      warnOnce(PASTE_MEDIA_WARNING);
       run(f, pasteAlt(el), style);
       return;
     }
@@ -4108,7 +4147,7 @@ function htmlToMarkdown(doc, options) {
       var href = el.getAttribute('href').trim();
       if (href && !/[\x00-\x1f]/.test(href) && !/^(?!(?:https?|ftp|mailto):)[a-z][a-z\d+.-]*:/i.test(href)) {
         var label = flow();
-        children(el, style & 12, label);
+        children(el, style & 28, label);
         var md = render(label), raw = el.textContent.replace(/\s+/g, ' ');
         if (md) {
           var bare = /^(?:https?|ftp):\/\//i.test(href) && raw.trim() === href && md === proseLine(proseLiteral(href));
@@ -4159,6 +4198,12 @@ function htmlToMarkdown(doc, options) {
       return;
     }
     var block = /^(p|div|pre|section|article|header|footer|tr)$/.test(tag);
+    var script = !block && !(style & 4) && htmlScriptTag(el);
+    if (script) {
+      var res = readHtmlScript(el, script, function (_kind, msg) { warnOnce(msg); });
+      run(f, res.value, style, res.kind || undefined);
+      return;
+    }
     if (block) endParagraph(f);
     children(el, style, f, list);
     if (block) endParagraph(f);
@@ -4169,7 +4214,7 @@ function htmlToMarkdown(doc, options) {
   if (root.blocks.length === 1 && root.blocks[0].table) {
     var lone = root.blocks[0].table;
     var keepGrid = options && options.keepGrid;
-    var grid = (lone.rows.length >= 2 && htmlTableGrid(lone.rows, !keepGrid)) || readHtmlTable(lone);
+    var grid = (lone.rows.length >= 2 && htmlTableGrid(lone.rows)) || readHtmlTable(lone);
     return grid && keepGrid ? { grid: grid } : tableMarkdown(grid, options);
   }
   var markdown = render(root);
@@ -4177,6 +4222,47 @@ function htmlToMarkdown(doc, options) {
   var result = { markdown: markdown, warnings: warnings };
   if (options && options.keepGrid) result.hasList = hasList;
   return result;
+}
+
+function pasteBlocks(md) {
+  if (!md || !window.marked || typeof window.marked.lexer !== 'function') return { start: false, end: false };
+  var tokens = window.marked.lexer(md.trim()).filter(function (t) { return t.type !== 'space'; });
+  var block = /^(?:table|list|heading|blockquote|code)$/;
+  return {
+    start: !!tokens.length && block.test(tokens[0].type),
+    end: !!tokens.length && block.test(tokens[tokens.length - 1].type)
+  };
+}
+
+/* Separate a converted paste that starts or ends with a Markdown block from
+   adjacent draft text so a trailing table cannot swallow the next sentence,
+   while keeping inline conversions inline. */
+function placeProsePaste(before, md, after) {
+  var edge = pasteBlocks(md), left = '', right = '';
+  if (edge.start && before.trim()) {
+    md = md.replace(/^[ \t]+/, '');
+    var pre = before + (md.match(/^\n*/) || [''])[0];
+    left = /\n[ \t]*\n$/.test(pre) ? '' : /\n[ \t]*$/.test(pre) ? '\n' : '\n\n';
+  }
+  if (edge.end && after.trim()) {
+    md = md.replace(/[ \t]+$/, '');
+    var post = (md.match(/\n*$/) || [''])[0] + after;
+    right = /^\n[ \t]*\n/.test(post) ? '' : /^[ \t]*\n/.test(post) ? '\n' : '\n\n';
+  }
+  var prefix = before + left + md;
+  return { text: prefix + right + after, caret: prefix.length };
+}
+
+function looksLikeTablePaste(text) {
+  /* A TeX array or tabular is a table paste only when the pasted text itself
+     is that environment, not when a sentence contains an array inside math. */
+  if (/^\s*(?:%[^\n]*\n\s*)*(?:\\\[|\$\$)?\s*\\begin\s*\{(?:tabular\*?|tabularx|array|table\*?)\}/.test(text)) return true;
+  var lines = text.replace(/^\n+|\n+$/g, '').split('\n');
+  if (lines.length < 2) return false;
+  var tabs = lines[0].split('\t').length - 1;
+  if (tabs && lines.every(function (s) { return s.split('\t').length === tabs + 1; })) return true;
+  if (/\\begin\s*\{/.test(text)) return false;
+  return lines.filter(function (s) { return /&.*\\\\/.test(s); }).length >= 2;
 }
 
 /* ---- compaction (pure): fewer characters, the same rendering ----
@@ -8625,25 +8711,36 @@ function exportOpenDraft() {
 }
 
 function discardPrint() {
+  var had = !!printRoot;
   printQueued = false;
   document.body.classList.remove('printing-drafts');
   if (printRoot) printRoot.remove();
   printRoot = null;
+  if (had) renderPreview();
 }
 
 function renderPrint() {
   var root = printRoot, papers = root.querySelectorAll('.printed-draft > .paper'), at = 0;
   printQueued = false;
   renderBusy = true;
+  /* Detach the open preview's MathItems first so typesetting a printed draft's
+     \label cannot overwrite a forward \eqref in the preview. */
+  clearOldMath(preview);
   function next() {
     /* Closing History or switching drafts cancels even a typeset in flight. */
     if (root !== printRoot) return;
     if (at === papers.length) return document.fonts && document.fonts.ready;
+    var paper = papers[at++];
     resetTeXState();
-    return MathJax.typesetPromise([papers[at++]]).then(next);
+    return MathJax.typesetPromise([paper]).then(function () {
+      /* Take this comment's math out of MathJax's document right away so a
+         later comment's \label cannot overwrite its forward \eqref. */
+      clearOldMath(paper);
+      return next();
+    });
   }
   Promise.resolve().then(next).then(function () {
-    clearOldMath(root); /* keep the rendered nodes, release the print-only MathItems */
+    clearOldMath(root); /* release any MathItems left on cancellation */
     if (root !== printRoot) return;
     document.body.classList.add('printing-drafts');
     window.print();
@@ -9903,15 +10000,6 @@ insertTableBtn.addEventListener('click', function () {
   showToast('Table inserted. ' + UNDO_HINT + ' undoes it.');
 });
 
-function looksLikeTablePaste(text) {
-  if (/\\begin\s*\{(?:tabular\*?|tabularx|array)\}/.test(text)) return true;
-  var lines = text.replace(/^\n+|\n+$/g, '').split('\n');
-  if (lines.length < 2) return false;
-  var tabs = lines[0].split('\t').length - 1;
-  if (tabs && lines.every(function (s) { return s.split('\t').length === tabs + 1; })) return true;
-  return lines.filter(function (s) { return /&.*\\\\/.test(s); }).length >= 2;
-}
-
 /* Let the native paste happen, including its undo entry. The offer belongs
    to that exact draft and range and expires on the next change. */
 onEditor('paste', function (e) {
@@ -9965,8 +10053,8 @@ convertPaste.addEventListener('click', function () {
       openTableImport(paste, ta.value.slice(paste.start, paste.end));
       return;
     }
-    var prefix = ta.value.slice(0, paste.start) + paste.prose.markdown;
-    setSourceText(prefix + ta.value.slice(paste.end), prefix.length);
+    var placed = placeProsePaste(ta.value.slice(0, paste.start), paste.prose.markdown, ta.value.slice(paste.end));
+    setSourceText(placed.text, placed.caret);
     afterSourceChange();
     showToast(['Formatting converted.'].concat(paste.prose.warnings.map(function (w) { return w.message; })).join(' '));
   }

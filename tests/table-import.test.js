@@ -249,9 +249,30 @@ test('Excel clipboard fragment markers and stylesheet classes contribute no cont
     <body><!--StartFragment--><table><tr><td class="xl65">Model</td><td class="xl65">Score</td></tr>
     <tr><td class="xl65">Base<img src="/ignored.png" alt="icon"><style>.x{}</style><script>ignore()</script></td>
     <td class="xl65">9.5</td></tr></table><!--EndFragment--></body></html>`, {
-    format: 'html', compact: '|Model|Score|\n|:-|-:|\n|Base|9.5|',
-    padded: '| Model | Score |\n| :-    | -:    |\n| Base  | 9.5   |',
-    cells: [['Model', 'Score'], ['Base', '9.5']], align: ['left', 'right'], tags: { strong: [], img: [] },
+    format: 'html', compact: '|Model|Score|\n|:-|-:|\n|Baseicon|9.5|',
+    padded: '| Model    | Score |\n| :-       | -:    |\n| Baseicon | 9.5   |',
+    cells: [['Model', 'Score'], ['Baseicon', '9.5']], align: ['left', 'right'], tags: { strong: [], img: [] },
+    warnings: [[2, 'Images and embedded equations cannot be converted. Check the pasted text for missing content.']],
+  });
+});
+
+test('standalone HTML tables keep equation image alt text with the media warning', () => {
+  check(`<table><tr><th>Metric</th><th>Definition</th></tr>
+    <tr><td>Loss</td><td><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jk2cAAAAASUVORK5CYII=" alt="squared error"></td></tr></table>`, {
+    format: 'html', compact: '|Metric|Definition|\n|:-|:-|\n|Loss|squared error|',
+    padded: '| Metric | Definition    |\n| :-     | :-            |\n| Loss   | squared error |',
+    cells: [['Metric', 'Definition'], ['Loss', 'squared error']], align: ['left', 'left'], tags: { img: [] },
+    warnings: [[2, 'Images and embedded equations cannot be converted. Check the pasted text for missing content.']],
+  });
+});
+
+test('HTML tables preserve vertical-align super/sub and significant spaces inside code', () => {
+  check(`<table><tr><th>Item</th><th>Value</th></tr>
+    <tr><td>10<span style="vertical-align:super">-3</span> / x<span style="vertical-align:sub">i</span></td><td><code>A  B</code></td></tr></table>`, {
+    format: 'html', compact: '|Item|Value|\n|:-|:-|\n|10$^{-3}$ / x$_{i}$|`A  B`|',
+    padded: '| Item                | Value  |\n| :-                  | :-     |\n| 10$^{-3}$ / x$_{i}$ | `A  B` |',
+    cells: [['Item', 'Value'], ['10$^{-3}$ / x$_{i}$', 'A  B']], align: ['left', 'left'],
+    math: ['I:^{-3}', 'I:_{i}'], tags: { code: ['A  B'] },
   });
 });
 
