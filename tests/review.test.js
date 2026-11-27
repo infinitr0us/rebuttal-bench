@@ -140,7 +140,7 @@ const rows = (text) => plain(A.reviewPoints(text).points).map(p => p.label + ' '
 
 test('forum HTML keeps fields, item order, nested lists and paragraphs, including a selection without the outer div', () => {
   const field = (name, content) => '<div><strong class="note-content-field disable-tex-rendering">' + name +
-    ':</strong> <div class="note-content-value markdown-rendered">' + content + '</div></div>';
+    ':</strong><span style="display:inline"> </span><div class="note-content-value markdown-rendered">' + content + '</div></div>';
   const html = '<h4>Official Review by Reviewer g4H2</h4>' +
     field('Weaknesses', '<p>Two concerns:</p><ol><li>Missing <em>units</em>.<ul><li>Time axis</li></ul></li><li>Labels overlap.</li></ol>') +
     field('Questions', '<ul><li>Which run?</li><li>Why stop?</li></ul>') +
@@ -157,12 +157,19 @@ test('a plain forum selection separates items, drops list introductions, and kee
   ]);
 });
 
+test('fragmentary items, an independent paragraph before a list, and a nested list introduction', () => {
+  assert.deepEqual(rows('Weaknesses:\nMissing units\nUnclear axes\n\nThis observation also needs an answer.\n1. Check the timing.\n- Check the indexing.'), [
+    'W1 Missing units', 'W2 Unclear axes', 'W3 This observation also needs an answer.', 'W4 Check the timing.', 'W5 Check the indexing.'
+  ]);
+  assert.deepEqual(rows('Questions:\n- Please clarify:\n  - Which map?\n  - Which grid?'), ['Q1 Which map?', 'Q2 Which grid?']);
+});
+
 test('score and administrative fields bound concerns even with a long inline value or an unfamiliar field name', () => {
   assert.deepEqual(rows(['Weaknesses:', 'Minor: The axis has no unit.', 'Clarity: Which unit?', 'Rating: Borderline because this needs a better estimate of the error in the appendix.',
     'Questions: Why five bins?', 'Flag For Ethics Review: The committee has received a separate report covering the use of personal records.',
     'Limitations: Only one site.', 'Paper Formatting Concerns: None', 'Code Of Conduct Acknowledgement: Affirmed', 'Final Justification:', 'I retained my score.',
-    'Comments: Add the table.', 'Dataset Access Declaration:', 'The form was signed.'].join('\n')), [
-    'W1 Minor: The axis has no unit.', 'W2 Clarity: Which unit?', 'Q1 Why five bins?', 'L1 Only one site.', 'C1 Add the table.'
+    'Comments: Add the table.', 'Dataset Access Declaration:', 'The form was signed.', 'Questions: Which fold?', 'Resource Availability Declaration: A full statement follows in the record.'].join('\n')), [
+    'W1 Minor: The axis has no unit.', 'W2 Clarity: Which unit?', 'Q1 Why five bins?', 'L1 Only one site.', 'C1 Add the table.', 'Q2 Which fold?'
   ]);
 });
 

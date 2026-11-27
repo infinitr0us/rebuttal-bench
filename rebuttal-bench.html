@@ -5261,7 +5261,8 @@ function reviewField(line) {
   /* An unfamiliar standalone form heading ends the preceding value. In prose,
      "Minor: ..." or "Include Human Evaluation: ..." can introduce a concern. */
   if (letter === undefined) {
-    if (m[2].trim() || !/:|：/.test(line) || !/^[A-Z][a-z]+(?: [A-Z][a-z]+)+$/.test(title)) return null;
+    if (!/:|：/.test(line) || !/^[A-Z][a-z]+(?: [A-Z][a-z]+)+$/.test(title)) return null;
+    if (m[2].trim() && !/ (?:Acknowledgement|Assessment|Declaration|Decision|Justification|Rating|Score)$/.test(title)) return null;
     letter = null;
   }
   return { letter: letter, name: title, rest: m[2] };
@@ -5297,6 +5298,9 @@ function readHtmlReview(doc) {
   }
   for (var i = 0; i < names.length; i++) {
     var name = names[i], value = name.nextElementSibling;
+    /* Chrome can wrap the space after a field name in a styled span. */
+    while (value && value.nodeName === 'SPAN' && !value.classList.contains('note-content-value') &&
+        !value.textContent.trim()) value = value.nextElementSibling;
     if (!value || !value.classList.contains('note-content-value')) return null;
     fields.push(name.textContent.trim().replace(/[:：]?$/, ':') + '\n' + clean(read(value, '')));
   }
@@ -5350,18 +5354,19 @@ function reviewPoints(text) {
   var used = { W: 0, Q: 0, L: 0, C: 0 }, taken = Object.create(null);
   fields.forEach(function (f) {
     if (!f.letter) return;
-    var items = [], first = null, item = null, para = null, previous = '';
+    var items = [], listIndent = null, item = null, para = null, previous = '';
     var mixed = /strengths and weaknesses/i.test(f.name);
     f.lines.forEach(function (l) {
       var body = l.text.trim(), bare = body.replace(/\*\*|__/g, '');
       if (!body) { para = null; previous = ''; return; }
       var m = REVIEW_ITEM.exec(l.text);
-      var kind = m ? (m[2] || m[3] ? 'num' : m[4] ? 'bullet' : 'label') : null;
-      if (m && (!first || (kind === first.kind && m[1].length <= first.indent))) {
-        first = { kind: kind, indent: m[1].length };
+      if (m && /[:：]$/.test(bare) && l.text.slice(m[0].length).trim()) {
+        item = para = listIndent = null;
+      } else if (m && (listIndent === null || m[1].length <= listIndent)) {
+        listIndent = m[1].length;
         item = { start: l.start + m[0].length, end: l.start + l.text.length, own: m[5] ? pointName(m[5]) : null };
         items.push(item);
-      } else if (!m && (/:$/.test(bare) || /^#{1,6}\s/.test(bare) ||
+      } else if (!m && (/[:：]$/.test(bare) || /^#{1,6}\s/.test(bare) ||
           /^\[\d+\]\s/.test(body) || (mixed && /^\+\s/.test(body)))) {
         /* Neither a list introduction nor a bibliography entry belongs to the
            preceding item. In a mixed field + can explicitly mark strengths. */
@@ -5371,8 +5376,8 @@ function reviewPoints(text) {
       } else {
         /* A forum selection loses list markers. Terminal punctuation followed
            by a fresh statement separates items; keep hard-wrapped prose. */
-        if (!para || (/^(?:some (?:other|further) limitations|another (?:concern|weakness)|(?:why|how|could|can|does|do|what|which)\b.*\?)/i.test(body) && !/^\s/.test(l.text)) ||
-            (/[.!?。？！]["')\]]?$/.test(previous) && !/^\s/.test(l.text) && !/^[,.;:?!)]/.test(body))) {
+        var fresh = /^(?:(?:missing|unclear|limited|please|another concern|some (?:other|further) limitations)\b|(?:why|how|could|can|does|do|what|which)\b.*\?)/i.test(body);
+        if (!para || (!/^\s/.test(l.text) && !/^[,.;:?!)]/.test(body) && (fresh || /[.!?。？！]["')\]]?$/.test(previous)))) {
           para = { start: l.start, end: l.start, prose: true };
           items.push(para);
         }
@@ -5380,10 +5385,10 @@ function reviewPoints(text) {
       }
       previous = body;
     });
-    items.forEach(function (it, index) {
+    items.forEach(function (it) {
       var body = text.slice(it.start, it.end).trim(), plain = body.replace(/\*\*|__/g, '');
       if (!REVIEW_WORD.test(body) || /^\d+[.)]$/.test(body)) return;
-      if (it.prose && first && items[index + 1] && !items[index + 1].prose) return;
+      if (it.prose && /^(?:a )?(?:summary of )?(?:my |the )?(?:concerns|questions|suggestions|weaknesses) (?:are|is|follow(?:s)?)\s*(?:listed )?(?:as follows|below)?[.:]?$/i.test(plain)) return;
       if (/^(?:none|n\/?a|no|yes|does not apply|not applicable|see (?:above|below)|no(?: (?:further|other|additional|paper formatting))? (?:questions?|comments?|concerns?))[.!]?$/i.test(plain)) return;
       if (f.letter === 'L' && /^(?:yes[,.:]?\s*)?(?:the (?:authors|paper) (?:discuss|discusses|acknowledge|acknowledges) (?:the |their )?limitations|(?:the )?limitations are (?:discussed|acknowledged))(?: in (?:the )?(?:paper|appendix|supplementary material))?[.!]?$/i.test(plain)) return;
       if (/^(?:please )?(?:see|refer to) (?:the )?(?:writing issues in )?(?:weaknesses|questions|reasons to reject)[.!]?$/i.test(plain)) return;
@@ -5395,7 +5400,9 @@ function reviewPoints(text) {
       if (label && taken[label]) label = null;
       if (label) {
         var letter = label.charAt(0), n = +label.slice(1);
-        if (used[letter] !== undefined && n > used[letter]) used[letter] = n;
+        /* An enormous pasted identifier remains a label, but must not put
+           subsequent generated numbers beyond exact integer arithmetic. */
+        if (n < 9007199254740991 - text.length && n > used[letter]) used[letter] = n;
       } else {
         do { label = f.letter + (++used[f.letter]); } while (taken[label]);
       }
