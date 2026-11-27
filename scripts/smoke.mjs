@@ -1215,6 +1215,55 @@ try {
     switchDraft(home); await wait(50);
     return both && renamed && draftMeta.active === home && !draftById(ab) && !draftById(k9) || { both, renamed, titles: titles() };`);
 
+  const REVIEW = 'Official Review of Submission1 by Reviewer k9F2\\nWeaknesses:\\n1. No ablation on the number of experts.\\n' +
+    '2. Missing comparison with Switch Transformer.\\nQuestions:\\n- Why is the loss weighted by 0.01?\\nRating: 4';
+  await check('the review view lists the points and what the draft answers; Quote and the skeleton are one undo each', `
+    const id = createDraft('Smoke review', ''); saveDraftMeta(); switchDraft(id); await wait(50);
+    const base = 'We thank the reviewer.\\n\\n**W1.** We added it.';
+    setSourceText(base, 0); updateAll();
+    viewReviewBtn.click(); await wait(20);
+    const shown = !reviewView.hidden && scroller.style.visibility === 'hidden' && prefs.view === 'review';
+    reviewInput.value = ${JSON.stringify(REVIEW)}; reviewInput.dispatchEvent(new Event('input')); await wait(20);
+    const rows = () => [...reviewList.querySelectorAll('.rpoint')].map((r) => r.querySelector('.rlabel').textContent + ':' + r.className.replace('rpoint ', '')).join(',');
+    const listed = rows() === 'W1:labelled,W2:missing,Q1:missing' && reviewBadge.textContent === '1/3';
+    reviewList.querySelector('.rgo[data-i="0"]').click(); await wait(20);
+    const went = ta.value.slice(ta.selectionStart).startsWith('**W1.**');
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    reviewList.querySelector('.rquote[data-i="1"]').click(); await wait(50);
+    const quoted = ta.value === base + '\\n\\n> **W2.** Missing comparison with Switch Transformer.' && rows() === 'W1:labelled,W2:labelled,Q1:missing';
+    ta.focus(); document.execCommand('undo'); await wait(50);
+    const undone = ta.value === base;
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    skeletonBtn.click(); await wait(50);
+    const skeleton = ta.value === base + '\\n\\n> **W2.** Missing comparison with Switch Transformer.\\n\\n> **Q1.** Why is the loss weighted by 0.01?';
+    document.execCommand('undo'); await wait(50);
+    const undone2 = ta.value === base;
+    const note = !reviewNote.hidden && !!document.getElementById('reviewNameTab');
+    document.getElementById('reviewNameTab').click(); await wait(20);
+    const named = draftById(id).name === 'Reviewer k9F2' && reviewNote.hidden;
+    return shown && listed && went && quoted && undone && skeleton && undone2 && note && named ||
+      { shown, listed, rows: rows(), badge: reviewBadge.textContent, went, quoted, undone, skeleton, undone2, note, named, value: ta.value };`);
+
+  await check('each draft keeps its own review', `
+    const id = draftMeta.list.find((d) => d.name === 'Reviewer k9F2').id;
+    const other = createDraft('No review', ''); saveDraftMeta(); switchDraft(other); await wait(50);
+    const empty = reviewInput.value === '' && reviewBadge.textContent === '' && reviewList.children.length === 0;
+    switchDraft(id); await wait(50);
+    const back = reviewInput.value === ${JSON.stringify(REVIEW)} && localStorage.getItem('rebuttal-bench-review-' + id) === reviewInput.value;
+    window.confirm = () => true; deleteDraft(other); await wait(20);
+    return empty && back || { empty, back, box: reviewInput.value.slice(0, 40) };`);
+  await load();
+  await check('a review and the review view survive a reload, and go with their draft', `
+    const id = draftMeta.list.find((d) => d.name === 'Reviewer k9F2').id;
+    switchDraft(id); await wait(50);
+    const kept = prefs.view === 'review' && !reviewView.hidden && reviewInput.value === ${JSON.stringify(REVIEW)} &&
+      reviewList.querySelectorAll('.rpoint').length === 3;
+    window.confirm = () => true; deleteDraft(id); await wait(50);
+    const gone = localStorage.getItem('rebuttal-bench-review-' + id) === null && !draftById(id);
+    viewPreviewBtn.click(); await wait(20);
+    return kept && gone && prefs.view === 'preview' && reviewView.hidden && scroller.style.visibility === '' ||
+      { kept, gone, view: prefs.view };`);
+
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).
