@@ -202,3 +202,54 @@ test('point offsets address the original CRLF review', () => {
 test('a question written entirely in Chinese is a point', () => {
   assert.deepEqual(rows('Questions:\n- 时间单位是什么？'), ['Q1 时间单位是什么？']);
 });
+
+test('review labels and skeleton labels use the same W/Q/L/C grammar', () => {
+  const ps = A.reviewPoints('Weaknesses:\n(Weakness2) Small sample.\n**Q12.** Which year?\n[Limitation 4] One region.\nConcern #7: Fix the axis.\nC8. Adjust the key.\nL9: One season.').points;
+  const names = ['W2', 'Q12', 'L4', 'C7', 'C8', 'L9'];
+  assert.deepEqual(plain(ps.map(p => p.label)), names);
+  for (const quotes of [true, false]) {
+    const source = A.reviewSkeleton(ps, [], quotes).join('\n\n');
+    const coverage = A.reviewCoverage(ps, source);
+    assert.deepEqual(plain(coverage.map(c => c.status)), names.map(() => 'labelled'));
+    assert.deepEqual(plain(A.reviewSkeleton(ps, coverage, quotes)), []);
+  }
+});
+
+test('one heading may cover several labels and a subpart name never covers its parent', () => {
+  const ps = A.reviewPoints('W2: Small sample.\nQuestion1: What unit?\nQ2: Which scale?').points;
+  const heading = '### **(Weakness2, Question1)** Samples and units';
+  const source = 'Opening\n\n' + heading + '\n\n### Q2a\nAn intermediate result.';
+  const coverage = plain(A.reviewCoverage(ps, source));
+  assert.deepEqual(coverage.map(c => c.status), ['labelled', 'labelled', 'missing']);
+  assert.deepEqual(coverage.slice(0, 2).map(c => source.slice(c.start, c.end).trim()), [heading, heading]);
+  for (const label of ['(Weakness2)', '[W2]', 'W2:', '**W2.**', 'Weakness 2']) {
+    assert.equal(A.reviewCoverage(ps, label + '\n\nResponse.')[0].status, 'labelled', label);
+  }
+  for (const suffix of ['a', 'Budget', '三']) assert.equal(A.pointName('Q2' + suffix), null);
+});
+
+test('quote coverage disambiguates shared openings and accepts a complete short point', () => {
+  const shared = 'Which sampling interval did the team use for ';
+  const ps = A.reviewPoints('Questions:\n- ' + shared + 'the spring survey?\n- ' + shared + 'the autumn survey?\n- Any ice?').points;
+  const draft = '> ' + shared + 'the autumn survey?\n\n> Any ice?';
+  const cov = plain(A.reviewCoverage(ps, draft));
+  assert.deepEqual(cov.map(c => c.status), ['missing', 'quoted', 'quoted']);
+  assert.deepEqual(cov.slice(1).map(c => draft.slice(c.start, c.end)), [shared + 'the autumn survey?', 'Any ice?']);
+});
+
+test('only visible quote text counts, including the words of a link label', () => {
+  const q = 'Where is the weather station located?', ps = A.reviewPoints('Questions: ' + q).points;
+  for (const source of ['[site]: /unused "' + q + '"', '[site]: /somewhere "' + q + '"\n\n[Map][site]', '`' + q + '`',
+    '~~~\n' + q + '\n~~~', '<!-- ' + q + ' -->', '[Answer](/map "' + q + '")']) {
+    assert.equal(A.reviewCoverage(ps, source)[0].status, 'missing', source);
+  }
+  assert.equal(A.reviewCoverage(ps, '> [Where is](/map) the weather station located?')[0].status, 'quoted');
+});
+
+test('quote offsets survive case folding and CRLF before and inside the quote', () => {
+  const ps = A.reviewPoints('Questions: Which location did you use?').points;
+  const draft = 'İstanbul\r\n\r\n> Which location\r\n> did you use?';
+  const c = A.reviewCoverage(ps, draft)[0];
+  assert.equal(c.status, 'quoted');
+  assert.equal(draft.slice(c.start, c.end), 'Which location\r\n> did you use?');
+});

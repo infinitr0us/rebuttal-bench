@@ -4886,8 +4886,10 @@ function importPlan(existing, incoming) {
    ends in punctuation or stands alone (**W1.**, **Q2:**, **Reviewer aBcD**),
    or a point's name (W1:, Q2., Weakness 3:, [W4]). Bold that starts a
    sentence (**We thank** the reviewer) is no label. */
-var SECTION_NAME = '(?:[WQ]\\d{1,2}|(?:weakness|question|comment|concern|point|issue|limitation)s?\\s*#?\\d{1,2})';
-var SECTION_LABEL = new RegExp('^(?:\\[' + SECTION_NAME + '\\]|' + SECTION_NAME + '\\s*[.:)])', 'i');
+var REVIEW_NAME = '(?:[WQLC]\\d+|(?:weakness|question|comment|concern|limitation)s?[ \\t]*#?\\d+)(?![\\p{L}\\p{N}])';
+var SECTION_NAME = '(?:' + REVIEW_NAME + '|(?:point|issue)s?\\s*#?\\d{1,2})';
+var SECTION_LABEL = new RegExp('^(?:[\\[(]' + SECTION_NAME + '(?:\\s*,\\s*' + SECTION_NAME +
+  ')*[\\])]|' + SECTION_NAME + '\\s*(?:[.:)]|$))', 'iu');
 
 function sectionLabel(s) {
   s = s.replace(/^\s+/, '');
@@ -4895,7 +4897,7 @@ function sectionLabel(s) {
   if (bold && bold[2].length <= 100 &&
       (/[.:?)\]]$/.test(bold[2]) || /^\s*(?:$|[:.\u2013\u2014-])/.test(bold[3]) ||
        /* "**W3** (novelty)": a point's name, not "**Our method** (Sec. 3) improves" */
-       (/^\s*\(/.test(bold[3]) && new RegExp('^' + SECTION_NAME + '$', 'i').test(bold[2])))) return true;
+       (/^\s*\(/.test(bold[3]) && new RegExp('^' + SECTION_NAME + '$', 'iu').test(bold[2])))) return true;
   return SECTION_LABEL.test(s);
 }
 
@@ -5065,20 +5067,27 @@ function reviewerRef(text, i, known) {
 
 /* A point's name as Sections and the review's points write it, made
    comparable: "W1", "Weakness 1" and "weakness #1" are all W1. */
-var POINT_NAME = /^(?:([WQ])(\d{1,2})(?!\d)|(weakness|question|comment|concern|point|issue|limitation)s?\s*#?(\d{1,2})(?!\d))/i;
+var POINT_NAME = new RegExp('^(?:\\*\\*|__)?[\\[(]?(' + REVIEW_NAME + ')', 'iu');
 function pointName(s) {
   var m = POINT_NAME.exec(s);
-  if (!m) return null;
-  return m[1] ? m[1].toUpperCase() + (+m[2]) : m[3].charAt(0).toUpperCase() + (+m[4]);
+  return m ? m[1].charAt(0).toUpperCase() + m[1].match(/\d+$/)[0].replace(/^0+(?=\d)/, '') : null;
 }
 
-/* The parts of a draft whose title starts with a point's name (see
-   commentSections): [{label, start, end}], in order. */
+/* Read the original first line. Sections abbreviates titles for display,
+   and a combined heading can have several labels beyond that abbreviation. */
 function labelledParts(text) {
   var r = commentSections(text, true), out = [];
   (r ? r.sections : []).forEach(function (s) {
-    var p = s.kind === 'opening' ? null : pointName(s.title.replace(/^\[/, ''));
-    if (p) out.push({ label: p, start: s.start, end: s.end });
+    if (s.kind === 'opening') return;
+    var stop = text.indexOf('\n', s.start);
+    var line = text.slice(s.start, stop < 0 ? text.length : stop).replace(/^\s*(?:#{1,6}\s+|>\s*|(?:[*+-]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?/, '');
+    var m;
+    while ((m = POINT_NAME.exec(line))) {
+      out.push({ label: pointName(m[1]), start: s.start, end: s.end });
+      var comma = /^[)\]]?(?:\*\*|__)?\s*,\s*/.exec(line.slice(m[0].length));
+      if (!comma) break;
+      line = line.slice(m[0].length + comma[0].length);
+    }
   });
   return out;
 }
@@ -5239,7 +5248,8 @@ var REVIEW_FIELD_INDEX = (function () {
 })();
 /* A list item's marker at the start of a line: a number, a bullet, or the
    reviewer's own label. */
-var REVIEW_ITEM = /^([ \t]{0,8})(?:(\d{1,2})[.)]|\((\d{1,2})\)|([-*•●▪◦‣])|\[?((?:[WQLC]\d{1,2}|(?:weakness|question|limitation|concern|comment)[ \t]*#?\d{1,2}))\]?[ \t]*[.:)\]–-]?)(?=[ \t]+\S|$)/i;
+var REVIEW_ITEM = new RegExp('^([ \\t]{0,8})(?:(\\d+)[.)]|\\((\\d+)\\)|([-*•●▪◦‣])|' +
+  '(?:\\*\\*|__)?[\\[(]?(' + REVIEW_NAME + ')[\\])]?[ \\t]*[.:)–-]?(?:\\*\\*|__)?)(?=[ \\t]+\\S|$)', 'iu');
 
 /* The field a line names, as {letter, name, rest: the text after the name
    on the same line}, or null. Markup around the name (**, ##) is ignored. */
@@ -5403,21 +5413,61 @@ function reviewPoints(text) {
    quote), else 'missing' (no part labelled so: perhaps answered in other
    words, so the page never says unanswered). */
 function reviewCoverage(points, draft) {
-  var parts = typeof draft === 'string' && draft.trim() ? labelledParts(draft) : [];
-  /* Whitespace and case folded, with each folded character's place. */
+  draft = typeof draft === 'string' ? draft : '';
+  if (/\r/.test(draft)) {
+    /* Marked locates LF text. Translate both ends of its half-open ranges. */
+    var offsets = [], lf = draft.replace(/\r\n?|\n|[^\r\n]+/g, function (run, start) {
+      var count = run === '\r\n' ? 1 : run.length;
+      for (var j = 0; j < count; j++) offsets.push(start + j);
+      return run.charAt(0) === '\r' ? '\n' : run;
+    });
+    offsets.push(draft.length);
+    return reviewCoverage(points, lf).map(function (c) {
+      if (c.start >= 0) { c.start = offsets[c.start]; c.end = offsets[c.end]; }
+      return c;
+    });
+  }
+  var model = draft && collectMarkedRanges(draft), labels = Object.create(null);
+  if (model) labelledParts(draft).forEach(function (p) { if (!labels[p.label]) labels[p.label] = p; });
+  var excluded = model ? model.ranges.filter(function (r) {
+    return /^(?:code|codespan|html|image)$/.test(r.type);
+  }).concat(model.definitions, model.unlocated, model.dropped, looseFenceRanges(draft)) : [];
+  var mask = makeMask(draft.length, excluded), syntax = makeMask(draft.length, model ? model.hidden : []);
   var flat = '', at = [], prevSpace = true;
-  for (var i = 0; typeof draft === 'string' && i < draft.length; i++) {
+  for (var i = 0; model && i < draft.length; i++) {
+    if (mask[i]) {
+      if (!i || !mask[i - 1]) { flat += '\u0000'; at.push(i); }
+      continue;
+    }
+    if (syntax[i]) continue;
     var ch = draft[i];
     if (/\s|>/.test(ch)) { if (!prevSpace) { flat += ' '; at.push(i); prevSpace = true; } continue; }
     if (ch === '*' || ch === '_') continue;
-    flat += ch.toLowerCase(); at.push(i); prevSpace = false;
+    var folded = ch.toLowerCase();
+    flat += folded;
+    for (var n = 0; n < folded.length; n++) at.push(i);
+    prevSpace = false;
   }
-  return (points || []).map(function (p) {
-    for (var k = 0; k < parts.length; k++) {
-      if (parts[k].label === p.label) return { label: p.label, status: 'labelled', start: parts[k].start, end: parts[k].end };
+  /* A distinctive opening allows an abbreviated quote. If several points
+     share it, only their full text distinguishes the corresponding answers. */
+  var counts = Object.create(null);
+  var needles = (points || []).map(function (p) {
+    var full = p.text.replace(/[*_]/g, '').replace(/[\s>]+/g, ' ').trim().toLowerCase();
+    var opening = full.slice(0, 40).trim();
+    counts[opening] = (counts[opening] || 0) + 1;
+    return { full: full, opening: opening };
+  });
+  return (points || []).map(function (p, index) {
+    var part = labels[p.label];
+    if (part) return { label: p.label, status: 'labelled', start: part.start, end: part.end };
+    var needle = needles[index], probe = counts[needle.opening] > 1 ? needle.full : needle.opening;
+    var hit = probe ? flat.indexOf(probe) : -1;
+    if (probe.length < 15) {
+      while (hit >= 0 && ((hit && REVIEW_WORD.test(flat.charAt(hit - 1)) && REVIEW_WORD.test(probe.charAt(0))) ||
+          (REVIEW_WORD.test(probe.slice(-1)) && REVIEW_WORD.test(flat.charAt(hit + probe.length))))) {
+        hit = flat.indexOf(probe, hit + 1);
+      }
     }
-    var probe = p.text.replace(/[*_>]/g, '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 40).trim();
-    var hit = probe.length >= 15 ? flat.indexOf(probe) : -1;
     if (hit >= 0) return { label: p.label, status: 'quoted', start: at[hit], end: at[hit + probe.length - 1] + 1 };
     return { label: p.label, status: 'missing', start: -1, end: -1 };
   });
