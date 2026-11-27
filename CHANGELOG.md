@@ -22,7 +22,7 @@
   the tab is named for another one, the view says so; a tab named for no one can take the
   reviewer's name with one click.
 
-## 3.8.0 (unreleased)
+## 3.8.0 (2026-11-27)
 
 ### Venue rules, checked again on 2026-11-27
 - The rule of the chosen venue now shows beside the character counter: the rules it follows
