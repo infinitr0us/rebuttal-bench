@@ -103,8 +103,11 @@ leave the browser: they autosave on this device only.
   a downloaded copy of it keep separate drafts; to move drafts between them, or to another
   browser, export them in one and import them in the other.
 - **Before posting.** Cards also point out placeholders left in the text (`TODO`, `XX.X`,
-  `Table X`, `[cite]`, `??`), invisible characters and ligatures (`ﬁ`) that a copy from a PDF
-  brings along, and a start that posting reads differently: OpenReview trims a comment when it
+  `Table X`, `[cite]`, `[Your Name]`, `??`), invisible characters and ligatures (`ﬁ`) that a copy
+  from a PDF brings along, commented-out LaTeX pasted from Overleaf (`% \vspace{2mm}`, a `%`
+  table row, `% TODO`), which OpenReview posts as typed, what a chat assistant leaves behind
+  (citation markers such as `:contentReference[oaicite:0]{index=0}`, "Here is a revised version
+  of your rebuttal:"), and a start that posting reads differently: OpenReview trims a comment when it
   posts it, so an indented first line is no longer a code block. Once MathJax has typeset the
   preview, every formula it cannot typeset gets a card with its error message, and every macro
   it does not know (`\bm`, `\argmax`, `\R`) gets one card for all the formulas that use it,
@@ -210,6 +213,7 @@ tests/
   drafts.test.js           the stored list of drafts: parsing, merging two windows' lists
   split.test.js            splitting a draft into comments: where it cuts, what it keeps
   reviewers.test.js        reviewer IDs across drafts: greetings and IDs in other capitals
+  leftovers.test.js        LaTeX comment lines and chat-assistant leftovers, caught and quiet
   review.test.js           a review's points and how a draft covers them
   fixtures/                realistic drafts used by the tests
   example.test.js          the built-in example must end clean and fully typeset
