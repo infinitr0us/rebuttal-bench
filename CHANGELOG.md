@@ -1,5 +1,34 @@
 # Changelog
 
+## 3.8.0 (unreleased)
+
+### Venue rules, checked again on 2026-11-27
+- The rule of the chosen venue now shows beside the character counter: the year of its rules,
+  what the limit counts and its link rule, for example *NeurIPS 2026 · per review · no links*.
+  Hover for the full rule and the date it was checked; click to open the official page.
+- A venue whose rules state no number (ICLR) no longer keeps the limit of the venue chosen
+  before it: it uses the limit you typed last (5,000 until you type one), and the counter says
+  *your limit*. So does a limit you type over a venue's, with the venue's own number beside it.
+- ICML cites its 2027 instructions (5,000 characters per round, unchanged). AAAI is labelled
+  AAAI-26, since AAAI-27 published no rebuttal rules. ICLR's guide asks for links that are
+  anonymous and do not track visitors, so a shortened URL is now an error there and a link that
+  may name the authors a warning. The NeurIPS rule names its one exception: an anonymized link to
+  code the reviewers asked for, sent to the AC in an Official Comment.
+- Two new presets for venues that keep OpenReview's default forms (workshops, smaller venues):
+  *OpenReview default comment* (5,000 characters) and *OpenReview default rebuttal* (2,500).
+
+### Reviewer IDs across drafts
+- A draft whose tab is named for a reviewer (`Reviewer k9F2`, `k9F2`, `R2`) gets a card when its
+  opening or closing thanks or greets another reviewer, or a line such as *Response to Reviewer
+  Ab12* names one: the sign of an answer copied from another draft. A general response, which
+  thanks every reviewer, is left alone, and so is a reviewer mentioned in the middle of an answer.
+- An ID written in other capitals than its tab (`k9f2` for `k9F2`) gets a card, since OpenReview
+  IDs are case-sensitive, and once two tabs are named by ID, so does an ID no tab has (perhaps a
+  reviewer of another paper, in a reused answer).
+- A pointer such as *see our answer to Reviewer Ab12, Q2* or *W3 of Reviewer Ab12* gets a card
+  when that reviewer's draft labels its parts (as *Sections* reads them) and has no such point.
+- All of these are advice: nothing changes the text, and Fix all does not count them.
+
 ## 3.7.0 (2026-11-25)
 
 ### Tables pasted from Word, Google Docs and web pages

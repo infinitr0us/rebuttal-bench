@@ -339,6 +339,9 @@ window.MathJax = {
   .charchip.over.rescued { border-color: var(--warn); color: var(--title-warn); }
   .charchip.over.rescued .fill { background: var(--chip-near); }
   .charchip .txt { position: relative; }
+  /* The venue's rule beside the counter; a link to its official page. */
+  .venuestat { color: var(--dim); text-decoration: none; }
+  .venuestat:hover, .venuestat:focus-visible { color: var(--text); text-decoration: underline; }
   #compactStat { color: var(--ok); }
   #compactStat.over { color: var(--err); }
 
@@ -963,6 +966,7 @@ window.MathJax = {
 
 <div class="statsbar">
   <span class="charchip" id="charChip" title="Counted like OpenReview’s own counter: length after trimming leading/trailing whitespace"><span class="fill" id="charFill"></span><span class="txt" id="charStat">0 / 5,000 characters</span></span>
+  <a id="venueStat" class="venuestat" hidden target="_blank" rel="noopener noreferrer"></a>
   <span id="compactStat" hidden title="What OpenReview counts for the text Copy compact puts on the clipboard: the same rendering, fewer characters"></span>
   <span id="selStat" hidden title="Characters in the editor's selection, counted as OpenReview counts (UTF-16 units)"></span>
   <span id="wordStat">0 words</span>
@@ -1826,29 +1830,37 @@ function texContextAt(src, a, i) {
 /* Rebuttal rules of venues that run their discussion on OpenReview, from the
    official pages on VENUES_CHECKED. `links`: 'none' (no links at all), 'anon'
    (no non-anonymized, personal or shortened URLs), 'any' (nothing stated).
-   `limit: null` keeps whatever limit is set. Rules change every year, so each
-   preset names its source and the page shows when it was checked. */
-var VENUES_CHECKED = '2026-11-21';
+   `limit: null` means the rules state no number: the author's own limit
+   applies. `label` names the year of the rules, `unit` what the limit counts.
+   Rules change every year, so each preset names its source and the page
+   shows when it was checked. */
+var VENUES_CHECKED = '2026-11-27';
 var VENUES = [
-  { id: 'neurips', name: 'NeurIPS', limit: 10000, links: 'none',
-    rule: '10,000 characters per review, no links; several comments may total more (2025 FAQ, 2026 handbook and July 2026 newsletter)',
+  { id: 'neurips', name: 'NeurIPS', label: 'NeurIPS 2026', limit: 10000, unit: 'per review', links: 'none',
+    rule: '10,000 characters per review, no links (the one exception: an anonymized link to code the reviewers asked for, sent to the AC in an Official Comment); several comments may total more (2026 handbook and July 2026 newsletter)',
     source: 'https://neurips.cc/Conferences/2026/MainTrackHandbook',
     parts: 'Several comments are allowed, even totalling more than 10,000 characters (July 2026 newsletter).' },
-  { id: 'icml', name: 'ICML', limit: 5000, links: 'anon',
-    rule: '5,000 characters per discussion round (rebuttal, reviewer follow-up, author follow-up); no non-anonymized, personal-website or shortened URLs (2026)',
-    source: 'https://icml.cc/Conferences/2026/ReviewerInstructions',
+  { id: 'icml', name: 'ICML', label: 'ICML 2027', limit: 5000, unit: 'per round', links: 'anon',
+    rule: '5,000 characters per discussion round (rebuttal, reviewer follow-up, author follow-up); no non-anonymized, personal-website or shortened URLs (2027 reviewer and author instructions)',
+    source: 'https://icml.cc/Conferences/2027/ReviewerInstructions',
     parts: 'ICML has one response per discussion round: a split may not be accepted.' },
-  { id: 'aaai', name: 'AAAI', limit: 2500, links: 'none',
-    rule: 'one rebuttal of 2,500 characters for all reviews; responses with URLs may be withheld; no new results (AAAI-26)',
+  { id: 'aaai', name: 'AAAI-26', label: 'AAAI-26', limit: 2500, unit: 'for all reviews', links: 'none',
+    rule: 'one rebuttal of 2,500 characters for all reviews; responses with URLs may be withheld; no new results (AAAI-26; AAAI-27 published no rebuttal rules)',
     source: 'https://aaai.org/conference/aaai/aaai-26/aaai-26-faq-for-authors-rebuttal/',
-    parts: 'AAAI allows a single rebuttal for all reviews: a split will not be accepted.' },
-  { id: 'arr', name: 'ACL ARR (ACL, NAACL, EMNLP)', limit: 5000, links: 'none',
+    parts: 'AAAI-26 allowed a single rebuttal for all reviews: a split will not be accepted.' },
+  { id: 'arr', name: 'ACL ARR (ACL, NAACL, EMNLP)', label: 'ACL ARR', limit: 5000, unit: 'per response', links: 'none',
     rule: 'one general response plus one per review, 5,000 characters each; text only, no external links (desk rejection)',
     source: 'https://aclrollingreview.org/authors',
     parts: 'ARR allows one response per review (plus one general response): a split may not be accepted.' },
-  { id: 'iclr', name: 'ICLR', limit: null, links: 'any',
-    rule: 'the author guide sets no limit: read it off the counter under the OpenReview comment box',
-    source: 'https://iclr.cc/Conferences/2027/AuthorGuidelines' }
+  { id: 'iclr', name: 'ICLR', label: 'ICLR 2027', limit: null, unit: null, links: 'anon',
+    rule: 'the author guide mentions a limit per comment but no number (read it off the counter under the OpenReview comment box) and no limit on the number of comments; a link must be anonymous and its host must not track visitors',
+    source: 'https://iclr.cc/Conferences/2027/AuthorGuidelines' },
+  { id: 'or-comment', name: 'OpenReview default comment', label: 'OpenReview default', limit: 5000, unit: 'per comment', links: 'any',
+    rule: 'OpenReview’s default comment form allows 5,000 characters; a venue can change it, so check the counter under the comment box',
+    source: 'https://docs.openreview.net/reference/default-forms/default-comment-form' },
+  { id: 'or-rebuttal', name: 'OpenReview default rebuttal', label: 'OpenReview default', limit: 2500, unit: 'per rebuttal', links: 'any',
+    rule: 'OpenReview’s default rebuttal form allows 2,500 characters; a venue can change it, so check the counter under the rebuttal box',
+    source: 'https://docs.openreview.net/reference/default-forms/default-rebuttal-form' }
 ];
 
 function venueById(id) {
@@ -2650,7 +2662,7 @@ function analyzeText(src, opts) {
     }
     if (LINK_SHORTENERS.test(host)) {
       push(venue && venue.links === 'anon' ? 'err' : 'warn', 'Shortened URL',
-        'A shortener hides where the link goes and can log who opens it. ICML forbids them in responses; give the full URL.',
+        'A shortener hides where the link goes and can log who opens it, which can identify a reviewer. ICML forbids them in responses, and ICLR forbids links whose host tracks visitors; give the full URL.',
         r.start, r.end);
     } else if (!own && linkMayReveal(href, host)) {
       push(venue && venue.links === 'anon' ? 'warn' : 'note', 'This link may reveal who the authors are',
@@ -4881,6 +4893,183 @@ function blockSources(text) {
   return out;
 }
 
+/* ---- reviewer IDs across drafts (pure) ----
+   OpenReview names an anonymous reviewer by four letters and digits
+   ("Reviewer k9F2"); some authors number them ("Reviewer 2", "R2"). A draft
+   whose tab is named for a reviewer should address that reviewer: an answer
+   copied from another reviewer's draft keeps the other ID in its greeting,
+   and a pointer such as "see our answer to Reviewer k9F2, Q2" can outlive a
+   renumbering. Advice only: mentioning another reviewer is often deliberate
+   (a shared answer), so nothing here has a fix. */
+var REVIEWER_ID = /^(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{4}$/;
+/* In prose a four-character word after "Reviewer" is taken for an ID only
+   when it has a digit or a capital after its first letter, or is a tab's
+   ID: "the reviewer also" names no one. */
+function idShaped(w) { return REVIEWER_ID.test(w) && (/\d/.test(w) || /[A-Z]/.test(w.slice(1))); }
+
+/* {ids, nums}: whom a tab name is for. "Reviewer abcd" says so outright; a
+   bare word needs an ID's shape (k9F2, not "Plan"); numbers come from
+   "Reviewer 2", "Rev 2", "R2". */
+function draftReviewer(name) {
+  var out = { ids: [], nums: [] }, m;
+  if (typeof name !== 'string') return out;
+  var re = /\breviewer[\s_#:-]*([A-Za-z0-9]{4})(?![A-Za-z0-9])/gi;
+  while ((m = re.exec(name))) if (REVIEWER_ID.test(m[1]) && out.ids.indexOf(m[1]) < 0) out.ids.push(m[1]);
+  name.split(/[^A-Za-z0-9]+/).forEach(function (w) {
+    if (w.length === 4 && idShaped(w) && out.ids.indexOf(w) < 0) out.ids.push(w);
+  });
+  re = /\b(?:reviewer|rev\.?|r)[\s_#-]*(\d{1,2})(?!\d)/gi;
+  while ((m = re.exec(name))) if (out.nums.indexOf(+m[1]) < 0) out.nums.push(+m[1]);
+  return out;
+}
+
+/* A point's name as Sections and pointers write it, made comparable:
+   "W1", "Weakness 1" and "weakness #1" are all W1. */
+var POINT_NAME = /^(?:([WQ])(\d{1,2})(?!\d)|(weakness|question|comment|concern|point|issue|limitation)s?\s*#?(\d{1,2})(?!\d))/i;
+function pointName(s) {
+  var m = POINT_NAME.exec(s);
+  if (!m) return null;
+  return m[1] ? m[1].toUpperCase() + (+m[2]) : m[3].charAt(0).toUpperCase() + (+m[4]);
+}
+
+/* The point names a draft labels its parts with (see commentSections), or
+   [] when it has none. */
+function pointLabels(text) {
+  var r = commentSections(text), out = [];
+  (r ? r.sections : []).forEach(function (s) {
+    var p = s.kind === 'opening' ? null : pointName(s.title.replace(/^\[/, ''));
+    if (p && out.indexOf(p) < 0) out.push(p);
+  });
+  return out;
+}
+
+/* Where "Reviewer X" occurs in the visible prose of `text`: {id | num,
+   start, end, points: [names after it, "Reviewer X, Q2" or "X's W1 and W3",
+   or before it, "Q2 of Reviewer X"]}. `known` maps each tab ID in lower case
+   to itself, so a tab's ID counts whatever its shape. "Reviewers k9F2 and
+   Ab12" yields both. */
+function reviewerMentions(text, known, visible) {
+  var out = [], re = /\breviewers?[ \t_]*#?([A-Za-z0-9]{1,4})(?![A-Za-z0-9])/gi, m;
+  var after = /^(?:['’]s)?[ \t]*[,:(\[]?[ \t]*(?:(?:point|question|weakness|comment|concern|issue|limitation)s?[ \t]*#?\d{1,2}(?!\d)|[WQ]\d{1,2}(?!\d))(?:[ \t]*(?:,|and|&|\/)[ \t]*(?:(?:point|question|weakness|comment|concern|issue|limitation)s?[ \t]*#?\d{1,2}(?!\d)|[WQ]\d{1,2}(?!\d)))*/i;
+  function points(s) {
+    var found = [], pm, pr = /(?:point|question|weakness|comment|concern|issue|limitation)s?[ \t]*#?\d{1,2}(?!\d)|[WQ]\d{1,2}(?!\d)/gi;
+    while ((pm = pr.exec(s))) {
+      var p = pointName(pm[0]);
+      if (p && found.indexOf(p) < 0) found.push(p);
+    }
+    return found;
+  }
+  function add(w, start, end) {
+    if (!visible(start, end)) return false;
+    var mention = null;
+    if (/^\d{1,2}$/.test(w)) mention = { num: +w };
+    else if (w.length === 4 && REVIEWER_ID.test(w) && (idShaped(w) || known[w.toLowerCase()])) mention = { id: w };
+    if (!mention) return false;
+    mention.start = start;
+    mention.end = end;
+    var a = after.exec(text.slice(end, end + 60)), b = /(?:^|[^A-Za-z0-9])((?:[WQ]\d{1,2}|(?:point|question|weakness|comment|concern|issue|limitation)s?[ \t]*#?\d{1,2})[ \t]+(?:of|from|by|raised by|asked by)[ \t]+)$/i.exec(text.slice(Math.max(0, start - 40), start));
+    mention.points = points((a ? a[0] : '') + ' ' + (b ? b[1] : ''));
+    out.push(mention);
+    return true;
+  }
+  while ((m = re.exec(text))) {
+    var w = m[1], at = m.index + m[0].length - w.length;
+    if (!add(w, m.index, at + w.length)) continue;
+    var tail = at + w.length, more;
+    while ((more = /^(?:[ \t]*,[ \t]*(?:and[ \t]+)?|[ \t]+and[ \t]+|[ \t]*&[ \t]*)([A-Za-z0-9]{4})(?![A-Za-z0-9])/.exec(text.slice(tail, tail + 40)))) {
+      var ws = tail + more[0].length - more[1].length;
+      if (/^\d+$/.test(more[1]) || !add(more[1], ws, ws + 4)) break;
+      tail = ws + 4;
+    }
+    re.lastIndex = tail;
+  }
+  return out;
+}
+
+/* Cards for a draft (`text`, as posted) whose tab is named `self`, given the
+   other tabs [{name, labels}] (`labels`: pointLabels of its text, or null
+   while it is unknown). `spans`: the formulas analyze found (computed here
+   when not given). A draft for no one in particular (a general response)
+   thanks every reviewer, so only a draft named for a reviewer is held to
+   addressing that one. See the section's comment. */
+function reviewerIssues(text, self, others, spans) {
+  var none = [];
+  if (typeof text !== 'string' || !text.trim() || text.toLowerCase().indexOf('reviewer') < 0) return none;
+  var model = collectMarkedRanges(text);
+  if (!model) return none;
+  var me = draftReviewer(self), tabs = (others || []).map(function (o) {
+    return { name: o.name, who: draftReviewer(o.name), labels: o.labels };
+  });
+  var known = Object.create(null), idTabs = me.ids.length ? 1 : 0;
+  me.ids.forEach(function (id) { known[id.toLowerCase()] = id; });
+  tabs.forEach(function (t) {
+    if (t.who.ids.length) idTabs++;
+    t.who.ids.forEach(function (id) { known[id.toLowerCase()] = id; });
+  });
+  var mask = proseMask(text, spans || analyze(text).spans, model);
+  var mentions = reviewerMentions(text, known, function (a, b) { return !maskHits(mask, a, b); });
+  if (!mentions.length) return none;
+  var blocks = blockSources(text), first = blocks[0], last = blocks[blocks.length - 1];
+  function inBlock(blk, at) { return !!blk && at >= blk.start && at < blk.end; }
+  function sentence(at, end) {
+    var s = at, e = end;
+    while (s > 0 && text[s - 1] !== '\n' && !(/[.!?]/.test(text[s - 1]) && /\s/.test(text[s] || ''))) s--;
+    while (e < text.length && text[e] !== '\n' && !(/[.!?]/.test(text[e]) && /\s|$/.test(text[e + 1] || ''))) e++;
+    return text.slice(s, e);
+  }
+  function isFor(who, m) { return m.id ? who.ids.indexOf(m.id) >= 0 : who.nums.indexOf(m.num) >= 0; }
+  function label(m) { return 'Reviewer ' + (m.id || m.num); }
+  var issues = [], unknownSeen = Object.create(null);
+  mentions.forEach(function (m) {
+    var name = escHtml(label(m)), mine = isFor(me, m);
+    var theirs = tabs.filter(function (t) { return isFor(t.who, m); });
+    /* An ID typed in another case is another ID to OpenReview. */
+    if (m.id && !mine && !theirs.length && known[m.id.toLowerCase()]) {
+      issues.push({ sev: 'warn', title: 'Reviewer ID written differently from its tab',
+        detail: name + ' differs only in capitals from the tab’s ID ' + escHtml(known[m.id.toLowerCase()]) +
+          '. OpenReview IDs are case-sensitive, so reviewers read it as someone else.',
+        start: m.start, end: m.end, fix: null, math: false });
+      return;
+    }
+    /* Addressed: thanked or greeted in the first or last block, or named by
+       a line such as "## Response to Reviewer X" ("see our answer to
+       Reviewer X" inside a sentence is a pointer). */
+    var lineStart = text.lastIndexOf('\n', m.start - 1) + 1;
+    var addressed = (inBlock(first, m.start) || inBlock(last, m.start)) &&
+      (/\b(?:thank(?:s|ing|ful)?|dear|hi|hello|grateful|gratitude|appreciated?|appreciates)\b/i.test(sentence(m.start, m.end)) ||
+       /^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:our[ \t]+)?(?:response|reply|answer|rebuttal)s?[ \t]+to[ \t]+(?:the[ \t]+)?$/i.test(text.slice(lineStart, m.start)));
+    var forSomeone = me.ids.length || me.nums.length, mineKnown = m.id ? me.ids.length : me.nums.length;
+    if (addressed && !mine && forSomeone && (theirs.length || mineKnown)) {
+      issues.push({ sev: 'warn', title: 'This draft addresses another reviewer',
+        detail: 'The tab is named for ' + escHtml(self) + ', but this greets or thanks ' + name +
+          (theirs.length ? ', who has a draft of their own (' + escHtml(theirs[0].name) + ')' : '') +
+          '. An answer copied from another draft keeps its reviewer ID: change the ID, or rename the tab if it is the tab that is wrong.',
+        start: m.start, end: m.end, fix: null, math: false });
+      return;
+    }
+    if (m.id && !mine && !theirs.length && idTabs >= 2 && !unknownSeen[m.id]) {
+      unknownSeen[m.id] = true;
+      issues.push({ sev: 'note', title: 'No draft is named for this reviewer',
+        detail: 'None of the tabs is named for ' + name + '. If this text comes from another paper’s rebuttal, the ID is that paper’s reviewer, whom these reviewers do not know.',
+        start: m.start, end: m.end, fix: null, math: false });
+      return;
+    }
+    if (!m.points.length || mine || !theirs.length) return;
+    var labels = null;
+    theirs.forEach(function (t) { if (t.labels) labels = (labels || []).concat(t.labels); });
+    if (!labels || !labels.length) return;
+    var missing = m.points.filter(function (p) { return labels.indexOf(p) < 0; });
+    if (missing.length) {
+      issues.push({ sev: 'warn', title: 'Pointer to a point the other draft does not have',
+        detail: 'This points to ' + escHtml(missing.join(', ')) + ' of ' + name + ', but ' + escHtml(theirs[0].name) +
+          ' labels its parts ' + escHtml(labels.slice(0, 8).join(', ')) + (labels.length > 8 ? ', …' : '') +
+          '. If the answer moved or was renumbered, update the pointer.',
+        start: m.start, end: m.end, fix: null, math: false });
+    }
+  });
+  return issues;
+}
+
 /* ---- wording hints (pure): shorter ways to say the same ----
    Advice for a draft over the limit, never applied: a phrase can be the
    author's choice, and its replacement may need the sentence recast. Only
@@ -5319,6 +5508,7 @@ function freshEditor(value) {
   if (focused) ta.focus();
 }
 var venueSelect = document.getElementById('venue');
+var venueStat = document.getElementById('venueStat');
 VENUES.forEach(function (v) {
   var opt = document.createElement('option');
   opt.value = v.id;
@@ -5403,7 +5593,10 @@ var PREFS_KEY = 'rebuttal-bench-prefs';
 var DRAFT_KEY = 'rebuttal-bench-draft';
 var FS_RANGES = { fsEditor: [11, 20], zoomPreview: [70, 200] };
 var FS_STEPS = { fsEditor: 1, zoomPreview: 10 };
-var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, sync: true, venue: '',
+/* `ownLimit` is the last limit the author typed: it applies wherever the
+   chosen venue states no number (Custom, ICLR), so one venue's limit does
+   not stay on after switching to another. */
+var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, ownLimit: 5000, sync: true, venue: '',
   compact: compactDefaults(), compactOpen: false, wordingOpen: false, sectionsOpen: false, spellcheck: false };
 
 function applyPrefs() {
@@ -5429,6 +5622,32 @@ function applyPrefs() {
   Array.prototype.forEach.call(compactList.querySelectorAll('input[data-trick]'), function (box) {
     box.checked = !!prefs.compact[box.getAttribute('data-trick')];
   });
+  renderVenueStat();
+}
+
+/* The venue's rule beside the counter: the year of its rules, what its limit
+   counts and its link rule, or that the limit is the author's own (the venue
+   states no number, or the author typed another one). It opens the official
+   page, which carries nothing of the draft. */
+function renderVenueStat() {
+  var venue = venueById(prefs.venue);
+  venueStat.hidden = !venue;
+  if (!venue) {
+    venueStat.textContent = '';
+    venueStat.removeAttribute('href');
+    limitInput.title = 'Your own character limit';
+    return;
+  }
+  var own = !venue.limit || prefs.limit !== venue.limit;
+  var parts = [venue.label,
+    own ? 'your limit (' + (venue.limit ? 'rule: ' + fmt(venue.limit) + ' ' + venue.unit : 'none stated') + ')' : venue.unit];
+  if (venue.links === 'none') parts.push('no links');
+  else if (venue.links === 'anon') parts.push('anonymous links only');
+  venueStat.textContent = parts.join(' · ');
+  venueStat.href = venue.source;
+  venueStat.title = venue.name + ': ' + venue.rule + '. Source: ' + venue.source +
+    ' (checked ' + VENUES_CHECKED + '; rules change every year). Click to open it.';
+  limitInput.title = own ? 'Your own character limit' : 'The character limit of ' + venue.label + ' (' + venue.unit + ')';
 }
 
 var prefsTimer = null;
@@ -6030,15 +6249,43 @@ function renderSections(text, total) {
   sectionsList.innerHTML = html;
 }
 
+/* Reviewer IDs in the open draft against the other tabs (reviewerIssues),
+   read as posted. Another draft's point labels are kept per text, so typing
+   here does not lex every other draft again; a draft whose text is not known
+   yet (still loading) is not checked. */
+var pointLabelCache = {};
+function draftPointLabels(id) {
+  var t = knownDraftText(id);
+  if (t === null) return null;
+  var c = pointLabelCache[id];
+  if (!c || c.text !== t) c = pointLabelCache[id] = { text: t, labels: pointLabels(t.trim()) };
+  return c.labels;
+}
+function reviewerCards(text, spans) {
+  var self = draftReady ? draftById(draftMeta.active) : null;
+  if (!self || text.toLowerCase().indexOf('reviewer') < 0) return [];
+  var lead = leadOf(text);
+  var others = draftMeta.list.filter(function (d) { return d.id !== self.id; }).map(function (d) {
+    return { name: d.name, labels: draftPointLabels(d.id) };
+  });
+  return reviewerIssues(text.trim(), self.name, others, spans.map(function (sp) {
+    return { start: sp.start - lead, end: sp.end - lead, recovered: sp.recovered };
+  })).map(function (iss) {
+    iss.start += lead;
+    iss.end += lead;
+    return iss;
+  });
+}
+
 /* The analyzer's hazards for analyzedText plus what MathJax reported in the
-   last typeset, as cards. Also called on its own when a typeset changes the
+   last typeset, and the reviewer cards, as cards. Also called on its own when a typeset changes the
    TeX problems, which needs neither a new analysis nor a new compaction. */
 function renderIssues() {
   var text = analyzedText, res = lastAnalysis;
   if (!res) return;
   texCardsStale = texReportsFor !== text;
   currentIssues = res.issues.concat(texProblemIssues(text, res.spans, texReports, res.issues,
-    { stale: texCardsStale, analyze: { venue: prefs.venue } }));
+    { stale: texCardsStale, analyze: { venue: prefs.venue } }), reviewerCards(text, res.spans));
   currentIssues.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
 
   var n = currentIssues.length;
@@ -6370,6 +6617,7 @@ function renameDraft(id) {
   d.at = Date.now();
   saveDraftMeta();
   renderDraftTabs();
+  renderIssues(); /* the reviewer cards read the tabs' names */
 }
 
 function deleteDraft(id) {
@@ -6396,6 +6644,8 @@ function deleteDraft(id) {
   retryLocalWrites(); /* space just freed */
   saveDraftMeta();
   renderDraftTabs();
+  delete pointLabelCache[id];
+  renderIssues(); /* the reviewer cards read the other tabs */
 }
 
 draftTabs.addEventListener('click', function (e) {
@@ -7603,7 +7853,8 @@ function refusedEdit(key) {
 window.addEventListener('beforeunload', flushDraft);
 window.addEventListener('pagehide', flushDraft);
 limitInput.addEventListener('input', function () {
-  prefs.limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
+  prefs.limit = prefs.ownLimit = Math.max(0, parseInt(limitInput.value, 10) || 0);
+  renderVenueStat();
   savePrefs();
   updateAll();
 });
@@ -7611,11 +7862,11 @@ limitInput.addEventListener('input', function () {
 venueSelect.addEventListener('change', function () {
   var venue = venueById(venueSelect.value);
   prefs.venue = venue ? venue.id : '';
-  if (venue && venue.limit) prefs.limit = venue.limit;
+  prefs.limit = venue && venue.limit ? venue.limit : prefs.ownLimit;
   applyPrefs();
   savePrefs();
   updateAll();
-  if (venue) showToast(venue.name + ': ' + venue.rule + '.');
+  if (venue) showToast(venue.name + ': ' + venue.rule + '.' + (venue.limit ? '' : ' Limit: your own, ' + fmt(prefs.limit) + '.'));
 });
 
 syncBox.addEventListener('change', function () {
@@ -7872,6 +8123,13 @@ storeGet(PREFS_KEY).then(function (v) {
         : (typeof p.fsPreview === 'number' ? Math.round(p.fsPreview / 12 * 10) * 10 : null);
       if (zoom !== null && zoom >= FS_RANGES.zoomPreview[0] && zoom <= FS_RANGES.zoomPreview[1]) restore('zoomPreview', zoom);
       if (typeof p.limit === 'number' && p.limit >= 0) restore('limit', p.limit);
+      /* Before 3.8 only the limit was stored: it was the author's own unless
+         it is the stored venue's. */
+      if (typeof p.ownLimit === 'number' && p.ownLimit >= 0) restore('ownLimit', p.ownLimit);
+      else if (typeof p.limit === 'number' && p.limit >= 0) {
+        var storedVenue = typeof p.venue === 'string' ? venueById(p.venue) : null;
+        if (!(storedVenue && storedVenue.limit === p.limit)) restore('ownLimit', p.limit);
+      }
       if (typeof p.sync === 'boolean') restore('sync', p.sync);
       if (typeof p.venue === 'string' && (p.venue === '' || venueById(p.venue))) restore('venue', p.venue);
       /* Only known tricks: one removed in a later version is simply forgotten. */

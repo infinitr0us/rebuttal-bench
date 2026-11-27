@@ -375,8 +375,23 @@ because OpenReview typesets each comment from a fresh TeX state.
 ## Venue presets
 
 `VENUES` holds each venue's limit, link rule, whether several comments are allowed (`parts`) and official source, checked on `VENUES_CHECKED`.
+`label` names the year of its rules and `unit` what its limit counts (both shown beside the
+counter by `renderVenueStat`); `limit: null` means the rules state no number, and the page then
+uses `prefs.ownLimit`, the limit the author typed last, so one venue's limit never stays on
+under another. Ids are stored in the preferences: keep them when renaming a venue.
 When a call for papers changes, update the entry, its source and the date together, and keep
 `tests/links.test.js` passing. Do not add a venue without an official page that states its rule.
+
+## Reviewer IDs across drafts
+
+`reviewerIssues(text, self, others, spans)` (pure, `tests/reviewers.test.js`) reads the open
+draft as posted against the tabs' names (`draftReviewer`: an ID after "Reviewer", a bare word
+with an ID's shape, a number) and the other drafts' point labels (`pointLabels`, from
+`commentSections`). Its cards are advice without fixes and come from `renderIssues`
+(`reviewerCards`), not from `analyze`, so Fix all, compaction and the macro check never see them;
+renaming or deleting a tab redraws them. Only visible prose counts (`proseMask`). A draft named
+for no one (a general response) is never held to greeting one reviewer, and a four-letter word
+after "Reviewer" is an ID only with a digit, an inner capital, or a tab of that name.
 
 ## Staying in sync with OpenReview
 
@@ -402,7 +417,9 @@ asynchronous store), a page back from the back/forward cache, a fresh TeX
 state per preview (no duplicate `\label` errors, deleted `\newcommand`s, `\definecolor`s and
 `\DeclarePairedDelimiter`s forgotten), drafts (a fresh one, switching, undo isolation, rename and delete,
 across a reload and with a slow store), manual fixes outside Fix
-all, Fix all's added-character count, the selection count, venue presets, Copy compact and Apply to
+all, Fix all's added-character count, the selection count, venue presets (the rule beside the
+counter, the author's own limit, preferences stored before 3.8), reviewer cards across drafts
+(with a rename), Copy compact and Apply to
 source (with undo), the compact chip state, compaction switches across a reload, jumping to a hazard on a
 long soft-wrapped line, refusing a stale one-click fix, draft persistence across a reload (also
 with a stubbed asynchronous `window.storage`: keystrokes before a reload, a draft saved elsewhere,

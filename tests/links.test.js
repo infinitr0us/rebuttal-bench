@@ -47,18 +47,40 @@ test('ICML: shortened URLs are errors, identifying links warnings, others fine',
   assert.deepEqual(hazards('[data](https://example.org/data)', 'icml'), []);
 });
 
-test('ICLR and no venue leave ordinary links alone; Fix all never removes a link', () => {
-  assert.deepEqual(hazards('[data](https://example.org/data)', 'iclr'), []);
+test('ICLR, the OpenReview defaults and no venue leave ordinary links alone; Fix all never removes a link', () => {
+  for (const venue of ['iclr', 'or-comment', 'or-rebuttal', undefined]) {
+    assert.deepEqual(hazards('[data](https://example.org/data)', venue), [], venue);
+  }
   const src = 'See [the logs](https://example.org/logs).';
   assert.equal(A.fixAllText(src).text, src);
 });
 
-test('every venue preset names its rule and an official source', () => {
+test('ICLR: links must be anonymous and must not track visitors, so a shortener is an error', () => {
+  assert.deepEqual(hazards('https://bit.ly/3abc', 'iclr'), ['err Shortened URL']);
+  assert.deepEqual(hazards('[repo](https://github.com/alice/method)', 'iclr'), ['warn This link may reveal who the authors are']);
+  assert.deepEqual(hazards('[repo](https://anonymous.4open.science/r/method-1234)', 'iclr'), []);
+});
+
+test('the NeurIPS link card names the one exception, a code link for the AC', () => {
+  const iss = [...A.analyze('See [code](https://example.org/c).', { venue: 'neurips' }).issues]
+    .find((i) => /not allowed/.test(i.title));
+  assert.match(iss.detail, /Official Comment/);
+});
+
+test('every venue preset names its rule, the year of its rules and an official source', () => {
   assert.match(A.VENUES_CHECKED, /^\d{4}-\d{2}-\d{2}$/);
+  const ids = new Set();
   for (const v of A.VENUES) {
+    assert.ok(!ids.has(v.id), v.id);
+    ids.add(v.id);
     assert.ok(/^https:\/\//.test(v.source), v.id);
     assert.ok(v.rule.length > 20, v.id);
+    assert.ok(typeof v.label === 'string' && v.label.length > 2, v.id);
     assert.ok(['none', 'anon', 'any'].includes(v.links), v.id);
     assert.ok(v.limit === null || (Number.isInteger(v.limit) && v.limit > 0), v.id);
+    // A preset with a number says what it counts; one without has no unit.
+    assert.ok(v.limit === null ? v.unit === null : typeof v.unit === 'string' && v.unit.length > 2, v.id);
   }
+  // The ids are stored in the preferences: renaming one would forget a choice.
+  for (const id of ['neurips', 'icml', 'aaai', 'arr', 'iclr']) assert.ok(A.venueById(id), id);
 });
