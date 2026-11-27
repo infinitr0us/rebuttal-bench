@@ -135,6 +135,18 @@ text, discard the grid and use the regular text importer.
   Fix all button does not count it, and its card says "Not part of Fix all". Even so, verify
   in a regression case that the fixed text renders as promised.
 
+## Formatted prose paste
+
+`htmlToMarkdown(doc, options)` (pure, `tests/paste.test.js`) reads a parsed clipboard fragment
+from Google Docs, Word or a web page and shares the table importer's emphasis and grid rendering
+(`readHtmlTable`'s quirks: Docs' normal-weight `b`, Word's `mso-` lists). It escapes what would
+become Markdown but never `$` or a backslash, since authors write TeX in their documents. The
+editor asks for `keepGrid`, so a paste that is only a table still opens the table dialog, and an
+explicit HTML list wins over the tab-separated heuristic (Word puts tabs after list markers). The
+offer is bound to the captured draft, source and range, like the table offer, and applies with
+`setSourceText` for one undo. Tests check the exact Markdown, the rendered HTML and the TeX that
+reaches MathJax.
+
 ## Compaction
 
 `compactText(text, enabled, render, maxChecks)` rewrites the source with the tricks in
@@ -302,6 +314,14 @@ cases, Chrome probes); keep their rules:
   Export all merges, in a private copy, this window's list with the stored one (drafts another
   window just added), writes `draftsFile` with every known text and names the others before
   leaving them out; Download refuses an unknown text.
+- **Compare and Print only read.** `diffWords(a, b, details)` (pure, `tests/diff.test.js`) keeps
+  both texts exactly (the `same` and `del` runs rebuild `a`, `same` and `ins` rebuild `b`); it
+  bounds the word-level LCS, then retries by line, then falls back to one replacement, and
+  `details.mode` tells the view when its counts cover whole lines or texts. The History version
+  picker stays bound to the versions shown when Compare opened. Print reads `knownDraftText`
+  with Export's private list merge, renders through the preview's queue with a fresh TeX state
+  per comment, waits for the typeset before `window.print()`, and removes its copy on
+  `afterprint`; closing History or switching drafts cancels a pending print.
 - **Import only adds** (`importDrafts`; pure: `readDraftsFile`, `importPlan`). Each draft of the
   file whose text no draft known here has (`knownDraftText`, after taking in the stored list)
   becomes a new tab under a name no draft has. It never replaces, changes or opens a draft and
@@ -383,6 +403,15 @@ because OpenReview typesets each comment from a fresh TeX state.
   all* through `setSourceText`, so each is one undo; *Replace all* keeps a version in History.
   Ctrl+F is taken only in the editor and the find bar; elsewhere the browser's find stays.
 - The editor's `spellcheck` follows `prefs.spellcheck`; a fresh editor is a clone, so it keeps it.
+
+- `promisesIn(text, spans)` (pure, `tests/promises.test.js`) finds the sentences of visible prose
+  that commit to a change of the paper (`will`) or report one (`done`), one Markdown leaf at a
+  time with `proseMask`, quotes of the review left out, offsets in the editor's text (CRLF
+  included). Precision comes before recall: it was tuned on 310 real author responses (181
+  detections read, none wrong; `reviews/2026-11-27/codex-promises`, git-ignored). Extend a
+  trigger only with a synthetic positive, a near miss and a rerun of that corpus. The panel reads
+  every tab through `knownDraftText` and reuses detections while a text is unchanged; a row of
+  another draft goes through `switchDraft` and selects the sentence once that draft is loaded.
 
 ## Venue presets
 

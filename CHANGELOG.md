@@ -1,5 +1,26 @@
 # Changelog
 
+## 3.11.0 (unreleased)
+
+### Paste from Google Docs or Word
+- Formatted text pasted into the editor offers *Convert*: headings, bold and italics, links,
+  nested lists, quotes, inline code and tables become Markdown, and one undo brings back the
+  plain paste. TeX written in the document (`$\alpha$`) reaches MathJax unchanged; an equation
+  that arrives as an image or MathML keeps its alt text, with a warning.
+
+### Promises
+- The *Promises* panel lists what the drafts promise to change in the paper, grouped by tab:
+  commitments (*we will add*) and changes already made (*we have revised*). A click opens the
+  draft at the sentence, and *Copy as checklist* copies the commitments as a Markdown to-do
+  list with their tab names. Tuned on 310 real author responses to list only real promises.
+
+### Compare and print
+- *Compare* in the History dialog shows what changed between the open draft and an earlier
+  version, another draft or a pasted co-author's copy, word by word (insertions underlined,
+  deletions struck through, with counts). It changes nothing.
+- *Print this draft* and *Print all drafts* print the comments as OpenReview renders them, with
+  typeset math, each on its own page with its title and length against the limit.
+
 ## 3.10.0 (2026-11-27)
 
 ### Before posting
