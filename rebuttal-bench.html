@@ -690,6 +690,22 @@ window.MathJax = {
   .modal-opts { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 18px 10px; font-size: 12.5px; color: var(--dim); }
   .modal-opts input { accent-color: var(--accent); }
   .modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; padding: 10px 18px 14px; }
+  .history-view { display: flex; flex-direction: column; min-height: 0; }
+  #compareView { gap: 10px; padding: 4px 18px 14px; overflow: auto; }
+  #compareView label { font-size: 13px; }
+  #compareSource, #comparePaste {
+    width: 100%; margin-top: 4px; padding: 6px; border: 1px solid var(--line);
+    border-radius: 4px; background: var(--editor-bg); color: var(--text);
+  }
+  #comparePaste { resize: vertical; font-family: var(--mono); }
+  #compareSummary { margin: 0; color: var(--dim); font-size: 12.5px; }
+  #compareDiff {
+    margin: 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere;
+    font: 13px/1.6 var(--mono); border: 1px solid var(--line); border-radius: 4px;
+  }
+  #compareDiff del { color: var(--title-err); background: var(--chip-over); text-decoration: line-through; }
+  #compareDiff ins { color: var(--ok); background: var(--chip-ok); text-decoration: underline; }
+  #compareBack { align-self: flex-start; }
   .split-parts { flex: 1; min-height: 0; overflow-y: auto; padding: 0 18px; }
   .split-part { margin: 0 0 10px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .split-part-head {
@@ -1186,15 +1202,29 @@ window.MathJax = {
       <h3 id="historyTitle">History</h3>
       <button type="button" class="modal-x" data-close aria-label="Close">×</button>
     </div>
-    <p class="modal-note">Earlier versions are kept before <em>Fix all</em>, <em>Apply to source</em>, <em>Replace all</em>, <em>Clear</em>, <em>Load example</em> and a restore, and every 10 minutes while you edit: up to 20 per draft, in this browser only. When they take up too much room, or a draft needs the space, the oldest go first.</p>
-    <div id="historyList" class="split-parts"></div>
-    <p class="modal-note">Drafts are kept in this browser only, and the online page and a downloaded copy of it each keep their own. Export them to keep a backup, or to copy them into another browser. Import adds the drafts of an exported file as new tabs, and never replaces or changes a draft.</p>
-    <div class="modal-actions">
-      <button type="button" id="exportAllBtn" title="Every draft in one .json file, which Import reads back">Export all drafts</button>
-      <button type="button" id="exportOneBtn" title="The open draft as a Markdown file">Download this draft (.md)</button>
-      <button type="button" id="importBtn" title="The drafts of an exported .json file, or a .md or .txt file as one draft, as new tabs">Import…</button>
-      <input type="file" id="importFile" accept=".json,.md,.markdown,.txt" hidden>
-      <button type="button" data-close>Close</button>
+    <div id="historyVersions" class="history-view">
+      <p class="modal-note">Earlier versions are kept before <em>Fix all</em>, <em>Apply to source</em>, <em>Replace all</em>, <em>Clear</em>, <em>Load example</em> and a restore, and every 10 minutes while you edit: up to 20 per draft, in this browser only. When they take up too much room, or a draft needs the space, the oldest go first.</p>
+      <div id="historyList" class="split-parts"></div>
+      <p class="modal-note">Drafts are kept in this browser only, and the online page and a downloaded copy of it each keep their own. Export them to keep a backup, or to copy them into another browser. Import adds the drafts of an exported file as new tabs, and never replaces or changes a draft.</p>
+      <div class="modal-actions">
+        <button type="button" id="compareBtn">Compare…</button>
+        <button type="button" id="exportAllBtn" title="Every draft in one .json file, which Import reads back">Export all drafts</button>
+        <button type="button" id="exportOneBtn" title="The open draft as a Markdown file">Download this draft (.md)</button>
+        <button type="button" id="importBtn" title="The drafts of an exported .json file, or a .md or .txt file as one draft, as new tabs">Import…</button>
+        <input type="file" id="importFile" accept=".json,.md,.markdown,.txt" hidden>
+        <button type="button" data-close>Close</button>
+      </div>
+    </div>
+    <div id="compareView" class="history-view" hidden>
+      <label>Compare this draft with
+        <select id="compareSource"></select>
+      </label>
+      <label id="comparePasteLabel" hidden>Paste edited text
+        <textarea id="comparePaste" rows="4" spellcheck="false"></textarea>
+      </label>
+      <p id="compareSummary" role="status"></p>
+      <pre id="compareDiff" aria-label="Changes"></pre>
+      <button type="button" id="compareBack">Back to versions</button>
     </div>
   </div>
 </div>
@@ -4832,6 +4862,72 @@ function newDraftName(list) {
 
 /* ---- earlier versions of a draft, and drafts as files (pure) ---- */
 
+/* A TeX control word is one edit. Unicode letters, marks and numbers stay
+   together, including in prose that does not use the Latin alphabet. */
+var DIFF_WORD = '\\\\[A-Za-z]+|[\\p{L}\\p{M}\\p{N}]+';
+var DIFF_TOKENS = new RegExp(DIFF_WORD + '|\\s+|.', 'gu');
+var DIFF_WORDS_ONLY = new RegExp(DIFF_WORD, 'gu');
+var DIFF_LINES = /[^\r\n\u2028\u2029]*(?:\r\n|[\r\n\u2028\u2029])|[^\r\n\u2028\u2029]+/g;
+
+function diffTokenRuns(left, right) {
+  var runs = [], start = 0, endA = left.length, endB = right.length;
+  function add(op, text) {
+    if (!text) return;
+    var last = runs[runs.length - 1];
+    if (last && last.op === op) last.text += text;
+    else runs.push({ op: op, text: text });
+  }
+  /* Even a book-length draft with one local edit can get a word diff. Only
+     the unmatched middle needs the quadratic longest-common-subsequence table. */
+  while (start < endA && start < endB && left[start] === right[start]) start++;
+  while (endA > start && endB > start && left[endA - 1] === right[endB - 1]) { endA--; endB--; }
+  var rows = endA - start, cols = endB - start;
+  if (rows && cols && (rows > 3000 || cols > 3000 || rows * cols > 2250000)) return null;
+  add('same', left.slice(0, start).join(''));
+  var i = 0, j = 0;
+  if (rows && cols) {
+    var stride = cols + 1, lcs = new Uint16Array((rows + 1) * stride), at;
+    for (i = rows - 1; i >= 0; i--) {
+      for (j = cols - 1; j >= 0; j--) {
+        at = i * stride + j;
+        lcs[at] = left[start + i] === right[start + j] ? 1 + lcs[at + stride + 1]
+          : Math.max(lcs[at + stride], lcs[at + 1]);
+      }
+    }
+    i = j = 0;
+    while (i < rows && j < cols) {
+      at = i * stride + j;
+      if (left[start + i] === right[start + j]) { add('same', left[start + i]); i++; j++; }
+      else if (lcs[at + stride] >= lcs[at + 1]) { add('del', left[start + i]); i++; }
+      else { add('ins', right[start + j]); j++; }
+    }
+  }
+  add('del', left.slice(start + i, endA).join(''));
+  add('ins', right.slice(start + j, endB).join(''));
+  add('same', left.slice(endA).join(''));
+  return runs;
+}
+
+/* Each side can be recovered verbatim from its runs. The optional details
+   tell the reader when the work bound required a coarser comparison. */
+function diffWords(a, b, details) {
+  var runs, mode = 'words';
+  if (a === b) runs = a ? [{ op: 'same', text: a }] : [];
+  else {
+    runs = diffTokenRuns(a.match(DIFF_TOKENS) || [], b.match(DIFF_TOKENS) || []);
+    if (!runs) {
+      mode = 'lines';
+      runs = diffTokenRuns(a.match(DIFF_LINES) || [], b.match(DIFF_LINES) || []);
+      if (!runs) {
+        mode = 'replacement';
+        runs = [{ op: 'del', text: a }, { op: 'ins', text: b }];
+      }
+    }
+  }
+  if (details) details.mode = mode;
+  return runs;
+}
+
 /* A draft's history: its earlier texts, newest first, each {at, why, text}.
    It is kept in this browser only and capped, per draft (HISTORY_MAX,
    HISTORY_CHARS) and for all drafts together (HISTORY_BUDGET, well under
@@ -7370,6 +7466,12 @@ var memHistory = {};     /* without readable localStorage: this window's version
 var historyNewest = {};  /* id -> time of its newest version, so the autosave need not read the list */
 var historyShown = [];   /* the versions the dialog lists */
 var historyFor = null;   /* and the draft they belong to */
+var historyVersions = document.getElementById('historyVersions');
+var compareView = document.getElementById('compareView');
+var compareSource = document.getElementById('compareSource');
+var comparePaste = document.getElementById('comparePaste');
+var compareDiff = document.getElementById('compareDiff');
+var compareSummary = document.getElementById('compareSummary');
 
 function readHistory(id) {
   var list = memHistory[id] || [];
@@ -7552,6 +7654,9 @@ function versionTime(at) {
 /* Redrawn while open (a rename, a version from another window), the list
    keeps the focus on the same version's button, or on the dialog. */
 function renderHistory() {
+  /* Keep the version picker bound to the texts the author saw on opening
+     Compare. A new version in another window can move every list index. */
+  if (!compareView.hidden) return;
   var el = document.activeElement, keep = null;
   if (el && historyList.contains(el)) {
     var attr = el.hasAttribute('data-restore') ? 'data-restore' : el.hasAttribute('data-copy-version') ? 'data-copy-version' : null;
@@ -7605,10 +7710,105 @@ function openHistory() {
 function closeHistory() {
   if (historyDialog.hidden) return;
   historyDialog.hidden = true;
+  leaveCompare();
   setModal(historyDialog, false);
   var btn = draftTools.querySelector('.dtool[data-act="history"]');
   (btn || ta).focus();
 }
+
+function openCompare() {
+  if (historyDialog.hidden || historyFor !== draftMeta.active) return;
+  historyVersions.hidden = true;
+  compareView.hidden = false;
+  historyTitle.textContent = 'Compare “' + draftById(historyFor).name + '”';
+  function group(label) {
+    var g = document.createElement('optgroup');
+    g.label = label;
+    compareSource.appendChild(g);
+    return g;
+  }
+  compareSource.textContent = '';
+  if (historyShown.length) {
+    var versions = group('Earlier versions');
+    historyShown.forEach(function (v, i) {
+      versions.appendChild(new Option(versionTime(v.at) + ' · ' + v.why, 'version-' + i));
+    });
+  }
+  compareSource.add(new Option('Pasted text', 'paste'));
+  var others = draftMeta.list.filter(function (d) { return d.id !== historyFor; });
+  if (others.length) {
+    var drafts = group('Other drafts');
+    others.forEach(function (d) {
+      var opt = new Option(d.name, 'draft-' + d.id);
+      function available() {
+        opt.disabled = knownDraftText(d.id) === null;
+        opt.textContent = d.name + (opt.disabled ? ' (text unavailable)' : '');
+      }
+      available();
+      drafts.appendChild(opt);
+      if (opt.disabled && bodyLoads[d.id]) bodyLoads[d.id].then(available);
+    });
+  }
+  drawCompare();
+  compareSource.focus();
+}
+
+function drawCompare() {
+  if (historyDialog.hidden || compareView.hidden || historyFor !== draftMeta.active) return;
+  var source = compareSource.value, pasting = source === 'paste', historical = source.indexOf('version-') === 0;
+  document.getElementById('comparePasteLabel').hidden = !pasting;
+  var base = knownDraftText(historyFor);
+  if (base !== null && !ta.readOnly) base = ta.value; /* compare what the author sees in the editor */
+  var other = pasting ? comparePaste.value : null, direction;
+  if (historical) {
+    other = historyShown[Number(source.slice(8))].text;
+    direction = 'Earlier version → current draft';
+  } else if (pasting) {
+    direction = 'Current draft → pasted text';
+  } else {
+    var d = draftById(source.slice(6));
+    if (d) other = knownDraftText(d.id);
+    direction = 'Current draft → “' + (d ? d.name : 'other draft') + '”';
+  }
+  compareDiff.textContent = '';
+  if (base === null || other === null) {
+    compareSummary.textContent = 'The text of this draft is unavailable for comparison.';
+    return;
+  }
+  var details = {}, counts = { del: 0, ins: 0 }, fragment = document.createDocumentFragment();
+  var runs = historical ? diffWords(other, base, details) : diffWords(base, other, details);
+  runs.forEach(function (run) {
+    if (run.op === 'same') fragment.appendChild(document.createTextNode(run.text));
+    else {
+      var mark = document.createElement(run.op);
+      mark.textContent = run.text;
+      fragment.appendChild(mark);
+      counts[run.op] += (run.text.match(DIFF_WORDS_ONLY) || []).length;
+    }
+  });
+  compareDiff.appendChild(fragment);
+  function words(n) { return fmt(n) + (n === 1 ? ' word' : ' words'); }
+  compareSummary.textContent = direction + ' · ' + (base === other ? 'Identical texts.'
+    : words(counts.del) + ' deleted, ' + words(counts.ins) + ' inserted.') +
+    (details.mode === 'lines' ? ' Large edit shown by line. Counts include every word in changed lines.'
+      : details.mode === 'replacement' ? ' Large edit shown as one replacement. Counts include both full texts.' : '');
+}
+
+function leaveCompare() {
+  compareView.hidden = true;
+  historyVersions.hidden = false;
+  comparePaste.value = '';
+  compareSource.textContent = compareDiff.textContent = compareSummary.textContent = '';
+}
+
+document.getElementById('compareBtn').addEventListener('click', openCompare);
+compareSource.addEventListener('change', drawCompare);
+comparePaste.addEventListener('input', drawCompare);
+document.getElementById('compareBack').addEventListener('click', function () {
+  leaveCompare();
+  renderHistory();
+  document.getElementById('compareBtn').focus();
+});
 
 /* A restore is one more edit: one undo brings the text back, and the text
    it replaces is kept as a version first. */

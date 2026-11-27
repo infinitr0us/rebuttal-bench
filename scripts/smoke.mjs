@@ -694,6 +694,41 @@ try {
     window.confirm = () => true; deleteDraft(a); await wait(50);
     return inert && focusKept && closed && kept && draftMeta.active === 'd1' || { inert, focusKept, closed, kept, active: draftMeta.active };`);
 
+  await check('Compare reads versions, other drafts and pasted edits without changing the draft or storage', `
+    const id = createDraft('Compare current', 'Our current result.');
+    const other = createDraft('Co-author', 'Our revised result.');
+    const unknown = createDraft('Still loading', '');
+    fallbackDel(keyOfDraft(unknown)); bodyState[unknown] = 'loading'; delete bodyKnown[unknown];
+    switchDraft(id);
+    keepVersion('before edits', 'Our earlier result.');
+    const stored = JSON.stringify(localStorage), meta = JSON.stringify(draftMeta);
+    const shown = () => Array.from(compareDiff.children, el => [el.tagName, el.textContent]);
+    const change = (value) => { compareSource.value = value; compareSource.dispatchEvent(new Event('change')); };
+    try {
+      draftTools.querySelector('[data-act="history"]').click();
+      document.getElementById('compareBtn').click();
+      const version = shown(), modal = !!ta.closest('[inert]') && !compareView.closest('[inert]');
+      const unavailable = compareSource.querySelector('[value="draft-' + unknown + '"]').disabled;
+      change('draft-' + other);
+      const draft = shown();
+      change('paste'); comparePaste.value = 'Our <b> result.'; comparePaste.dispatchEvent(new Event('input'));
+      const pasted = shown(), count = compareSummary.textContent;
+      document.getElementById('compareBack').click();
+      const back = compareView.hidden && !historyVersions.hidden && !!historyList.querySelector('[data-restore]');
+      document.getElementById('compareBtn').click();
+      const readOnly = stored === JSON.stringify(localStorage) && meta === JSON.stringify(draftMeta) && ta.value === 'Our current result.';
+      switchDraft('d1');
+      const closed = historyDialog.hidden && compareView.hidden && !comparePaste.value && !ta.closest('[inert]');
+      return JSON.stringify(version) === JSON.stringify([['DEL','earlier'],['INS','current']]) &&
+        JSON.stringify(draft) === JSON.stringify([['DEL','current'],['INS','revised']]) &&
+        JSON.stringify(pasted) === JSON.stringify([['DEL','current'],['INS','<b>']]) &&
+        /1 word deleted, 1 word inserted/.test(count) && modal && unavailable && back && readOnly && closed ||
+        { version, draft, pasted, count, modal, unavailable, back, readOnly, closed };
+    } finally {
+      closeHistory(); switchDraft('d1'); window.confirm = () => true;
+      [id, other, unknown].forEach(deleteDraft);
+    }`);
+
   await check('Export names a draft that has not loaded instead of writing it as blank', `
     const id = createDraft('Loading one', 'its text'); saveDraftMeta();
     fallbackDel(keyOfDraft(id)); delete draftTexts[id]; bodyState[id] = 'loading';
