@@ -5213,20 +5213,24 @@ var REVIEW_FIELDS = [
   ['W', 'weaknesses', 'weakness', 'summary of weaknesses', 'strengths and weaknesses', 'other strengths and weaknesses',
     'claims and evidence', 'methods and evaluation criteria', 'theoretical claims', 'experimental designs or analyses',
     'essential references not discussed', 'requested changes', 'concerns', 'main weaknesses', 'major weaknesses',
-    'major concerns', 'paper formatting concerns'],
+    'major concerns', 'paper formatting concerns', 'reasons to reject', 'relation to broader scientific literature'],
   ['Q', 'questions', 'question', 'questions for authors', 'questions for the authors', 'questions to authors',
     'questions to the authors', 'questions and suggestions', 'questions for rebuttal'],
   ['L', 'limitations', 'limitation', 'limitations and societal impact'],
   ['C', 'other comments or suggestions', 'comments suggestions and typos', 'comments, suggestions and typos',
     'comments', 'comment', 'suggestions', 'minor comments', 'minor weaknesses', 'minor issues', 'typos',
-    'additional comments', 'additional feedback', 'detailed comments'],
+    'additional comments', 'additional feedback', 'detailed comments', 'missing references', 'minor typos',
+    'typos grammar style and presentation improvements'],
   [null, 'summary', 'paper summary', 'summary of the paper', 'summary of contributions', 'summary of strengths',
     'strengths', 'strength', 'main strengths', 'soundness', 'presentation', 'contribution', 'rating', 'overall rating',
     'overall recommendation', 'recommendation', 'overall assessment', 'confidence', 'reviewer confidence',
     'flag for ethics review', 'ethical concerns', 'details of ethics concerns', 'ethics', 'code of conduct',
-    'supplementary material', 'relation to broader scientific literature', 'relation to prior work', 'quality',
+    'supplementary material', 'reasons to accept', 'paper topic and main contributions', 'paper topic', 'relation to prior work', 'quality',
     'clarity', 'significance', 'originality', 'reproducibility', 'best paper', 'justification for recommendation',
-    'first time reviewer', 'review', 'title']
+    'first time reviewer', 'review', 'title', 'excitement', 'references', 'final justification',
+    'code of conduct acknowledgement', 'responsible reviewing acknowledgement', 'broader impact concerns',
+    'explain your answer above', 'are the claims made in the submission supported by accurate, convincing and clear evidence?',
+    "would at least some individuals in tmlr's audience be interested in knowing the findings of this paper?"]
 ];
 var REVIEW_FIELD_INDEX = (function () {
   var map = Object.create(null);
@@ -5240,13 +5244,58 @@ var REVIEW_ITEM = /^([ \t]{0,8})(?:(\d{1,2})[.)]|\((\d{1,2})\)|([-*•●▪◦�
 /* The field a line names, as {letter, name, rest: the text after the name
    on the same line}, or null. Markup around the name (**, ##) is ignored. */
 function reviewField(line) {
-  var m = /^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*([A-Za-z][A-Za-z ,/&-]{2,60}?)[ \t]*(?:\*\*|__)?[ \t]*(?::|：|$)(?:(?:\*\*|__)[ \t]*)?(.*)$/.exec(line);
+  var m = /^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*([A-Za-z][A-Za-z '?,/&-]*?)[ \t]*(?:\*\*|__)?[ \t]*(?::|：|$)(?:(?:\*\*|__)[ \t]*)?(.*)$/.exec(line);
   if (!m) return null;
-  var name = m[1].toLowerCase().replace(/\s*&\s*/g, ' and ').replace(/\s+/g, ' ').replace(/[ ,]+$/, '');
-  if (!(name in REVIEW_FIELD_INDEX)) return null;
-  /* "Summary" with no colon in a sentence is prose, not a field. */
-  if (!/:|：/.test(line) && m[2].trim()) return null;
-  return { letter: REVIEW_FIELD_INDEX[name], name: m[1].trim(), rest: m[2] };
+  var title = m[1].trim(), name = title.toLowerCase().replace(/\s*&\s*/g, ' and ').replace(/\s+/g, ' ');
+  var letter = REVIEW_FIELD_INDEX[name];
+  /* An unfamiliar standalone form heading ends the preceding value. In prose,
+     "Minor: ..." or "Include Human Evaluation: ..." can introduce a concern. */
+  if (letter === undefined) {
+    if (m[2].trim() || !/:|：/.test(line) || !/^[A-Z][a-z]+(?: [A-Z][a-z]+)+$/.test(title)) return null;
+    letter = null;
+  }
+  return { letter: letter, name: title, rest: m[2] };
+}
+
+/* Read the field/value siblings OpenReview copies, including selections whose
+   outer note-content div is missing. Only text enters the review box. */
+function readHtmlReview(doc) {
+  var names = doc.getElementsByClassName('note-content-field'), fields = [];
+  function children(node, indent) {
+    var out = '';
+    for (var child = node.firstChild; child; child = child.nextSibling) out += read(child, indent);
+    return out;
+  }
+  function clean(s) { return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim(); }
+  function read(node, indent) {
+    if (node.nodeType === 3) return node.nodeValue.replace(/\s+/g, ' ');
+    if (node.nodeType !== 1 && node.nodeType !== 11) return '';
+    var tag = node.nodeName;
+    if (/^(?:SCRIPT|STYLE)$/.test(tag)) return '';
+    if (tag === 'BR') return '\n';
+    if (tag === 'OL' || tag === 'UL') {
+      var rows = [], n = node.hasAttribute('start') ? Number(node.getAttribute('start')) : 1;
+      for (var li = node.firstElementChild; li; li = li.nextElementSibling) {
+        if (li.nodeName !== 'LI') continue;
+        if (li.hasAttribute('value')) n = Number(li.getAttribute('value'));
+        rows.push(indent + (tag === 'OL' ? (n++) + '. ' : '- ') + clean(children(li, indent + '  ')));
+      }
+      return '\n' + rows.join('\n') + '\n';
+    }
+    var value = children(node, indent);
+    return /^(?:DIV|P|H[1-6]|BLOCKQUOTE|PRE)$/.test(tag) ? '\n\n' + value.trim() + '\n\n' : value;
+  }
+  for (var i = 0; i < names.length; i++) {
+    var name = names[i], value = name.nextElementSibling;
+    if (!value || !value.classList.contains('note-content-value')) return null;
+    fields.push(name.textContent.trim().replace(/[:：]?$/, ':') + '\n' + clean(read(value, '')));
+  }
+  if (!fields.length) return null;
+  var prefix = doc.createRange();
+  prefix.selectNodeContents(doc.body);
+  prefix.setEndBefore(names[0]);
+  var title = clean(read(prefix.cloneContents(), ''));
+  return (title ? title + '\n' : '') + fields.join('\n\n');
 }
 
 /* The first sentence of `s`, at most `max` characters, cut at a word. */
@@ -5262,21 +5311,22 @@ function reviewExcerpt(s, max) {
 /* {reviewer, points: [{label, letter, field, text, excerpt, start, end}]}:
    `reviewer` is the ID in OpenReview's title line ("Official Review of
    Submission12 by Reviewer k9F2"), or null; offsets are into `text`. */
+var REVIEW_WORD = new RegExp('[\\p{L}\\p{N}]', 'u');
 function reviewPoints(text) {
   var out = { reviewer: null, points: [] };
   if (typeof text !== 'string' || !text.trim()) return out;
-  text = text.replace(/\r\n?/g, '\n');
   var who = /\bby[ \t]+Reviewer[ \t_]+([A-Za-z0-9]{4})(?![A-Za-z0-9])/.exec(text.slice(0, 400));
   if (who) out.reviewer = who[1];
   /* Lines with their offsets; fields as runs of lines. */
-  var lines = [], pos = 0;
-  text.split('\n').forEach(function (l) { lines.push({ text: l, start: pos }); pos += l.length + 1; });
+  var lines = [], lineRe = /([^\r\n]*)(?:\r\n?|\n|$)/g, line;
+  while ((line = lineRe.exec(text)) && line[0]) lines.push({ text: line[1], start: line.index });
   var fields = [], cur = null;
   lines.forEach(function (l) {
     var f = reviewField(l.text);
     /* Inside a field of points, "Clarity: the notation in Sec. 3 is ..." is
        one of them; a score field reads "Clarity: 3: good". */
-    if (f && !f.letter && cur && cur.letter && f.rest.trim().length > 40 && !/^\d/.test(f.rest.trim())) f = null;
+    if (f && cur && cur.letter && /^(?:quality|clarity|significance|originality|soundness|presentation|contribution)$/i.test(f.name) &&
+        f.rest.trim() && !/^(?:\d|(?:excellent|good|fair|poor|weak|strong|adequate|satisfactory)\.?$)/i.test(f.rest.trim())) f = null;
     if (f) {
       cur = { letter: f.letter, name: f.name, lines: [] };
       fields.push(cur);
@@ -5290,38 +5340,46 @@ function reviewPoints(text) {
   var used = { W: 0, Q: 0, L: 0, C: 0 }, taken = Object.create(null);
   fields.forEach(function (f) {
     if (!f.letter) return;
-    var items = [], first = null;
+    var items = [], first = null, item = null, para = null, previous = '';
+    var mixed = /strengths and weaknesses/i.test(f.name);
     f.lines.forEach(function (l) {
+      var body = l.text.trim(), bare = body.replace(/\*\*|__/g, '');
+      if (!body) { para = null; previous = ''; return; }
       var m = REVIEW_ITEM.exec(l.text);
       var kind = m ? (m[2] || m[3] ? 'num' : m[4] ? 'bullet' : 'label') : null;
       if (m && (!first || (kind === first.kind && m[1].length <= first.indent))) {
-        if (!first) first = { kind: kind, indent: m[1].length };
-        items.push({ start: l.start + m[0].length, end: l.start + l.text.length, own: m[5] ? pointName(m[5]) : null, lines: 1 });
-      } else if (items.length) {
-        items[items.length - 1].end = l.start + l.text.length;
+        first = { kind: kind, indent: m[1].length };
+        item = { start: l.start + m[0].length, end: l.start + l.text.length, own: m[5] ? pointName(m[5]) : null };
+        items.push(item);
+      } else if (!m && (/:$/.test(bare) || /^#{1,6}\s/.test(bare) ||
+          /^\[\d+\]\s/.test(body) || (mixed && /^\+\s/.test(body)))) {
+        /* Neither a list introduction nor a bibliography entry belongs to the
+           preceding item. In a mixed field + can explicitly mark strengths. */
+        item = para = null;
+      } else if (item) {
+        item.end = l.start + l.text.length;
       } else {
-        items.push({ start: l.start, end: l.start + l.text.length, own: null, lines: 0, para: true });
+        /* A forum selection loses list markers. Terminal punctuation followed
+           by a fresh statement separates items; keep hard-wrapped prose. */
+        if (!para || (/^(?:some (?:other|further) limitations|another (?:concern|weakness)|(?:why|how|could|can|does|do|what|which)\b.*\?)/i.test(body) && !/^\s/.test(l.text)) ||
+            (/[.!?。？！]["')\]]?$/.test(previous) && !/^\s/.test(l.text) && !/^[,.;:?!)]/.test(body))) {
+          para = { start: l.start, end: l.start, prose: true };
+          items.push(para);
+        }
+        para.end = l.start + l.text.length;
       }
+      previous = body;
     });
-    /* No list: the field's paragraphs are its points. */
-    if (!first) {
-      items = [];
-      var para = null;
-      f.lines.forEach(function (l) {
-        if (!l.text.trim()) { para = null; return; }
-        if (!para) { para = { start: l.start, end: l.start + l.text.length, own: null }; items.push(para); }
-        else para.end = l.start + l.text.length;
-      });
-    } else {
-      /* Text before the first item introduces the list. */
-      items = items.filter(function (it) { return !it.para; });
-    }
-    items.forEach(function (it) {
-      var body = text.slice(it.start, it.end).trim();
-      if (body.replace(/[^A-Za-z0-9]/g, '').length < 3) return;
-      /* "Limitations: Yes" means they were addressed. */
-      if (f.letter === 'L' && (body.length < 30 || /^(?:yes|no|none|n\/?a)\b/i.test(body))) return;
-      if (/^(?:none|n\/?a|no(?: (?:further|other|additional))? (?:questions?|comments?|concerns?))\.?$/i.test(body)) return;
+    items.forEach(function (it, index) {
+      var body = text.slice(it.start, it.end).trim(), plain = body.replace(/\*\*|__/g, '');
+      if (!REVIEW_WORD.test(body) || /^\d+[.)]$/.test(body)) return;
+      if (it.prose && first && items[index + 1] && !items[index + 1].prose) return;
+      if (/^(?:none|n\/?a|no|yes|does not apply|not applicable|see (?:above|below)|no(?: (?:further|other|additional|paper formatting))? (?:questions?|comments?|concerns?))[.!]?$/i.test(plain)) return;
+      if (f.letter === 'L' && /^(?:yes[,.:]?\s*)?(?:the (?:authors|paper) (?:discuss|discusses|acknowledge|acknowledges) (?:the |their )?limitations|(?:the )?limitations are (?:discussed|acknowledged))(?: in (?:the )?(?:paper|appendix|supplementary material))?[.!]?$/i.test(plain)) return;
+      if (/^(?:please )?(?:see|refer to) (?:the )?(?:writing issues in )?(?:weaknesses|questions|reasons to reject)[.!]?$/i.test(plain)) return;
+      /* Only whole, unqualified endorsements. A "but", request or second
+         sentence leaves the point for the author to judge. */
+      if (f.letter === 'W' && /^(?:the (?:paper|benchmark|method|writing|proof) is (?:useful|clear|correct|well[- ]written)|the (?:theoretical )?claims are (?:correctly proved and )?well supported(?: by (?:the )?(?:numerical|empirical) evidence)?)[.!]?$/i.test(plain)) return;
       var start = it.start + text.slice(it.start, it.end).search(/\S/), label = it.own;
       /* A label the reviewer used twice gets the next free number. */
       if (label && taken[label]) label = null;
