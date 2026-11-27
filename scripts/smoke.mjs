@@ -1198,28 +1198,30 @@ try {
     setSourceText(was, 0); saveDraftNow(); updateAll();
     return rows.join('|') === 'Reviewer A:0|W1: First:1|Reviewer B:0|W1: Next:1' && at === 4 || { rows, at };`);
 
-  await check('a draft named for one reviewer that thanks another gets a card, which follows renames and the other tab', `
+  await check('a draft named for one reviewer that thanks another gets a card, which follows renames here and in another window', `
     const home = draftMeta.active;
-    const ab = createDraft('Reviewer Ab12', '**W1.** Seeds.\\n\\n**Q1:** Why?');
+    const ab = createDraft('Reviewer Ab12', '**W1.** Seeds.');
     const k9 = createDraft('Reviewer k9F2', ''); saveDraftMeta();
     switchDraft(k9); await wait(50);
-    setSourceText('We thank Reviewer Ab12 for the review.\\n\\nW1: see our answer to Reviewer Ab12, Q2.', 0); updateAll();
-    const titles = () => currentIssues.map((i) => i.title + ' @' + ta.value.slice(i.start, i.end));
-    const both = titles().join('|') === 'This draft addresses another reviewer @Reviewer Ab12|' +
-      'Pointer to a point the other draft does not have @Q2';
-    /* Another window adds Q2 to Ab12's draft: the pointer card goes, with no edit here. */
-    const key = 'rebuttal-bench-draft-' + ab, now = '**W1.** Seeds.\\n\\n**Q2:** Why?';
-    localStorage.setItem(key, now);
-    window.dispatchEvent(new StorageEvent('storage', { key, newValue: now }));
-    const followed = titles().join('|') === 'This draft addresses another reviewer @Reviewer Ab12';
-    window.prompt = () => 'Reviewer Ab12 (follow-up)';
+    setSourceText('We thank Reviewer Ab12 for the review.\\n\\nW1: more seeds.', 0); updateAll();
+    const titles = () => currentIssues.map((i) => i.title + ' @' + ta.value.slice(i.start, i.end)).join('|');
+    const card = titles() === 'This draft addresses another reviewer @Ab12';
+    /* Another window renames this tab: the card goes with no edit here. */
+    const meta = JSON.parse(localStorage.getItem('rebuttal-bench-drafts'));
+    meta.list.find((d) => d.id === k9).name = 'Reviewer Ab12 (follow-up)';
+    meta.list.find((d) => d.id === k9).at = Date.now();
+    localStorage.setItem('rebuttal-bench-drafts', JSON.stringify(meta));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'rebuttal-bench-drafts', newValue: JSON.stringify(meta) }));
+    const elsewhere = draftById(k9).name === 'Reviewer Ab12 (follow-up)' && titles() === '';
+    window.prompt = () => 'Reviewer k9F2';
+    await wait(5); /* a later rename here, which the merge keeps */
     renameDraft(k9); await wait(20);
-    const renamed = titles().length === 0;
+    const renamed = titles() === 'This draft addresses another reviewer @Ab12';
     window.confirm = () => true;
     deleteDraft(ab); deleteDraft(k9); await wait(50);
     switchDraft(home); await wait(50);
-    return both && followed && renamed && draftMeta.active === home && !draftById(ab) && !draftById(k9) ||
-      { both, followed, renamed, titles: titles() };`);
+    return card && elsewhere && renamed && draftMeta.active === home && !draftById(ab) && !draftById(k9) ||
+      { card, elsewhere, renamed, titles: titles() };`);
 
   /* A Node string with real line breaks; JSON.stringify writes it into the page code. */
   const REVIEW = 'Official Review of Submission1 by Reviewer k9F2\nWeaknesses:\n1. No ablation on the number of experts.\n' +

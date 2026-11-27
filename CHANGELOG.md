@@ -36,11 +36,12 @@
   one venue's limit under another, which cannot be told apart from a typed one). A venue picked
   in the first moments, before the stored preferences are read, keeps its own limit.
 - ICML cites its 2027 instructions (5,000 characters per round, unchanged). AAAI is labelled
-  AAAI-26: the 2,500 characters come from its FAQ, and AAAI-27 published no character limit.
-  ACL ARR forbids external links, so a link into the OpenReview forum is no longer flagged
-  there. ICLR's guide asks for anonymous links whose host does not track visitors: a link that
-  may name the authors gets a warning there, a shortened URL a warning (an error only at ICML,
-  which names them). The NeurIPS rule names its one exception: an anonymized link to code the
+  AAAI-26: the 2,500 characters come from its FAQ, and the AAAI-27 call states no character
+  limit. ACL ARR forbids external links, so a link into the OpenReview forum (a path, a query or
+  a fragment) is no longer flagged there, while `//host` links are. ICLR's guide asks for code in
+  an anonymous repository and demos on hosts that do not track visitors: a link that may name the
+  authors gets a warning there, a shortened URL a warning (an error only at ICML, which names
+  them). The NeurIPS rule names its one exception: an anonymized link to code the
   reviewers asked for, sent to the AC in an Official Comment.
 - Two new presets for venues that keep OpenReview's default forms (workshops, smaller venues):
   *OpenReview default comment* (5,000 characters) and *OpenReview default rebuttal* (2,500).
@@ -52,15 +53,13 @@
   answer copied from another draft. Mentions in passing (*as Reviewer Ab12 also noted*, *thank
   you for raising the same concern as Reviewer Ab12*), joint thanks to several reviewers, quotes
   and a general response are left alone, and IDs are never compared with numbers.
-- An ID written in other capitals than its tab (`k9f2` for `k9F2`) gets a card, since OpenReview
-  IDs are case-sensitive.
-- A pointer such as *see our answer to Reviewer Ab12, Q2* or *see W3 of Reviewer Ab12* gets a
-  card on the point when that reviewer's drafts never mention it, in any spelling.
-- All of these are advice: nothing changes the text, and Fix all does not count them. The
-  cards follow the other tabs: a rename, an import, or a text saved in another window.
-- A Codex review of these checks found twelve problems before release, most of them cards on
-  ordinary sentences; the checks were narrowed to what is unmistakable, and every sentence the
-  review tried is now a regression case.
+- An ID written in other capitals than every tab's (`k9f2` for `k9F2`) gets a card, since
+  OpenReview IDs are case-sensitive.
+- Both are advice: nothing changes the text, and Fix all does not count them. The cards follow
+  the tabs' names, renamed here, in another window or on another device.
+- Two Codex reviews of these checks found cards on ordinary sentences; the checks were narrowed
+  to what is unmistakable, a planned check of pointers such as *see our answer to Reviewer
+  Ab12, Q2* was left out for now, and every sentence the reviews tried is a regression case.
 
 ## 3.7.0 (2026-11-25)
 
