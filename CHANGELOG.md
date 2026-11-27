@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.10.0 (unreleased)
+
+### Before posting
+- A line that starts with `%` is a LaTeX comment in the paper's source (a note to a co-author,
+  a sentence taken out), but OpenReview posts it as typed: it now gets a card, with a click to
+  delete the line. Percentages (`95% of runs`, a line break before `% on average`) and comments
+  inside math or code are left alone.
+- What a chat assistant leaves around its text gets a card: the citation markers its copy
+  button leaves (`:contentReference[oaicite:0]{index=0}`, `citeturn0search1`, `【4†source】`,
+  deleted with a click), its own opening line ("Certainly! Here is a revised version of your
+  rebuttal:") and phrases no author writes to a reviewer ("I hope this helps", "As an AI
+  language model"). An author's similar sentences ("Here is the revised proof:", "Please let us
+  know if you have further questions") are left alone.
+- `[Your Name]`, `[Authors' names]` and the like count as placeholders.
+- The Compaction panel says that notification e-mails show the Markdown rendered but formulas
+  as LaTeX source, so only the formula tricks change what a reviewer reads there (checked in
+  Outlook).
+
 ## 3.9.0 (2026-11-27)
 
 ### The review beside its draft

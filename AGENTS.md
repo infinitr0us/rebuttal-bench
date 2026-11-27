@@ -89,7 +89,15 @@ text, discard the grid and use the regular text importer.
   Check 17 reports placeholders in visible text only (not in code, link destinations and
   definitions, image syntax, dropped cells or HTML comments), each pattern limited to where it
   is unmistakable (no `??` in code, no `XXX` in math); check 18 invisible characters and
-  ligatures, one card each, with a manual fix for all of them.
+  ligatures, one card each, with a manual fix for all of them. Check 19 reports a prose line
+  that starts with `%` (a LaTeX comment from the paper's source, posted as typed), not inside
+  math or code and not a wrapped percentage ("by 5" then "% on average"); check 20 what a chat
+  assistant leaves behind: its citation markers (`oaicite`, `citeturn`, `【4†source】`), its own
+  opening line ("Certainly! Here is a revised version of your rebuttal:") and phrases no author
+  writes to a reviewer ("I hope this helps"). Both use check 17's mask, warn, and offer a manual
+  deletion only for a marker or a line of their own; `tests/leftovers.test.js` holds the
+  author's similar sentences that must stay quiet ("Here is the revised proof:", "Please let us
+  know"). Widen a pattern only with such a near-miss case.
 - `texProblemIssues(src, spans, reports, issues, {stale, analyze})` turns what MathJax reported
   after the last typeset (`texProblems()` in the DOM section: `{tex, undef, errors}` per formula,
   in document order) into cards. Formulas cut apart by inline Markdown are skipped (MathJax never

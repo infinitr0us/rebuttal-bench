@@ -1077,7 +1077,7 @@ window.MathJax = {
     <details class="compact" id="compactBox">
       <summary>Compaction <span id="compactSum" class="compact-sum zero"></span></summary>
       <div class="compact-body">
-        <p class="compact-note">Shorter source, the same rendering on OpenReview: every change is checked against the rendered comment and dropped if anything would differ (the last group excepted, and off until you switch it on). <b>Copy compact</b> copies the short form; the editor keeps your text.</p>
+        <p class="compact-note">Shorter source, the same rendering on OpenReview: every change is checked against the rendered comment and dropped if anything would differ (the last group excepted, and off until you switch it on). <b>Copy compact</b> copies the short form; the editor keeps your text. Notification e-mails show the Markdown rendered but formulas as LaTeX source, so only the formula tricks change what a reviewer reads there.</p>
         <div id="compactList"></div>
         <div class="compact-actions">
           <button type="button" id="applyCompactBtn" title="Replace the editor text with the compact form (one undo brings it back)">Apply to source</button>
@@ -2808,6 +2808,8 @@ function analyzeText(src, opts) {
     { re: /(^|[^\w.])(X{1,3}(?:\.X{1,3})+|x{2,3}\.x{1,3}|x\.x{2,3}|X{1,3}(?=[ \t]?\\?%))(?!\w|\.\w)/g, math: true, group: 2 },
     { re: /\?{2,}/g, math: false },
     { re: /\[(?:cite|citation(?: needed)?|refs?|references?|todo|tbd|placeholder|(?:insert|add|fill in)\b[^\]\n]{0,60})\](?![(\[:])/gi, math: false },
+    /* what a template or a chat assistant leaves for the author: "[Your Name]" */
+    { re: /\[(?:your|authors?(?:'s|’s)?)\b[^\]\n]{0,40}\](?![(\[:])/gi, math: false },
     { re: /\blorem ipsum\b/gi, math: true }
   ];
   var placed = new Uint8Array(src.length);
@@ -2866,6 +2868,61 @@ function analyzeText(src, opts) {
     },
     function (n) { return n === 1 ? 'spell it out' : 'spell all ' + n + ' out'; },
     function (ch) { return LIGATURES[ch]; });
+
+  /* The span of line `at`..`end` with one of its line breaks, so deleting it
+     leaves no blank line behind. */
+  function wholeLine(at, end) {
+    var from = src.lastIndexOf('\n', at - 1) + 1;
+    return end < src.length ? [from, end + 1] : [from > 0 ? from - 1 : from, end];
+  }
+
+  /* 19. LaTeX comment lines. A line that starts with % is a comment in the
+         paper's source (a note to a co-author, a sentence taken out), but
+         OpenReview prints it as typed, like an HTML comment. Only prose lines
+         count: TeX drops a comment inside math, and code shows what it shows.
+         A line break inside "by 5\n% on average" is a wrapped percentage. */
+  var commentLine = /^[ \t]{0,3}%[^\n]*/gm, cl;
+  while ((cl = commentLine.exec(src))) {
+    var cs = cl.index + cl[0].indexOf('%'), ce = cl.index + cl[0].length;
+    if (skipText[cs] || mathMask[cs]) continue;
+    if (/\d[ \t]*$/.test(src.slice(Math.max(0, cl.index - 12), Math.max(0, cl.index - 1))) && /^%[ \t]+[a-z]/.test(src.slice(cs, ce))) continue;
+    var cut = wholeLine(cl.index, ce);
+    push('warn', 'LaTeX comment is shown to the reviewers',
+      'OpenReview has no LaTeX comments: “' + escHtml(src.slice(cs, Math.min(ce, cs + 80))) + '” is posted as typed. ' +
+        'Delete the line if it was a note for your co-authors.',
+      cs, ce, manual('delete the line', cut[0], cut[1], ''));
+  }
+
+  /* 20. Leftovers of a chat assistant: the citation markers its copy button
+         leaves behind (":contentReference[oaicite:0]{index=0}",
+         "citeturn0search1", "【4†source】"), its own lines around the text it
+         wrote ("Certainly! Here is a revised version of your rebuttal:"), and
+         phrases only an assistant writes ("I hope this helps", "As an AI
+         language model"). Nothing an author writes to a reviewer, so a
+         warning; a marker or a line of its own can be deleted on a click. */
+  var CHAT_MARKER = /[ \t]?(?::?contentReference\[oaicite:\d+\]\{index=\d+\}|\[oaicite:\d+\]|?cite?(?:turn\d+(?:search|news|view|file|fetch|image)\d+?)+?|【\d+(?::\d+)?†[^】\n]{0,40}】)/g;
+  var CHAT_LINE = /^[ \t]*(?:(?:certainly|sure|of course|absolutely)[!,.][ \t]*here(?:'s|’s|[ \t]+is|[ \t]+are)\b|here(?:'s|’s|[ \t]+is)[ \t]+(?:a|an|the)[ \t]+(?:revised|polished|refined|improved|rewritten|edited|more concise|condensed|shortened)[ \t]+(?:version|draft)[ \t]+of[ \t]+(?:your|the)[ \t]+(?:rebuttal|response|reply|answer|comment|text|draft)\b)[^\n]*/gim;
+  var CHAT_PHRASE = /\b(?:i hope this helps|as an ai(?: language model)?\b|let me know if you(?:'d|’d| would) like me to|would you like me to (?:shorten|revise|adjust|rewrite|expand|make)|feel free to (?:adjust|tweak|modify) (?:it|this|the (?:text|wording|tone)) (?:as needed|to your)|(?:here(?:'s|’s| is) )?(?:a|the) (?:revised|polished) version of your (?:rebuttal|response))/gi;
+  var chatSeen = new Uint8Array(src.length), cm;
+  function chatCard(s, e, f) {
+    if (skipText[s] || mathMask[s] || chatSeen[s]) return;
+    for (var k = s; k < e; k++) chatSeen[k] = 1;
+    push('warn', 'Text left over from a chat assistant',
+      '“' + escHtml(src.slice(s, Math.min(e, s + 80)).trim()) + '” reads as a chat assistant’s own words or citation marker, not as part of your answer. Reviewers would see it as typed.',
+      s, e, f);
+  }
+  CHAT_MARKER.lastIndex = 0;
+  while ((cm = CHAT_MARKER.exec(src))) {
+    var ms = cm.index + (cm[0].charAt(0) === ' ' || cm[0].charAt(0) === '\t' ? 1 : 0);
+    chatCard(ms, cm.index + cm[0].length, manual('delete the marker', cm.index, cm.index + cm[0].length, ''));
+  }
+  CHAT_LINE.lastIndex = 0;
+  while ((cm = CHAT_LINE.exec(src))) {
+    var ls = cm.index + cm[0].search(/\S/), le = cm.index + cm[0].length, whole = wholeLine(cm.index, le);
+    chatCard(ls, le, manual('delete the line', whole[0], whole[1], ''));
+  }
+  CHAT_PHRASE.lastIndex = 0;
+  while ((cm = CHAT_PHRASE.exec(src))) chatCard(cm.index, cm.index + cm[0].length, null);
 
   issues.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
   return {
@@ -4354,8 +4411,10 @@ function mathTrick(id, label, hint) {
 }
 
 /* In application order. `on` is the default; table edge pipes are off by
-   default because a table without them reads worse as plain text (the
-   notification e-mail, a co-author's copy) for 2 characters a row. */
+   default because a table without them reads worse as plain text (a
+   co-author's copy) for 2 characters a row. The notification e-mail renders
+   the Markdown, tables included, but shows formulas as TeX source (seen in
+   Outlook, 2026-11-27), so only the formula tricks change what it shows. */
 var COMPACT_TRICKS = [
   { id: 'entities', on: true, find: findEntities, label: 'Character references',
     hint: '&plusmn; becomes ±, &nbsp; a no-break space; never &lt; &amp; &#36; or invisible characters' },
