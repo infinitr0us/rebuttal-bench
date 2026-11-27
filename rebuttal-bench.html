@@ -659,6 +659,7 @@ window.MathJax = {
   .section .bar { flex: none; width: 56px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
   .section .bar span { display: block; height: 100%; background: var(--accent); }
   .section .gain { font-family: var(--mono); font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+  #promisesList h3 { margin: 8px 0 2px; font-size: inherit; }
 
   /* dialogs */
   .modal {
@@ -1135,6 +1136,14 @@ window.MathJax = {
       <div class="compact-body">
         <p class="compact-note">The length of each part of this draft, counted like the limit. A heading starts a part, and so does a paragraph, list item or quote that opens with a label such as <b>**W1.**</b>, <b>**Q2:**</b> or <b>W3:</b>. Click a part to go to it.</p>
         <div id="sectionsList"></div>
+      </div>
+    </details>
+    <details class="compact" id="promisesBox">
+      <summary>Promises <span id="promisesSum" class="compact-sum zero"></span></summary>
+      <div class="compact-body">
+        <p class="compact-note">Select a sentence to open it in its draft. Copy future changes as a revision checklist.</p>
+        <div id="promisesList"></div>
+        <div class="compact-actions"><button type="button" id="copyPromises" disabled>Copy as checklist</button></div>
       </div>
     </details>
     <details class="cheat">
@@ -5803,6 +5812,123 @@ function looseFenceRanges(text) {
   return out;
 }
 
+/* Find sentences within each Markdown leaf so list items and table cells
+   never run together. Offsets refer to the draft as typed. */
+function leadOf(text) { return text.length - text.replace(/^\s+/, '').length; }
+var PROMISE_ACTION = '(?:add|include|clarify|revise|discuss|move|release|report|expand|correct|update|incorporate|fix|remove|rewrite|cite|publish|provide|rename|rephrase|document|replace|upload|modify|state|proofread)';
+var PROMISE_EDIT = '(?:added|included|clarified|revised|discussed|moved|released|reported|expanded|corrected|updated|incorporated|fixed|removed|rewritten|cited|published|provided|renamed|rephrased|documented|replaced|uploaded|modified|stated|proofread)';
+var PROMISE_VERSION = '(?:(?:revised|final|updated|camera[- ]ready) (?:version|paper|manuscript|draft|submission)|revision|camera[- ]ready)';
+var PROMISE_ADVERB = '(?:(?:also|now|further|explicitly|carefully|clearly|already|accordingly|thoroughly) )*';
+var PROMISE_FUTURE = new RegExp("\\bwe(?: will|['’]ll) " + PROMISE_ADVERB + PROMISE_ACTION + '\\b', 'i');
+var PROMISE_PAST = new RegExp("\\bwe(?: have|['’]ve) " + PROMISE_ADVERB + PROMISE_EDIT + '\\b', 'i');
+var PROMISE_PASSIVE = new RegExp('\\bwill ' + PROMISE_ADVERB + 'be ' + PROMISE_EDIT + '\\b', 'i');
+var PROMISE_IN_VERSION = new RegExp('\\bin (?:the|our) (?:final|camera[- ]ready) (?:version|paper|manuscript|draft|submission),? we ' + PROMISE_ADVERB + PROMISE_ACTION + '\\b', 'i');
+var PROMISE_VERSION_NOW = new RegExp('\\b(?:the|our) ' + PROMISE_VERSION + ' now (?:includes|contains|explains|discusses|reports|clarifies|provides|lists|describes|cites)\\b', 'i');
+var PROMISE_IN_REVISION = new RegExp('\\b' + PROMISE_VERSION + '\\b', 'i');
+var PROMISE_PART = '(?:paper|manuscript|draft|appendi(?:x|ces)|supplement(?:ary)?|main text|(?:figures?|tables?|fig\\.?) (?=\\d)|(?:sub)?sections?|sec\\.?|paragraph|caption|footnote|repository|readme|codebase|abstract|introduction|typos?|wording|writing)';
+var PROMISE_PAPER = new RegExp('\\b' + PROMISE_PART + '\\b', 'i');
+var PROMISE_DESTINATION = new RegExp('\\b(?:in|into|to|throughout|under) (?:the |our |this )?(?:(?:main|new|corresponding) )?' + PROMISE_PART + '\\b', 'i');
+var PROMISE_MATERIAL = /\b(?:details?|discussions?|explanations?|clarifications?|descriptions?|definitions?|citations?|references?|results?|comparisons?|experiments?|ablations?|baselines?|analysis|analyses|limitations?|proofs?|plots?|figures?|tables?|pseudocode|code|scripts?|datasets?|weights|notation|terminology|derivations?|seed sweep)\b/i;
+function promiseKind(sentence) {
+  var s = sentence.replace(/\s+/g, ' ').replace(/\*\*|__/g, '');
+  /* A proposed edit, a hypothetical and a demonstration in this reply can
+     all use exactly the same verbs as a commitment to the manuscript. */
+  if (/\?|\b(?:if|unless|whether|suppose|imagine|depending on|provided (?:that|with)|might|maybe|hypothetically|not sure|uncertain|doubt|deny|unlikely)\b|\b(?:that|which)\s*$/i.test(s) ||
+      /\b(?:below|here|(?:this|next|new|follow[- ]up) (?:author )?(?:reply|response|comment|rebuttal)|(?:following|next) table|in (?:a |our )?future work)\b/i.test(s)) return '';
+  if (PROMISE_IN_VERSION.test(s)) return 'will';
+  if (PROMISE_VERSION_NOW.test(s)) return 'done';
+  var revision = PROMISE_IN_REVISION.test(s);
+  var passive = PROMISE_PASSIVE.exec(s);
+  if (passive && (revision || s.slice(passive.index + passive[0].length).trim().search(PROMISE_DESTINATION) === 0)) return 'will';
+  if (/\b(?:code|scripts?|weights|dataset|artifacts?) will be (?:publicly )?(?:released|published)\b/i.test(s)) return 'will';
+  var future = PROMISE_FUTURE.exec(s), verb = future || PROMISE_PAST.exec(s);
+  if (!verb) return '';
+  /* "We will" can be embedded in someone else's question or an author's
+     uncertainty. Prefer a main clause, also after a revision preamble. */
+  var before = s.slice(0, verb.index).trim();
+  if (before && !/(?:[,;:*\u2013\u2014]|\b(?:and|but|so|therefore|thus|version|revision|manuscript|paper|camera[- ]ready))$/i.test(before)) return '';
+  /* Read the object before its modifiers: adding noise to a dataset and
+     adding the dataset to an appendix are quite different operations. */
+  var after = s.slice(verb.index + verb[0].length);
+  var destination = PROMISE_DESTINATION.test(after) || before.search(PROMISE_DESTINATION) === 0;
+  var object = after.split(/\b(?:in|of|to|on|with|after|and|as|for|by|before|from|but|that|at|which|while)\b|[,;:.!?]/i)[0];
+  if (future) return revision || destination || PROMISE_PAPER.test(object) || PROMISE_MATERIAL.test(object) ? 'will' : '';
+  /* "We have discussed/provided X in the paper" may describe the original
+     submission. These verbs need explicit evidence of a revision. */
+  if (revision) return 'done';
+  if (/\b(?:included|discussed|provided|reported|stated|documented)\b$/i.test(verb[0]) && !/\bnow\b/i.test(verb[0])) return '';
+  if (destination || PROMISE_PAPER.test(object)) return 'done';
+  return '';
+}
+
+function promisesIn(text, spans) {
+  if (typeof text !== 'string' || !/\b(?:we|will|now)\b/i.test(text)) return [];
+  var lead = leadOf(text), posted = text.trim(), source = posted, offsets = null;
+  /* Marked normalizes CRLF before lexing. Imported drafts can still have
+     the original line endings, including inside the sentence we select. */
+  if (posted.indexOf('\r') >= 0) {
+    offsets = [];
+    for (var i = 0; i < posted.length; i++) {
+      offsets.push(i);
+      if (posted[i] === '\r' && posted[i + 1] === '\n') i++;
+    }
+    offsets.push(posted.length);
+    source = posted.replace(/\r\n?/g, '\n');
+  }
+  var model = collectMarkedRanges(source);
+  if (!model) return [];
+  var math = spans && !offsets ? spans.map(function (sp) {
+    return { start: sp.start - lead, end: sp.end - lead, recovered: sp.recovered };
+  }) : analyze(source).spans;
+  var mask = proseMask(source, math, model), displayEnds = Object.create(null), out = [];
+  /* An author can put a sentence's final period inside a display formula.
+     Keep the closing delimiter with it and the next prose sentence separate. */
+  math.forEach(function (sp) {
+    if (!sp.recovered && /[.!?]\s*\$\$$/.test(source.slice(sp.start, sp.end))) displayEnds[sp.end] = true;
+  });
+  /* Words on either side of a visible link label can form a commitment.
+     Its Markdown delimiters and destination contribute no words. */
+  model.hidden.forEach(function (r) {
+    for (var i = r.start; i < r.end; i++) mask[i] = 2;
+  });
+  model.ranges.forEach(function (r) {
+    if (r.type === 'del') for (var i = r.start; i < r.end; i++) mask[i] = 1;
+  });
+  model.leaves.forEach(function (leaf) {
+    if (!leaf.exact || leaf.dropped || leaf.html) return;
+    var raw = source.slice(leaf.start, leaf.end);
+    /* Preserve positions, and leave a non-word barrier so hidden words
+       cannot complete a trigger or supply the manuscript context. */
+    var chars = raw.split('');
+    for (var j = 0; j < chars.length; j++) {
+      var skip = mask[leaf.start + j];
+      if (skip) chars[j] = skip === 2 ? ' ' : '\x01';
+    }
+    var visible = chars.join('').replace(/"[^"]*(?:"|$)|“[^”]*(?:”|$)|‘[\s\S]*?(?:’(?!\w)|$)|(?:^|[\s(])'(?=\S)[\s\S]*?(?:'(?!\w)|$)/g, function (quote) {
+      return quote.replace(/[^\s]/g, '\x01');
+    });
+    function consider(a, b) {
+      var kind = promiseKind(visible.slice(a, b));
+      if (!kind) return;
+      while (a < b && /\s/.test(raw[a])) a++;
+      while (b > a && /\s/.test(raw[b - 1])) b--;
+      a += leaf.start; b += leaf.start;
+      var start = lead + (offsets ? offsets[a] : a), end = lead + (offsets ? offsets[b] : b);
+      out.push({ start: start, end: end, kind: kind, sentence: text.slice(start, end) });
+    }
+    var from = 0, stops = /[.?!]+[)"'”’\]*_]*(?=\s|$)|\$\$(?=\s+[A-Z])|\.(?=We\b)| {2,}\n|\n(?=[ \t]*\[(?:[Aa]uthors?|[Rr]eviewer)\]\s*:)/g, stop;
+    while ((stop = stops.exec(raw))) {
+      if (stop[0] === '$$' ? !displayEnds[leaf.start + stops.lastIndex] : mask[leaf.start + stop.index]) continue;
+      if (raw[stop.index] === '.' && /\b(?:e\.g|i\.e|sec|secs|fig|figs|eq|eqs|tab|dr|prof|vs|et al)$/i.test(raw.slice(Math.max(0, stop.index - 7), stop.index)) &&
+          !/^\s+(?:We|The|Our|In|This|It|These)\b/.test(raw.slice(stops.lastIndex))) continue;
+      consider(from, stops.lastIndex);
+      from = stops.lastIndex;
+    }
+    consider(from, raw.length);
+  });
+  return out;
+}
+
 /* {hints, saves}: one hint per phrase, {kind: 'filler' | 'name', text, say,
    at: [{start, end}], saves}; `saves` in total, an estimate. `spans`: the
    formulas analyze found (computed here when not given). A name is a run of
@@ -6161,6 +6287,10 @@ var wordingList = document.getElementById('wordingList');
 var sectionsBox = document.getElementById('sectionsBox');
 var sectionsSum = document.getElementById('sectionsSum');
 var sectionsList = document.getElementById('sectionsList');
+var promisesBox = document.getElementById('promisesBox');
+var promisesSum = document.getElementById('promisesSum');
+var promisesList = document.getElementById('promisesList');
+var copyPromises = document.getElementById('copyPromises');
 
 /* Listeners on the editor go through onEditor, so that a fresh textarea (a
    draft switch puts one in, see openDraft) gets every one of them. */
@@ -6271,7 +6401,7 @@ var FS_STEPS = { fsEditor: 1, zoomPreview: 10 };
    not stay on after switching to another. */
 var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, ownLimit: 5000, sync: true, venue: '',
   compact: compactDefaults(), compactOpen: false, wordingOpen: false, sectionsOpen: false, spellcheck: false,
-  view: 'preview', skeletonQuotes: true };
+  promisesOpen: false, view: 'preview', skeletonQuotes: true };
 
 function applyPrefs() {
   document.documentElement.setAttribute('data-theme', prefs.theme === 'dark' ? 'dark' : 'light');
@@ -6291,6 +6421,7 @@ function applyPrefs() {
   compactBox.open = !!prefs.compactOpen;
   wordingBox.open = !!prefs.wordingOpen;
   sectionsBox.open = !!prefs.sectionsOpen;
+  promisesBox.open = !!prefs.promisesOpen;
   spellBox.checked = !!prefs.spellcheck;
   ta.spellcheck = !!prefs.spellcheck;
   refreshFind(); /* the editor's font size moves the text under find's boxes */
@@ -6876,6 +7007,7 @@ function updateAll() {
   renderIssues();
   renderWording(text, res.spans);
   renderSections(text, chars);
+  renderPromises();
   renderReview(); /* which points the draft labels or quotes */
   refreshFind(); /* a draft switch puts in another text */
   scheduleCompaction();
@@ -6888,7 +7020,6 @@ var wordingShown = null, wordingHintsShown = [];
 /* Both panels read the comment as posted (trimmed, as the preview shows
    it: an indented first line is no code block there), and point into the
    editor's text. */
-function leadOf(text) { return text.length - text.replace(/^\s+/, '').length; }
 function renderWording(text, spans) {
   var lead = leadOf(text);
   var r = wordingHints(text.trim(), spans.map(function (sp) { return { start: sp.start - lead, end: sp.end - lead, recovered: sp.recovered }; })), html = '';
@@ -6958,9 +7089,55 @@ function reviewerCards(text, spans) {
     return iss;
   });
 }
+/* Only changed bodies need another pass through Marked. An unknown body
+   stays distinct from an empty one, including during background reads. */
+var promisesByDraft = Object.create(null), promisesHtml = '', pendingPromise = null;
+function renderPromises() {
+  var next = Object.create(null), html = '', count = 0, checklist = [];
+  if (!draftReady) return checklist;
+  draftMeta.list.forEach(function (d) {
+    var text = knownDraftText(d.id);
+    if (text !== null) text = text.replace(/\r\n?/g, '\n'); /* textarea offsets when opened */
+    var entry = promisesByDraft[d.id];
+    if (!entry || entry.text !== text) {
+      entry = { text: text, rows: promisesIn(text, lastAnalysis && analyzedText === text ? lastAnalysis.spans : null) };
+    }
+    next[d.id] = entry;
+    if (text !== null && !entry.rows.length) return;
+    html += '<section aria-label="' + escAttr(d.name) + '"><h3>' + escHtml(d.name) + '</h3>';
+    if (text === null) html += '<p class="compact-note">Not checked</p>';
+    entry.rows.forEach(function (p, i) {
+      var sentence = p.sentence.replace(/\s+/g, ' ');
+      html += '<button type="button" class="section" data-draft="' + escAttr(d.id) + '" data-promise="' + i +
+        '" title="' + escAttr(sentence) + '"><span class="name">' + escHtml(sentence) +
+        '</span><span class="gain">' + p.kind + '</span></button>';
+      if (p.kind === 'will') checklist.push('- [ ] ' + sentence + ' (' + d.name + ')');
+    });
+    count += entry.rows.length;
+    html += '</section>';
+  });
+  promisesByDraft = next;
+  if (!html) html = '<div class="lint-empty">No promises found in these drafts.</div>';
+  if (promisesHtml !== html) { promisesList.innerHTML = html; promisesHtml = html; }
+  promisesSum.textContent = count + (count === 1 ? ' promise' : ' promises');
+  promisesSum.classList.toggle('zero', !count);
+  copyPromises.disabled = !checklist.length;
+  return checklist;
+}
+function selectPromise(target) {
+  if (ta.value !== target.text) {
+    renderPromises();
+    showToast('The draft has changed since this sentence was listed.');
+    return;
+  }
+  ta.focus();
+  ta.setSelectionRange(target.row.start, target.row.end);
+  revealOffset(target.row.start);
+}
 function refreshReviewerCards() {
   if (lastAnalysis && analyzedText === ta.value) renderIssues();
   renderReview(); /* its note compares the review's reviewer with the tab's name */
+  renderPromises();
 }
 
 /* The analyzer's hazards for analyzedText plus what MathJax reported in the
@@ -7043,6 +7220,7 @@ function startBodyLoad(id) {
     if (!res.failed && id !== draftMeta.active) draftTexts[id] = typeof res.value === 'string' ? res.value : '';
     /* Bring the store up to date with a local copy it never got. */
     if (res.pending && id !== draftMeta.active && typeof res.value === 'string') storeDraft(res.value, key);
+    if (draftReady && id !== draftMeta.active) renderPromises();
     return res;
   });
   return bodyLoads[id];
@@ -7196,6 +7374,7 @@ function renderDraftTabs() {
    whose text has not been read yet (or could not be) is read first, with the
    editor locked meanwhile. */
 function openDraft(id) {
+  pendingPromise = null;
   /* Dialogs work on the draft being left: History's versions, Split's parts,
      the table about to be inserted. */
   if (historyDialog && !historyDialog.hidden) closeHistory();
@@ -7240,6 +7419,7 @@ function unlockDraft(id, res) {
   ta.placeholder = TA_PLACEHOLDER;
   updateAll();
   renderPreview();
+  if (pendingPromise) { selectPromise(pendingPromise); pendingPromise = null; }
 }
 
 function switchDraft(id) {
@@ -7397,6 +7577,7 @@ function takeInList(json) {
 }
 window.addEventListener('storage', function (e) {
   if (e.key === DRAFTS_KEY) takeInList(e.newValue);
+  else if (draftReady && draftMeta.list.some(function (d) { return e.key === keyOfDraft(d.id); })) renderPromises();
 });
 /* A page restored from the back/forward cache got no storage events while it
    was away: it takes in the list as this browser stores it now, so its open
@@ -8257,6 +8438,26 @@ sectionsList.addEventListener('click', function (e) {
   ta.focus();
   ta.setSelectionRange(at, at);
   revealOffset(at);
+});
+
+promisesBox.addEventListener('toggle', function () {
+  prefs.promisesOpen = promisesBox.open;
+  savePrefs();
+});
+promisesList.addEventListener('click', function (e) {
+  var button = e.target.closest('[data-promise]');
+  if (!button) return;
+  var id = button.getAttribute('data-draft'), entry = promisesByDraft[id];
+  if (!entry || !draftById(id)) return;
+  var target = { text: entry.text, row: entry.rows[Number(button.getAttribute('data-promise'))] };
+  switchDraft(id);
+  if (draftMeta.active !== id) return;
+  if (ta.readOnly) pendingPromise = target; /* unlockDraft checks the text it actually read */
+  else selectPromise(target);
+});
+copyPromises.addEventListener('click', function () {
+  var lines = renderPromises(); /* include edits and renames since the last analysis */
+  if (lines.length) copyText(lines.join('\n'), 'Copied the revision checklist', copyPromises);
 });
 
 /* ---- the review each draft answers ----
@@ -9295,6 +9496,7 @@ storeGet(PREFS_KEY).then(function (v) {
       if (typeof p.compactOpen === 'boolean') restore('compactOpen', p.compactOpen);
       if (typeof p.wordingOpen === 'boolean') restore('wordingOpen', p.wordingOpen);
       if (typeof p.sectionsOpen === 'boolean') restore('sectionsOpen', p.sectionsOpen);
+      if (typeof p.promisesOpen === 'boolean') restore('promisesOpen', p.promisesOpen);
       if (typeof p.spellcheck === 'boolean') restore('spellcheck', p.spellcheck);
       if (p.view === 'preview' || p.view === 'review') restore('view', p.view);
       if (typeof p.skeletonQuotes === 'boolean') restore('skeletonQuotes', p.skeletonQuotes);
