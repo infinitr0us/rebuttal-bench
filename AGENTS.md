@@ -401,7 +401,10 @@ number) give nothing. Two Codex reviews (`reviews/2026-11-27/codex-review-38`,
 `codex-recheck-38`) found false cards in broader versions, which also checked pointers ("see our
 answer to Reviewer X, Q2") and IDs no tab has; both were dropped. Their sentences are the
 regression cases: widen a pattern only with a near-miss test, and bring pointers back only with
-a design that reads the other draft's parts, not its words. The cards are advice without fixes
+a design that reads the other draft's parts, not its words. Known misses, accepted by the final
+review round (`codex-final-38`): a salutation in italics, or wrapped right after "Dear". At ARR,
+`[x](www.host/path)` counts as external although OpenReview would resolve it inside the forum
+(the author means to leave it). The cards are advice without fixes
 and come from `renderIssues` (`reviewerCards`), not from `analyze`, so Fix all, compaction and
 the macro check never see them. They depend on the tabs' names, so a rename, a deletion, an
 import, a list taken in from another window and a list merged on saving call
