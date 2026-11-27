@@ -441,8 +441,15 @@ its block, quotes, code, general tabs and comparisons across numbering schemes (
 number) give nothing. Two Codex reviews (`reviews/2026-11-27/codex-review-38`,
 `codex-recheck-38`) found false cards in broader versions, which also checked pointers ("see our
 answer to Reviewer X, Q2") and IDs no tab has; both were dropped. Their sentences are the
-regression cases: widen a pattern only with a near-miss test, and bring pointers back only with
-a design that reads the other draft's parts, not its words. Known misses, accepted by the final
+regression cases: widen a pattern only with a near-miss test. Pointers came back in 3.11 in that
+narrow form: a cue (`see`, `cf.`, `refer to`, `as we answered in`) and "our/the
+answer/response/reply to Reviewer X" with a point label right after, right before or between
+("our response to Q1 from Reviewer X"), checked against the `labelledParts` of that reviewer's
+other drafts (which read combined headings such as `## W1 and W2`); nothing when one of those
+drafts is unread or none has labels. A precision probe on the 310 real author responses found
+only the two genuine pointers (`reviews/2026-11-27/neon-pointers`); rerun it after any change.
+The pointer card selects the missing label and needs the other drafts' texts (`others[i].text`),
+so a background read and a draft text saved in another window also refresh the cards. Known misses, accepted by the final
 review round (`codex-final-38`): a salutation in italics, or wrapped right after "Dear". At ARR,
 `[x](www.host/path)` counts as external although OpenReview would resolve it inside the forum
 (the author means to leave it). The cards are advice without fixes

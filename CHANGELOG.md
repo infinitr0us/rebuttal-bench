@@ -14,6 +14,15 @@
   draft at the sentence, and *Copy as checklist* copies the commitments as a Markdown to-do
   list with their tab names. Tuned on 310 real author responses to list only real promises.
 
+### Pointers into another reviewer's answer
+- An explicit pointer into another reviewer's answer ("please refer to our response to Reviewer
+  Ab12, Q2", "Q2 of our answer to Reviewer Ab12", "our response to Q1 from Reviewer Ab12") gets a
+  card on the label when that reviewer's drafts label no such part, naming the labels they have.
+  A combined heading (`## W1 and W2`, `## Questions 2 and 9`) counts for each label. Mentions of
+  the reviewer's own points, technical terms (`L2 regularization`, `W2V`), quarter-years and bare
+  counts stay quiet, and so do drafts not read yet or without labels. On 310 real author
+  responses it found the two genuine pointers and nothing else. Built by Gemini 4 Neon.
+
 ### Compare and print
 - *Compare* in the History dialog shows what changed between the open draft and an earlier
   version, another draft or a pasted co-author's copy, word by word (insertions underlined,

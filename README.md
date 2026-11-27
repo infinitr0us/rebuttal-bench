@@ -90,8 +90,9 @@ leave the browser: they autosave on this device only.
   draft deleted in one window comes back if another window still has it open). A tab named for a
   reviewer (`Reviewer k9F2`, `k9F2`, `R2`) is checked against the others: a card points out a
   salutation, a *Response to* line or an opening or closing thanks that addresses another
-  reviewer (an answer copied from their draft), and an ID in other capitals than its tab.
-  Mentions in passing and joint thanks are left alone.
+  reviewer (an answer copied from their draft), an ID in other capitals than its tab, and a
+  pointer such as *please refer to our response to Reviewer Ab12, Q2* when that reviewer's drafts
+  label no Q2. Mentions in passing and joint thanks are left alone.
 - **Review.** Switch the right pane between *Preview* and *Review* with a click or the arrow
   keys. Paste the forum review your draft answers. A rich paste keeps its fields, paragraphs
   and lists. Plain text works too. Each weakness, question, limitation or comment gets a label
