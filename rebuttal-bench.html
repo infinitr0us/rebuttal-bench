@@ -5109,16 +5109,24 @@ function blockSources(text) {
    OpenReview names an anonymous reviewer by four letters and digits
    ("Reviewer k9F2"); some authors number them ("Reviewer 2", "R2"). A draft
    whose tab is named for a reviewer should address that reviewer: an answer
-   copied from another reviewer's draft keeps the other ID in its greeting.
-   Mentioning another reviewer is usually deliberate (a shared concern, a
-   joint thanks, a cross-reference), so only what is unmistakable gets a card:
-   a salutation (Dear, Hi, Hello) naming another reviewer, a "Response to
-   Reviewer X" heading or line of its own, or thanks whose object is another
-   reviewer in the opening or closing block; and an ID in other capitals than
-   every tab's. IDs and numbers are compared only within one scheme, since a
-   tab named by ID says nothing about the numbers. Two Codex reviews tried a
-   broader check (pointers to points, IDs no tab has) and found it wrong on
-   ordinary sentences; those sentences are the regression cases. */
+   copied from another reviewer's draft keeps the other ID in its greeting,
+   and an explicit pointer into our answer to another reviewer ("see our
+   response to Reviewer k9F2, Q2") can outlive a renumbering. Mentioning
+   another reviewer is usually deliberate (a shared concern, a joint thanks,
+   a cross-reference), so only what is unmistakable gets a card: a salutation
+   (Dear, Hi, Hello) naming another reviewer, a "Response to Reviewer X"
+   heading or line of its own, or thanks whose object is another reviewer in
+   the opening or closing block; an ID in other capitals than every tab's;
+   and an explicit pointer (see, cf., refer to, as answered/discussed in) to
+   our/the answer, response, reply or rebuttal to another reviewer naming a
+   point label that the other reviewer's drafts do not label (read via
+   labelledParts, skipping unreadable or unlabelled drafts). Mentions of a
+   reviewer's own points without "our/the answer/response/reply" stay quiet,
+   as do technical terms ("L2 regularization", "W2V"), quarter-years ("Q1
+   2025") and bare counts ("3 additional examples"): two Codex reviews of 3.8
+   found broader pointer checks wrong on those sentences, which stay as
+   regression cases. IDs and numbers are compared only within one scheme for
+   addressing, since a tab named by ID says nothing about the numbers. */
 var REVIEWER_ID = /^(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{4}$/;
 /* A four-character word is taken for an ID only with a letter and a digit,
    or with small letters and a capital after the first: "k9F2", "xKpQ", not
@@ -5168,41 +5176,200 @@ function reviewerRef(text, i, known) {
 
 /* A point's name as Sections and the review's points write it, made
    comparable: "W1", "Weakness 1" and "weakness #1" are all W1. */
-var POINT_NAME = new RegExp('^(?:\\*\\*|__)?[\\[(]?(' + REVIEW_NAME + ')', 'iu');
+var POINT_NAME = new RegExp('^(?:\\*\\*|__)?[\\[(]?((?:weaknesses[ \\t]*#?\\d+(?![\\p{L}\\p{N}])|' + REVIEW_NAME + '))', 'iu');
 function pointName(s) {
   var m = POINT_NAME.exec(s);
   return m ? m[1].charAt(0).toUpperCase() + m[1].match(/\d+$/)[0].replace(/^0+(?=\d)/, '') : null;
 }
 
 /* Read the original first line. Sections abbreviates titles for display,
-   and a combined heading can have several labels beyond that abbreviation. */
+   and a combined heading can have several labels beyond that abbreviation
+   ("W1 and W2", "Questions 2 and 9", "(Weakness1, Question1)"). */
 function labelledParts(text) {
   var r = commentSections(text, true), out = [];
   (r ? r.sections : []).forEach(function (s) {
     if (s.kind === 'opening') return;
     var stop = text.indexOf('\n', s.start);
-    var line = text.slice(s.start, stop < 0 ? text.length : stop).replace(/^\s*(?:#{1,6}\s+|>\s*|(?:[*+-]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?/, '');
-    var m;
-    while ((m = POINT_NAME.exec(line))) {
-      out.push({ label: pointName(m[1]), start: s.start, end: s.end });
-      var comma = /^[)\]]?(?:\*\*|__)?\s*,\s*/.exec(line.slice(m[0].length));
-      if (!comma) break;
-      line = line.slice(m[0].length + comma[0].length);
+    var raw = text.slice(s.start, stop < 0 ? text.length : stop).replace(/\r$/, '');
+    var line = raw.replace(/^\s*(?:#{1,6}\s+|>\s*|(?:[*+-]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?/, '');
+    if (/^ {0,3}#{1,6}(?=\s|$)/.test(raw)) line = line.replace(/\s+#+\s*$/, '');
+    var m = POINT_NAME.exec(line), letter = '';
+    while (m) {
+      var lbl = m[1] ? pointName(m[1]) : letter + m[2].replace(/^0+(?=\d)/, '');
+      letter = lbl.charAt(0);
+      out.push({ label: lbl, start: s.start, end: s.end });
+      var rest = line.slice(m[0].length);
+      var sep = /^[)\]]?(?:\*\*|__)?(?:\s*,\s*(?:(?:and|&)\s+)?|\s+(?:and|&)\s+|\s*[&\/]\s*)/i.exec(rest);
+      if (!sep) break;
+      line = rest.slice(sep[0].length);
+      m = POINT_NAME.exec(line);
+      if (!m && letter) {
+        /* A bare number continues the same kind ("Questions 2 and 9", "W1, 2,
+           and 3"), unless a word follows ("W1 and 3 additional baselines"). */
+        var num = /^(?:\*\*|__)?#?(\d+)(?![\p{L}\p{N}])(?:\*\*|__)?(?=$|[ \t]*(?:[,.:;!?)\]&\/\u2013\u2014(-]|(?:and|&)(?![\p{L}\p{N}])))/iu.exec(line);
+        if (num) m = [num[0], null, num[1]];
+      }
     }
   });
   return out;
 }
 
+/* A point label inside an explicit pointer: W, Q, L or C + digits, or
+   Weakness, Question, Limitation or Comment + number, ending at a
+   non-alphanumeric character and not a quarter-year ("Q1 2025"). Emphasis
+   is excluded from the span so the card selects the label alone. */
+var POINTER_TOKEN = /^(\*{1,2}|_{1,2})?(?:([WQLC])(\d+)|(weakness(?:es)?|questions?|limitations?|comments?)[ \t]*#?[ \t]*(\d+))(?![\p{L}\p{N}])(\*{1,2}|_{1,2})?(?![ \t\/-]+(?:19|20)\d\d(?![\p{L}\p{N}]))/iu;
+var POINTER_SEP = /^[ \t]*(?:\n[ \t]*)?(?:,[ \t]*(?:\n[ \t]*)?(?:(?:and|or|&)[ \t]*(?:\n[ \t]*)?)?|(?:and|or)[ \t]+(?:\n[ \t]*)?|[&\/][ \t]*(?:\n[ \t]*)?)/i;
+/* Short tokens and bare list numbers must end at punctuation, a list
+   conjunction or a post-pointer word, not a noun phrase ("L2 regularization",
+   "3 additional examples") or a hyphenated compound ("L2-norm"). */
+var POINTER_BOUNDARY = /^(?:$|[ \t]*(?:\n[ \t]*)?(?:[,.;:!?)\]&\/\u2013\u2014(\n]|-(?![\p{L}\p{N}])|$|(?:for|of|in|on|from|to|at|by|with|about|regarding|concerning|where|which|that|as|above|below|here|there|also|too|respectively|and|or)(?![\p{L}\p{N}])))/iu;
+var POINTER_BARE_NUM = /^(\*{1,2}|_{1,2})?#?(\d+)(?![\p{L}\p{N}])(\*{1,2}|_{1,2})?/u;
+
+/* Read one or more point labels starting at `i` ("Q2", "W1 and Q3",
+   "questions 2 and 9", "**Q9**"). Returns { items: [{label, start, end}],
+   end } or null. */
+function pointerPoints(text, i) {
+  var items = [], letter = '', pos = i, after = i;
+  for (;;) {
+    var slice = text.slice(pos, pos + 80);
+    var m = POINTER_TOKEN.exec(slice);
+    if (m) {
+      var tEnd = pos + m[0].length;
+      if (m[2] && !POINTER_BOUNDARY.test(text.slice(tEnd, tEnd + 30))) break;
+      var lead = m[1] ? m[1].length : 0, trail = m[6] ? m[6].length : 0;
+      var num = (m[3] || m[5]).replace(/^0+(?=\d)/, '');
+      letter = (m[2] || m[4]).charAt(0).toUpperCase();
+      items.push({ label: letter + num, start: pos + lead, end: tEnd - trail });
+      pos = tEnd;
+      after = pos;
+    } else if (items.length && (m = POINTER_BARE_NUM.exec(slice))) {
+      var nEnd = pos + m[0].length;
+      if (!POINTER_BOUNDARY.test(text.slice(nEnd, nEnd + 30))) break;
+      var nLead = m[1] ? m[1].length : 0, nTrail = m[3] ? m[3].length : 0;
+      items.push({ label: letter + m[2].replace(/^0+(?=\d)/, ''), start: pos + nLead, end: nEnd - nTrail });
+      pos = nEnd;
+      after = pos;
+    } else {
+      break;
+    }
+    var sep = POINTER_SEP.exec(text.slice(pos, pos + 20));
+    if (!sep) break;
+    pos += sep[0].length;
+  }
+  return items.length ? { items: items, end: after } : null;
+}
+
+/* Explicit pointers into our answer to another reviewer: a cue (see, cf.,
+   refer to, as (we) answered/discussed/... in) followed closely by "our/the
+   (answer|response|reply|rebuttal) to Reviewer X" with a point list right
+   after it (", Q2", " (W1 and Q3)", "'s Q2"), or the point list right before
+   it ("Q2 of our response to Reviewer X"), or "our response to Q1 from/of
+   Reviewer X". Bare mentions of a reviewer's points without "our/the
+   answer/response/reply" are never matched. */
+var POINTER_CUE = /\b(?:see(?:[ \t]+also)?\b|cf\.|refer(?:s|red|ring)?[ \t]*(?:\n[ \t]*)?(?:(?:the[ \t]+reviewer|you)[ \t]*(?:\n[ \t]*)?)?to\b|as[ \t]*(?:\n[ \t]*)?(?:we[ \t]*(?:\n[ \t]*)?(?:have[ \t]*(?:\n[ \t]*)?)?)?(?:answered|discussed|explained|detailed|shown|addressed|noted|described)[ \t]*(?:\n[ \t]*)?in\b)/gi;
+var POINTER_ANS_TO = /^(?:\*{1,2}|_{1,2})?(?:our|the)(?:[ \t]+|[ \t]*\n[ \t]*)(?:\*{1,2}|_{1,2})?(?:answer|response|reply|rebuttal)(?:[ \t]+|[ \t]*\n[ \t]*)to(?:[ \t]+|[ \t]*\n[ \t]*)/i;
+var POINTER_PRE_OF = /^[ \t]*(?:\n[ \t]*)?(?:of|in)(?:[ \t]+|[ \t]*\n[ \t]*)(?:\*{1,2}|_{1,2})?(?:our|the)(?:[ \t]+|[ \t]*\n[ \t]*)(?:\*{1,2}|_{1,2})?(?:answer|response|reply|rebuttal)(?:[ \t]+|[ \t]*\n[ \t]*)to(?:[ \t]+|[ \t]*\n[ \t]*)/i;
+
+function findAnswerPointers(text, known) {
+  var out = [], m;
+  POINTER_CUE.lastIndex = 0;
+  while ((m = POINTER_CUE.exec(text))) {
+    var asClause = /^as\b/i.test(m[0]);
+    var gap = /^(?:[ \t]+|[ \t]*\n[ \t]*)/.exec(text.slice(m.index + m[0].length, m.index + m[0].length + 20));
+    if (!gap) continue;
+    var at = m.index + m[0].length + gap[0].length;
+    var ans = POINTER_ANS_TO.exec(text.slice(at, at + 80));
+    if (ans) {
+      var afterAns = at + ans[0].length;
+      var r = reviewerRef(text, afterAns, known);
+      if (r) {
+        var tail = text.slice(r.after, r.after + 100), close = null, comma = false;
+        var conn = /^['\u2019]s(?:\*{1,2}|_{1,2})?[ \t]*(?:\n[ \t]*)?/i.exec(tail);
+        if (!conn) {
+          conn = /^[ \t]*(?:\n[ \t]*)?(\(|\[)[ \t]*(?:\n[ \t]*)?/.exec(tail);
+          if (conn) close = conn[1] === '(' ? ')' : ']';
+        }
+        if (!conn) {
+          conn = /^[ \t]*(?:[,:]|[ \t]+[\u2013\u2014-])[ \t]*(?:\n[ \t]*)?/.exec(tail);
+          if (conn) comma = true;
+        }
+        if (conn) {
+          var pts = pointerPoints(text, r.after + conn[0].length);
+          if (pts) {
+            var rest = text.slice(pts.end, pts.end + 30);
+            /* Parenthesized lists must close right after the labels; an "as
+               discussed in ..., X," comma clause must end at punctuation so a
+               main-clause subject ("L2 on ImageNet is ...") is never read as a
+               point label. */
+            var ok = close
+              ? new RegExp('^[ \\t]*(?:\\n[ \\t]*)?\\' + close).test(rest)
+              : (asClause && comma ? /^[ \t]*(?:[,.;:!?)\]\u2013\u2014(\r\n]|$)/.test(rest) : POINTER_BOUNDARY.test(rest));
+            if (ok) out.push({ start: m.index, end: Math.max(r.end, pts.end), ref: r, items: pts.items });
+          }
+        }
+      } else {
+        /* "refer to our response to Q1 from Reviewer X" */
+        var pts3 = pointerPoints(text, afterAns);
+        if (pts3) {
+          var from = /^[ \t]*(?:\n[ \t]*)?(?:from|of)(?:[ \t]+|[ \t]*\n[ \t]*)/i.exec(text.slice(pts3.end, pts3.end + 25));
+          if (from) {
+            var r3 = reviewerRef(text, pts3.end + from[0].length, known);
+            if (r3) out.push({ start: m.index, end: Math.max(r3.end, pts3.end), ref: r3, items: pts3.items });
+          }
+        }
+      }
+    } else {
+      /* "see Q2 of our response to Reviewer X" */
+      var pts2 = pointerPoints(text, at);
+      if (pts2) {
+        var pre = POINTER_PRE_OF.exec(text.slice(pts2.end, pts2.end + 100));
+        if (pre) {
+          var r2 = reviewerRef(text, pts2.end + pre[0].length, known);
+          if (r2) out.push({ start: m.index, end: Math.max(r2.end, pts2.end), ref: r2, items: pts2.items });
+        }
+      }
+    }
+  }
+  return out;
+}
+
 /* Cards for a draft (`text`, as posted) whose tab is named `self`, given the
-   other tabs' names (`others`: [{name}]). `spans`: the formulas analyze found
-   (computed here when not given). */
+   other tabs (`others`: [{name, text}], where `text` is null while unknown).
+   `spans`: the formulas analyze found (computed here when not given). */
 function reviewerIssues(text, self, others, spans) {
   var none = [];
   if (typeof text !== 'string' || !text.trim()) return none;
+  if (/\r/.test(text)) {
+    /* Marked locates LF text. Translate both ends of its half-open ranges. */
+    var offsets = [], lf = text.replace(/\r\n?|\n|[^\r\n]+/g, function (run, start) {
+      var count = run === '\r\n' ? 1 : run.length;
+      for (var j = 0; j < count; j++) offsets.push(start + j);
+      return run.charAt(0) === '\r' ? '\n' : run;
+    });
+    offsets.push(text.length);
+    return reviewerIssues(lf, self, others).map(function (iss) {
+      iss.start = offsets[iss.start];
+      iss.end = offsets[iss.end];
+      return iss;
+    });
+  }
+  var lead = text.length - text.replace(/^\s+/, '').length;
+  var trimEnd = Math.max(lead, text.replace(/\s+$/, '').length);
+  if (lead || trimEnd < text.length) {
+    var shifted = spans ? spans.map(function (sp) {
+      return { start: sp.start - lead, end: sp.end - lead, recovered: sp.recovered };
+    }) : undefined;
+    return reviewerIssues(text.slice(lead, trimEnd), self, others, shifted).map(function (iss) {
+      iss.start += lead;
+      iss.end += lead;
+      return iss;
+    });
+  }
   var model = collectMarkedRanges(text);
   if (!model) return none;
   var me = draftReviewer(self), tabs = (others || []).map(function (o) {
-    return { name: o && o.name, who: draftReviewer(o && o.name) };
+    return { name: o && o.name, who: draftReviewer(o && o.name), text: o ? o.text : null };
   });
   /* Every spelling of every tab's ID: an exact one wins over a match in
      other capitals ("Ab12" here and "ab12 (follow-up)" there). */
@@ -5263,47 +5430,82 @@ function reviewerIssues(text, self, others, spans) {
     }
   }
 
-  if (!me.ids.length && !me.nums.length) return issues;
-  var first = blocks[0], last = blocks[blocks.length - 1];
-  function edge(at) {
-    return (!!first && at >= first.start && at < first.end) || (!!last && at >= last.start && at < last.end);
-  }
-  /* A salutation can stand anywhere (after a title); a "Response to" line
-     only as a heading, whatever follows ("## Reply to Reviewer X:
-     Calibration"), or as a paragraph of its own ("Our response to Reviewer
-     X contains the table", even wrapped, points to it); thanks only in the
-     opening or closing, with that reviewer as its only object: "We thank
-     Reviewer X and Reviewer Y", "... as well as the other reviewers" thank
-     several. A salutation is joint only with "and" ("Dear Reviewer X,
-     Reviewer Y raised ..." still greets X). */
-  var JOINT_THANKS = /^\s*(?:,\s*(?:and\s+)?|and\s+|&\s*|as\s+well\s+as\s+)(?:(?:the|all|both|other|our)\s+)*(?:reviewers?\b|rev\.?\s*\d|r?\d{1,2}(?![A-Za-z0-9])|([A-Za-z0-9]{4})(?![A-Za-z0-9]))/i;
-  var JOINT_SALUTATION = /^\s*(?:and\s+|&\s*|as\s+well\s+as\s+)(?:(?:the|all|both|other)\s+)*(?:reviewers?\b|rev\.?\s*\d|r?\d{1,2}(?![A-Za-z0-9]))/i;
-  var triggers = [
-    { re: /(?:^|[.!?][ \t]+|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:dear|hi|hello)[ \t]+/gi, joint: JOINT_SALUTATION },
-    { re: /(?:^|\n)[ \t]*(#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:our[ \t]+)?(?:author[ \t]+)?(?:response|reply|answer|rebuttal)s?[ \t]+to[ \t]+(?:the[ \t]+)?/gi, line: true, joint: JOINT_SALUTATION },
-    { re: /\b(?:(?:we|i)[ \t]+(?:(?:sincerely|warmly|again|truly|deeply|also|would like to)[ \t]+)?thank|thank[ \t]+you|thanks)[ \t]*,?[ \t]*(?:again[ \t]*,?[ \t]*)?(?:dear[ \t]+)?/gi, edge: true, joint: JOINT_THANKS }
-  ];
-  triggers.forEach(function (tr) {
-    while ((m = tr.re.exec(text))) {
-      var r = reviewerRef(text, m.index + m[0].length, known);
-      if (!r || !visible(m.index + m[0].search(/\S/), r.end) || (tr.edge && !edge(r.start))) continue;
-      if (tr.line && !m[1]) {
-        /* A paragraph of its own: it starts its block ("see our\nresponse to
-           Reviewer X." is a wrapped sentence) and ends after the name. */
-        var lineAt = m.index + m[0].search(/\S/), own = blockOf(lineAt);
-        if (!own || own.start !== text.lastIndexOf('\n', lineAt - 1) + 1 ||
-            !/^[ \t]*(?:\*\*|__)?[ \t]*[:.!]?[ \t]*(?:\*\*|__)?[ \t]*(?:\n[ \t]*\n|\n?[ \t]*$)/.test(text.slice(r.after, r.after + 40))) continue;
-      }
-      var also = tr.joint.exec(text.slice(r.after, r.after + 60));
-      if (also && (!also[1] || known[also[1].toLowerCase()] || idShaped(also[1]))) continue;
-      if (caseCard(r) || isFor(me, r) || !sameScheme(me, r)) continue;
-      var theirs = tabs.filter(function (t) { return isFor(t.who, r); })[0];
-      card('This draft addresses another reviewer',
-        'The tab is named for ' + escHtml(self) + ', but this addresses ' + escHtml(label(r)) +
-          (theirs ? ', who has a draft of their own (' + escHtml(theirs.name) + ')' : '') +
-          '. An answer copied from another draft keeps its reviewer: change the ID, or rename the tab if it is the tab that is wrong.',
-        r.start, r.end);
+  if (me.ids.length || me.nums.length) {
+    var first = blocks[0], last = blocks[blocks.length - 1];
+    function edge(at) {
+      return (!!first && at >= first.start && at < first.end) || (!!last && at >= last.start && at < last.end);
     }
+    /* A salutation can stand anywhere (after a title); a "Response to" line
+       only as a heading, whatever follows ("## Reply to Reviewer X:
+       Calibration"), or as a paragraph of its own ("Our response to Reviewer
+       X contains the table", even wrapped, points to it); thanks only in the
+       opening or closing, with that reviewer as its only object: "We thank
+       Reviewer X and Reviewer Y", "... as well as the other reviewers" thank
+       several. A salutation is joint only with "and" ("Dear Reviewer X,
+       Reviewer Y raised ..." still greets X). */
+    var JOINT_THANKS = /^\s*(?:,\s*(?:and\s+)?|and\s+|&\s*|as\s+well\s+as\s+)(?:(?:the|all|both|other|our)\s+)*(?:reviewers?\b|rev\.?\s*\d|r?\d{1,2}(?![A-Za-z0-9])|([A-Za-z0-9]{4})(?![A-Za-z0-9]))/i;
+    var JOINT_SALUTATION = /^\s*(?:and\s+|&\s*|as\s+well\s+as\s+)(?:(?:the|all|both|other)\s+)*(?:reviewers?\b|rev\.?\s*\d|r?\d{1,2}(?![A-Za-z0-9]))/i;
+    var triggers = [
+      { re: /(?:^|[.!?][ \t]+|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:dear|hi|hello)[ \t]+/gi, joint: JOINT_SALUTATION },
+      { re: /(?:^|\n)[ \t]*(#{1,6}[ \t]+)?(?:\*\*|__)?[ \t]*(?:our[ \t]+)?(?:author[ \t]+)?(?:response|reply|answer|rebuttal)s?[ \t]+to[ \t]+(?:the[ \t]+)?/gi, line: true, joint: JOINT_SALUTATION },
+      { re: /\b(?:(?:we|i)[ \t]+(?:(?:sincerely|warmly|again|truly|deeply|also|would like to)[ \t]+)?thank|thank[ \t]+you|thanks)[ \t]*,?[ \t]*(?:again[ \t]*,?[ \t]*)?(?:dear[ \t]+)?/gi, edge: true, joint: JOINT_THANKS }
+    ];
+    triggers.forEach(function (tr) {
+      while ((m = tr.re.exec(text))) {
+        var r = reviewerRef(text, m.index + m[0].length, known);
+        if (!r || !visible(m.index + m[0].search(/\S/), r.end) || (tr.edge && !edge(r.start))) continue;
+        if (tr.line && !m[1]) {
+          /* A paragraph of its own: it starts its block ("see our\nresponse to
+             Reviewer X." is a wrapped sentence) and ends after the name. */
+          var lineAt = m.index + m[0].search(/\S/), own = blockOf(lineAt);
+          if (!own || own.start !== text.lastIndexOf('\n', lineAt - 1) + 1 ||
+              !/^[ \t]*(?:\*\*|__)?[ \t]*[:.!]?[ \t]*(?:\*\*|__)?[ \t]*(?:\n[ \t]*\n|\n?[ \t]*$)/.test(text.slice(r.after, r.after + 40))) continue;
+        }
+        var also = tr.joint.exec(text.slice(r.after, r.after + 60));
+        if (also && (!also[1] || known[also[1].toLowerCase()] || idShaped(also[1]))) continue;
+        if (caseCard(r) || isFor(me, r) || !sameScheme(me, r)) continue;
+        var theirs = tabs.filter(function (t) { return isFor(t.who, r); })[0];
+        card('This draft addresses another reviewer',
+          'The tab is named for ' + escHtml(self) + ', but this addresses ' + escHtml(label(r)) +
+            (theirs ? ', who has a draft of their own (' + escHtml(theirs.name) + ')' : '') +
+            '. An answer copied from another draft keeps its reviewer: change the ID, or rename the tab if it is the tab that is wrong.',
+          r.start, r.end);
+      }
+    });
+  }
+
+  /* Explicit pointers into our answer to another reviewer: check each
+     pointed-to label against the destination draft's labelledParts. */
+  var labelCache = Object.create(null);
+  function targetLabels(r) {
+    var key = r.id ? 'i:' + r.id : 'n:' + r.num;
+    if (Object.prototype.hasOwnProperty.call(labelCache, key)) return labelCache[key];
+    var theirs = tabs.filter(function (t) { return isFor(t.who, r); });
+    if (!theirs.length || theirs.some(function (t) { return typeof t.text !== 'string'; })) {
+      return (labelCache[key] = null);
+    }
+    var list = [], has = Object.create(null);
+    theirs.forEach(function (t) {
+      labelledParts(t.text.replace(/\r\n?/g, '\n').trim()).forEach(function (p) {
+        if (!has[p.label]) { has[p.label] = true; list.push(p.label); }
+      });
+    });
+    return (labelCache[key] = list.length ? { theirs: theirs, list: list, has: has } : null);
+  }
+  findAnswerPointers(text, known).forEach(function (ptr) {
+    if (!visible(ptr.start, ptr.end) || isFor(me, ptr.ref)) return;
+    var target = targetLabels(ptr.ref);
+    if (!target) return;
+    var shown = target.list.slice(0, 8).join(', ') + (target.list.length > 8 ? ', \u2026' : '');
+    var dest = escHtml(target.theirs[0].name) + (target.theirs.length > 1 ? ' and its other drafts' : '');
+    var verb = target.theirs.length > 1 ? ' label their parts ' : ' labels its parts ';
+    ptr.items.forEach(function (pt) {
+      if (target.has[pt.label]) return;
+      card('Pointer to a point the other draft does not have',
+        'This points to ' + escHtml(pt.label) + ' in our answer to ' + escHtml(label(ptr.ref)) + ', but ' +
+          dest + verb + escHtml(shown) + '. If that answer moved or was renumbered, update the pointer.',
+        pt.start, pt.end);
+    });
   });
   issues.sort(function (a, b) { return a.start - b.start; });
   return issues;
@@ -6809,16 +7011,18 @@ function renderSections(text, total) {
   sectionsList.innerHTML = html;
 }
 
-/* Reviewer IDs in the open draft against the other tabs' names
-   (reviewerIssues), read as posted. The cards depend on those names, so
-   whatever changes the list (a rename or deletion here or in another window,
-   an import, a list merged on saving) calls refreshReviewerCards. */
+/* Reviewer IDs in the open draft against the other tabs (reviewerIssues),
+   read as posted. A draft whose text is not known yet (still loading) is not
+   checked against. The cards depend on the other tabs too, so whatever
+   changes them (a rename or deletion here or in another window, an import,
+   a list merged on saving, a text read in the background) calls
+   refreshReviewerCards. */
 function reviewerCards(text, spans) {
   var self = draftReady ? draftById(draftMeta.active) : null;
   if (!self || !text.trim()) return [];
   var lead = leadOf(text);
   var others = draftMeta.list.filter(function (d) { return d.id !== self.id; }).map(function (d) {
-    return { name: d.name };
+    return { name: d.name, text: knownDraftText(d.id) };
   });
   return reviewerIssues(text.trim(), self.name, others, spans.map(function (sp) {
     return { start: sp.start - lead, end: sp.end - lead, recovered: sp.recovered };
@@ -6913,6 +7117,7 @@ function startBodyLoad(id) {
     if (!res.failed && id !== draftMeta.active) draftTexts[id] = typeof res.value === 'string' ? res.value : '';
     /* Bring the store up to date with a local copy it never got. */
     if (res.pending && id !== draftMeta.active && typeof res.value === 'string') storeDraft(res.value, key);
+    if (id !== draftMeta.active) refreshReviewerCards(); /* its text is known now */
     return res;
   });
   return bodyLoads[id];
@@ -7267,6 +7472,9 @@ function takeInList(json) {
 }
 window.addEventListener('storage', function (e) {
   if (e.key === DRAFTS_KEY) takeInList(e.newValue);
+  /* Another window saved the text of a draft not open here: a pointer card
+     reads it. */
+  else if (draftReady && typeof e.key === 'string' && e.key.indexOf(DRAFT_KEY) === 0 && e.key !== draftKey) refreshReviewerCards();
 });
 /* A page restored from the back/forward cache got no storage events while it
    was away: it takes in the list as this browser stores it now, so its open
