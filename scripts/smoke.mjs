@@ -308,13 +308,13 @@ try {
     limitInput.value = '4200'; limitInput.dispatchEvent(new Event('input'));
     venueSelect.value = 'aaai'; venueSelect.dispatchEvent(new Event('change')); await wait(50);
     const aaai = limitInput.value === '2500' && !venueStat.hidden &&
-      venueStat.textContent === 'AAAI-26 · for all reviews · no links' && /aaai-26-faq/.test(venueStat.href);
+      venueStat.textContent === 'AAAI-26 · for all reviews · no URLs' && /aaai-26-faq/.test(venueStat.href);
     venueSelect.value = 'iclr'; venueSelect.dispatchEvent(new Event('change')); await wait(50);
     const iclr = limitInput.value === '4200' && /Limit: your own, 4,200/.test(toast.textContent) &&
       venueStat.textContent === 'ICLR 2027 · your limit (none stated) · anonymous links only';
     venueSelect.value = 'neurips'; venueSelect.dispatchEvent(new Event('change'));
     limitInput.value = '9500'; limitInput.dispatchEvent(new Event('input'));
-    const typed = venueStat.textContent === 'NeurIPS 2026 · your limit (rule: 10,000 per review) · no links';
+    const typed = venueStat.textContent === 'NeurIPS 2026 · your limit (rule: 10,000 per review) · no links (code for the AC excepted)';
     venueSelect.value = ''; venueSelect.dispatchEvent(new Event('change'));
     const custom = venueStat.hidden && limitInput.value === '9500';
     limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
@@ -1206,14 +1206,20 @@ try {
     setSourceText('We thank Reviewer Ab12 for the review.\\n\\nW1: see our answer to Reviewer Ab12, Q2.', 0); updateAll();
     const titles = () => currentIssues.map((i) => i.title + ' @' + ta.value.slice(i.start, i.end));
     const both = titles().join('|') === 'This draft addresses another reviewer @Reviewer Ab12|' +
-      'Pointer to a point the other draft does not have @Reviewer Ab12';
+      'Pointer to a point the other draft does not have @Q2';
+    /* Another window adds Q2 to Ab12's draft: the pointer card goes, with no edit here. */
+    const key = 'rebuttal-bench-draft-' + ab, now = '**W1.** Seeds.\\n\\n**Q2:** Why?';
+    localStorage.setItem(key, now);
+    window.dispatchEvent(new StorageEvent('storage', { key, newValue: now }));
+    const followed = titles().join('|') === 'This draft addresses another reviewer @Reviewer Ab12';
     window.prompt = () => 'Reviewer Ab12 (follow-up)';
     renameDraft(k9); await wait(20);
     const renamed = titles().length === 0;
     window.confirm = () => true;
     deleteDraft(ab); deleteDraft(k9); await wait(50);
     switchDraft(home); await wait(50);
-    return both && renamed && draftMeta.active === home && !draftById(ab) && !draftById(k9) || { both, renamed, titles: titles() };`);
+    return both && followed && renamed && draftMeta.active === home && !draftById(ab) && !draftById(k9) ||
+      { both, followed, renamed, titles: titles() };`);
 
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
@@ -1264,6 +1270,24 @@ try {
       !compactList.querySelector('input[data-trick="tables"]').checked || { restored: prefsRestored, tables: prefs.compact.tables };`);
   await inPage(`localStorage.setItem('stub:delay', '50');
     compactList.querySelector('input[data-trick="tables"]').click(); await wait(300); return true;`);
+
+  await inPage(`localStorage.setItem('stub:delay', '3000');
+    const p = JSON.parse(localStorage.getItem('stub:rebuttal-bench-prefs') || JSON.stringify(prefs));
+    localStorage.setItem('stub:rebuttal-bench-prefs', JSON.stringify(Object.assign(p, { venue: 'aaai', limit: 2500, ownLimit: 4200 })));
+    return true;`);
+  await send('Page.navigate', { url: PAGE }, sessionId);
+  await sleep(600);
+  await check('a venue chosen before the stored preferences arrive gets its limit, or the author’s stored one', `
+    for (let i = 0; i < 60 && typeof venueSelect === 'undefined'; i++) await wait(50);
+    if (prefsRestored) return 'the stored preferences came back too soon to test this';
+    venueSelect.value = 'iclr'; venueSelect.dispatchEvent(new Event('change'));
+    for (let i = 0; i < 80 && !prefsRestored; i++) await wait(50);
+    return prefsRestored && prefs.venue === 'iclr' && prefs.limit === 4200 && limitInput.value === '4200' ||
+      { venue: prefs.venue, limit: prefs.limit, own: prefs.ownLimit, shown: limitInput.value };`);
+  await inPage(`localStorage.setItem('stub:delay', '50');
+    for (let i = 0; i < 100 && !draftReady; i++) await wait(50);
+    venueSelect.value = ''; venueSelect.dispatchEvent(new Event('change'));
+    limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input')); await wait(300); return true;`);
 
   await load();
   await inPage(`document.querySelector('#draftTools .dadd').click(); await wait(50);
