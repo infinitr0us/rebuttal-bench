@@ -1066,6 +1066,37 @@ try {
     return rows.length === 2 && /×2 · −18$/.test(row.textContent) && first[0] === 0 && first[1] === 11 &&
       second[0] === 22 && third === 0 && /^about \\d+ to save$/.test(sum) && unchanged || { rows, first, second, third, sum };`);
 
+  await check('Promises groups drafts, selects the source across tabs and copies only future changes', `
+    const original = draftMeta.active;
+    const first = 'We will release our training scripts.';
+    const second = 'We will add an ablation to the appendix.';
+    const done = 'We have revised Section 3 accordingly.';
+    const ab = createDraft('Reviewer Ab12', '  Thanks. ' + first + ' ' + done);
+    const cd = createDraft('Reviewer Cd34', second);
+    const unknown = createDraft('Unread response', '');
+    fallbackDel(keyOfDraft(unknown)); delete draftTexts[unknown]; bodyKnown[unknown] = false;
+    switchDraft(cd);
+    promisesBox.open = true; await wait(50);
+    const group = (name) => [...promisesList.querySelectorAll('section')].find(s => s.getAttribute('aria-label') === name);
+    const kinds = (name) => [...group(name).querySelectorAll('.gain')].map(s => s.textContent).join(',');
+    const shown = kinds('Reviewer Ab12') === 'will,done' && kinds('Reviewer Cd34') === 'will' &&
+      /Not checked/i.test(group('Unread response').textContent) && promisesSum.textContent === '3 promises' && prefs.promisesOpen;
+    const selected = () => ta.value.slice(ta.selectionStart, ta.selectionEnd);
+    group('Reviewer Ab12').querySelector('[data-promise="1"]').click();
+    const switched = draftMeta.active === ab && selected() === done && document.activeElement === ta;
+    group('Reviewer Ab12').querySelector('[data-promise="0"]').click();
+    const current = selected() === first && ta.selectionStart === '  Thanks. '.length;
+    const prompt = window.prompt; window.prompt = () => 'Reviewer Ef56'; renameDraft(cd); window.prompt = prompt;
+    let copied;
+    Object.defineProperty(navigator, 'clipboard', { configurable: true,
+      value: { writeText: (text) => { copied = text; return Promise.resolve(); } } });
+    copyPromises.click();
+    const checklist = copied === '- [ ] ' + first + ' (Reviewer Ab12)\\n- [ ] ' + second + ' (Reviewer Ef56)';
+    promisesBox.open = false; switchDraft(original); window.confirm = () => true;
+    [ab, cd, unknown].forEach(deleteDraft);
+    return shown && switched && current && checklist && copyPromises.disabled ||
+      { shown, switched, current, copied, remaining: promisesSum.textContent }; `);
+
   await check('the spellcheck switch reaches the editor and survives a draft switch', `
     const was = ta.spellcheck;
     spellBox.click(); await wait(30);
