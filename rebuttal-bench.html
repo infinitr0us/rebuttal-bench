@@ -5064,7 +5064,13 @@ function reviewerIssues(text, self, others, spans) {
     while ((m = tr.re.exec(text))) {
       var r = reviewerRef(text, m.index + m[0].length, known);
       if (!r || !visible(m.index + m[0].search(/\S/), r.end) || (tr.edge && !edge(r.start))) continue;
-      if (tr.line && !m[1] && !/^[ \t]*(?:\*\*|__)?[ \t]*[:.!]?[ \t]*(?:\*\*|__)?[ \t]*(?:\n[ \t]*\n|\n?[ \t]*$)/.test(text.slice(r.after, r.after + 40))) continue;
+      if (tr.line && !m[1]) {
+        /* A paragraph of its own: it starts its block ("see our\nresponse to
+           Reviewer X." is a wrapped sentence) and ends after the name. */
+        var lineAt = m.index + m[0].search(/\S/), own = blockOf(lineAt);
+        if (!own || own.start !== text.lastIndexOf('\n', lineAt - 1) + 1 ||
+            !/^[ \t]*(?:\*\*|__)?[ \t]*[:.!]?[ \t]*(?:\*\*|__)?[ \t]*(?:\n[ \t]*\n|\n?[ \t]*$)/.test(text.slice(r.after, r.after + 40))) continue;
+      }
       var also = tr.joint.exec(text.slice(r.after, r.after + 60));
       if (also && (!also[1] || known[also[1].toLowerCase()] || idShaped(also[1]))) continue;
       if (caseCard(r) || isFor(me, r) || !sameScheme(me, r)) continue;

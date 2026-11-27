@@ -90,6 +90,7 @@ test('the sentences of the two 3.8 reviews stay quiet', () => {
     'Following the reviewers’ suggestion, we changed the example to ‘We thank Reviewer Ab12 for the feedback.’',
     'The example now reads, \'We thank Reviewer Ab12 for the feedback.\'',
     'Dear Reviewer k9F2,\n\nOur response to Reviewer Ab12\ncontains the full ablation table.\n\nBest regards.',
+    'Dear Reviewer k9F2,\n\nFor the complete calculation, see our\nresponse to Reviewer Ab12.\n\nBest regards.',
   ]) assert.deepEqual(cards(s), [], s);
   assert.deepEqual(cards('We thank Reviewer 3 and 2 for independently suggesting this baseline.', 'R2', NUMBERED), []);
   // General tabs, whatever they name; numbering schemes are not compared with IDs.
