@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.10.0 (unreleased)
+## 3.10.0 (2026-11-27)
 
 ### Before posting
 - Commented-out LaTeX pasted from the paper's source gets a card, with a click to delete the
