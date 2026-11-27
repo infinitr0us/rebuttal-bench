@@ -1366,6 +1366,24 @@ try {
     return kept && gone && prefs.view === 'preview' && reviewView.hidden && scroller.style.visibility === '' ||
       { kept, gone, view: prefs.view };`);
 
+  await check('Quote goes after the block that holds the caret, never into a code block that follows it', `
+    const home = draftMeta.active;
+    const id = createDraft('Code answer', ''); saveDraftMeta(); switchDraft(id); await wait(50);
+    viewReviewBtn.click();
+    for (let i = 0; i < 60 && !(reviewInput && reviewFor === id); i++) await wait(50);
+    const base = 'Opening answer.\\n\`\`\`py\\nrun()\\n\\nrun()\\n\`\`\`';
+    setSourceText(base, 0); updateAll();
+    reviewInput.value = 'Questions:\\n- Why twice?'; reviewInput.dispatchEvent(new Event('input')); await wait(50);
+    ta.focus(); ta.setSelectionRange(15, 15);
+    reviewList.querySelector('.rquote[data-i="0"]').click(); await wait(50);
+    const placed = ta.value === 'Opening answer.\\n\\n> **Q1.** Why twice?\\n\\n\`\`\`py\\nrun()\\n\\nrun()\\n\`\`\`';
+    ta.focus(); document.execCommand('undo'); await wait(50);
+    const undone = ta.value === base;
+    window.confirm = () => true; deleteDraft(id); await wait(50);
+    switchDraft(home); await wait(50);
+    viewPreviewBtn.click(); await wait(20);
+    return placed && undone || { placed, undone, value: ta.value };`);
+
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).

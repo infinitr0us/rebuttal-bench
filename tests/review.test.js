@@ -180,13 +180,21 @@ test('EMNLP and ARR form fields preserve the requests in each category', () => {
   ]);
 });
 
-test('TMLR form questions and impact answers bound the requested changes', () => {
+test('TMLR form questions and impact answers bound the requested changes; an explanation can hold a request', () => {
   assert.deepEqual(rows(['Summary Of Contributions:', 'Weaknesses:', '- No timing data.',
-    'Are the claims made in the submission supported by accurate, convincing and clear evidence?: No', 'Explain your answer above: This was discussed.',
-    "Would at least some individuals in TMLR's audience be interested in knowing the findings of this paper?: Yes", 'Explain your answer above: Simulation researchers.',
+    'Are the claims made in the submission supported by accurate, convincing and clear evidence?: No',
+    "Would at least some individuals in TMLR's audience be interested in knowing the findings of this paper?: Yes",
+    'Explain your answer above: The bar is low. Please state who the intended readers are.',
     'Requested Changes:', 'Critical:', '1. Add a clock.', 'Would strengthen the work:', '2. Plot memory use.', 'Broader Impact Concerns: No concerns.'].join('\n')), [
-    'W1 No timing data.', 'W2 Add a clock.', 'W3 Plot memory use.'
+    'W1 No timing data.', 'C1 The bar is low. Please state who the intended readers are.', 'W2 Add a clock.', 'W3 Plot memory use.'
   ]);
+});
+
+test('a reviewer\u2019s own sub-heading inside a field keeps the items under it (final review N2)', () => {
+  assert.deepEqual(rows(['Questions:', '**Experimental Setup:**', '1. Which seeds were used?', '2. Which split?', 'Rating: 4'].join('\n')),
+    ['Q1 Which seeds were used?', 'Q2 Which split?']);
+  assert.deepEqual(rows(['Weaknesses:', 'Data Collection:', '- The sampling is biased.', 'Evaluation Setup:', '- One metric only.', 'Questions: Why?'].join('\n')),
+    ['W1 The sampling is biased.', 'W2 One metric only.', 'Q1 Why?']);
 });
 
 test('ICML placeholders and unqualified endorsements do not become skeleton items', () => {
@@ -248,7 +256,8 @@ test('only visible quote text counts, including the words of a link label', () =
   const q = 'Where is the weather station located?', ps = A.reviewPoints('Questions: ' + q).points;
   for (const source of ['[site]: /unused "' + q + '"', '[site]: /somewhere "' + q + '"\n\n[Map][site]', '`' + q + '`',
     '~~~\n' + q + '\n~~~', '<!-- ' + q + ' -->', '[Answer](/map "' + q + '")']) {
-    assert.equal(A.reviewCoverage(ps, source)[0].status, 'missing', source);
+    /* Inline code is visible text; a code block, a comment or a link title is not taken for a quote. */
+    assert.equal(A.reviewCoverage(ps, source)[0].status, source.charAt(0) === '`' ? 'quoted' : 'missing', source);
   }
   assert.equal(A.reviewCoverage(ps, '> [Where is](/map) the weather station located?')[0].status, 'quoted');
 });
@@ -259,4 +268,21 @@ test('quote offsets survive case folding and CRLF before and inside the quote', 
   const c = A.reviewCoverage(ps, draft)[0];
   assert.equal(c.status, 'quoted');
   assert.equal(draft.slice(c.start, c.end), 'Which location\r\n> did you use?');
+});
+
+test('forum HTML keeps code lines and table cells (final review N3)', () => {
+  const html = '<strong class="note-content-field">Comments:</strong><div class="note-content-value">' +
+    '<p>The loop:</p><pre><code>for item in data:\n    score(item)\nreturn total\n</code></pre>' +
+    '<table><tr><th>Split</th><th>Score</th></tr><tr><td>Train</td><td>85</td></tr><tr><td>Test</td><td>71</td></tr></table></div>';
+  const text = A.readHtmlReview(new JSDOM(html).window.document);
+  assert.match(text, /for item in data:\n    score\(item\)\nreturn total/);
+  assert.match(text, /Split \| Score\nTrain \| 85\nTest \| 71/);
+});
+
+test('a verbatim quote with inline code counts, a short word in prose does not (final review N4, N7)', () => {
+  const ps = A.reviewPoints('Questions: Why is `batch_size` fixed at 16?').points;
+  assert.equal(A.reviewCoverage(ps, 'Thanks.\n\n> Why is `batch_size` fixed at 16?\n\nIt fits the GPU.')[0].status, 'quoted');
+  const rt = A.reviewPoints('Weaknesses:\n- Runtime\n- Memory use is high.').points;
+  assert.equal(A.reviewCoverage(rt, 'The runtime library is unchanged.')[0].status, 'missing');
+  assert.equal(A.reviewCoverage(rt, '> Runtime\n\nIt is 2 ms.')[0].status, 'quoted');
 });

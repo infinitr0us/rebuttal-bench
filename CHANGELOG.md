@@ -15,11 +15,20 @@
   questions. Points with the same opening use the full text. Click a covered point to find it.
   The tab shows the count (*3/5*). A point without a match says *no part labelled W3*, since
   only the author can judge an answer written in other words.
-- *Quote* and *Insert skeleton* add separate paragraphs. A caret inside a paragraph inserts
-  after it, and a selection uses its end. One undo restores the original passage.
+- *Quote* and *Insert skeleton* add separate paragraphs. A caret inside a paragraph, a list or
+  a code block inserts after that block, and a selection uses its end. One undo restores the
+  original passage.
+- Pasted code keeps its lines and a pasted table its rows and cells. A reviewer's own
+  sub-heading inside a field (*Experimental Setup:*) keeps the items under it, and TMLR's
+  *Explain your answer above* counts as comments, since it can hold a request.
 - When the review names its reviewer (OpenReview's *Official Review ... by Reviewer k9F2*) and
   the tab is named for another one, the view says so; a tab named for no one can take the
   reviewer's name with one click.
+- Two Codex reviews tested the view on 26 public reviews from ICLR, NeurIPS, ICML, TMLR and
+  EMNLP (kept out of the repository; the tests use invented reviews of the same shapes). Every
+  point an author would answer is found, both from a field-by-field paste and from a copy of
+  the forum page; some extra rows remain, mostly praise or explanations inside a field of
+  concerns, which the parser keeps rather than risk dropping a real concern.
 
 ## 3.8.0 (2026-11-27)
 

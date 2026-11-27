@@ -419,19 +419,26 @@ the frame on a draft switch, binds input only after the current frame loads, and
 theme tokens into its document on load and theme changes.
 
 `readHtmlReview(doc)` reads OpenReview's field/value sibling elements from a parsed clipboard
-fragment, preserving list markers, nested items and paragraphs. An ordinary paste stays native.
+fragment, preserving list markers, nested items, paragraphs, code lines and table cells. An
+ordinary paste stays native.
 `reviewPoints(text)` reads the original line endings for source offsets. Form fields set the
-type (W, Q, L or C) or end the preceding value. Aspect names such as Clarity can introduce
-prose inside a field. Plain selections lose list markers, so sentence boundaries and question
+type (W, Q, L or C) or end the preceding value; an unknown title-cased heading ends it only
+when it reads as the form's administration (Acknowledgement, Justification, Declaration and the
+like), otherwise it is the reviewer's sub-heading and its items stay in the field. Aspect names
+such as Clarity can introduce prose inside a field. Plain selections lose list markers, so sentence boundaries and question
 openings help separate items while wrapped prose stays together. Keep ambiguous concerns in
 mixed fields, even when that also keeps some praise. Tests use synthetic reviews.
 
 `REVIEW_NAME` is shared by review items, section names and coverage. `labelledParts` reads all
 the leading labels in a section, including combined headings. `reviewCoverage` maps visible
 quotes back to source offsets after case and whitespace folding. Shared openings require the
-full point. Link definitions, destinations, comments and code cannot cover a point. A missing
-match says *no part labelled X*. `insertBlock` inserts Quote and Insert skeleton at a paragraph
-boundary or after the paragraph containing the selection's end, with one source undo.
+full point. Link definitions, destinations, comments and code blocks cannot cover a point;
+inline code is visible text (only its backticks are skipped). A point under 15 characters counts
+only as a whole word inside a blockquote. A missing match says *no part labelled X*.
+`insertBlock` inserts Quote and Insert skeleton at a block boundary or after the top-level block
+(`blockSources`) holding the selection's end, never inside a fenced code block, with one source
+undo. Known limits accepted by the last review (`reviews/2026-11-27/codex-final-39`): praise in a
+field of concerns can become a point, and a part labelled Question2.1 counts for Q2.
 
 **Storage** is deliberately simpler than the drafts': a review lives under
 `REVIEW_PREFIX + draft id` in localStorage only (never the asynchronous store, Export, Import or

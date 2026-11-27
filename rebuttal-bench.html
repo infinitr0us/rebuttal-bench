@@ -5237,7 +5237,10 @@ var REVIEW_FIELDS = [
   ['C', 'other comments or suggestions', 'comments suggestions and typos', 'comments, suggestions and typos',
     'comments', 'comment', 'suggestions', 'minor comments', 'minor weaknesses', 'minor issues', 'typos',
     'additional comments', 'additional feedback', 'detailed comments', 'missing references', 'minor typos',
-    'typos grammar style and presentation improvements'],
+    'typos grammar style and presentation improvements',
+    /* TMLR's explanation of a yes/no answer can hold a request ("say who the
+       intended readers are"); the answer itself is no point. */
+    'explain your answer above'],
   [null, 'summary', 'paper summary', 'summary of the paper', 'summary of contributions', 'summary of strengths',
     'strengths', 'strength', 'main strengths', 'soundness', 'presentation', 'contribution', 'rating', 'overall rating',
     'overall recommendation', 'recommendation', 'overall assessment', 'confidence', 'reviewer confidence',
@@ -5246,7 +5249,7 @@ var REVIEW_FIELDS = [
     'clarity', 'significance', 'originality', 'reproducibility', 'best paper', 'justification for recommendation',
     'first time reviewer', 'review', 'title', 'excitement', 'references', 'final justification',
     'code of conduct acknowledgement', 'responsible reviewing acknowledgement', 'broader impact concerns',
-    'explain your answer above', 'are the claims made in the submission supported by accurate, convincing and clear evidence?',
+    'are the claims made in the submission supported by accurate, convincing and clear evidence?',
     "would at least some individuals in tmlr's audience be interested in knowing the findings of this paper?"]
 ];
 var REVIEW_FIELD_INDEX = (function () {
@@ -5266,11 +5269,14 @@ function reviewField(line) {
   if (!m) return null;
   var title = m[1].trim(), name = title.toLowerCase().replace(/\s*&\s*/g, ' and ').replace(/\s+/g, ' ');
   var letter = REVIEW_FIELD_INDEX[name];
-  /* An unfamiliar standalone form heading ends the preceding value. In prose,
-     "Minor: ..." or "Include Human Evaluation: ..." can introduce a concern. */
+  /* An unfamiliar form field ends the preceding value only when it reads as
+     the form's own administration ("Final Justification:", "Code Of Conduct
+     Acknowledgement: ..."). Any other title-cased heading is the reviewer's
+     sub-heading ("**Experimental Setup:**" over two questions) and stays in
+     its field, as does "Minor: ..." in prose. */
   if (letter === undefined) {
     if (!/:|：/.test(line) || !/^[A-Z][a-z]+(?: [A-Z][a-z]+)+$/.test(title)) return null;
-    if (m[2].trim() && !/ (?:Acknowledgement|Assessment|Declaration|Decision|Justification|Rating|Score)$/.test(title)) return null;
+    if (!/ (?:Acknowledgement|Acknowledgment|Assessment|Declaration|Decision|Justification|Rating|Score|Recommendation|Confidence)$|^(?:Code Of Conduct|Ethics|Ethical)\b/.test(title)) return null;
     letter = null;
   }
   return { letter: letter, name: title, rest: m[2] };
@@ -5292,6 +5298,19 @@ function readHtmlReview(doc) {
     var tag = node.nodeName;
     if (/^(?:SCRIPT|STYLE)$/.test(tag)) return '';
     if (tag === 'BR') return '\n';
+    /* Code keeps its lines and indentation; a table keeps its rows and cells. */
+    if (tag === 'PRE') return '\n\n' + node.textContent.replace(/\s+$/, '') + '\n\n';
+    if (tag === 'TABLE') {
+      var trs = node.getElementsByTagName('tr'), lines = [];
+      for (var r = 0; r < trs.length; r++) {
+        var cells = [];
+        for (var c = trs[r].firstElementChild; c; c = c.nextElementSibling) {
+          if (c.nodeName === 'TD' || c.nodeName === 'TH') cells.push(c.textContent.replace(/\s+/g, ' ').trim());
+        }
+        lines.push(indent + cells.join(' | '));
+      }
+      return '\n\n' + lines.join('\n') + '\n\n';
+    }
     if (tag === 'OL' || tag === 'UL') {
       var rows = [], n = node.hasAttribute('start') ? Number(node.getAttribute('start')) : 1;
       for (var li = node.firstElementChild; li; li = li.nextElementSibling) {
@@ -5444,10 +5463,14 @@ function reviewCoverage(points, draft) {
   }
   var model = draft && collectMarkedRanges(draft), labels = Object.create(null);
   if (model) labelledParts(draft).forEach(function (p) { if (!labels[p.label]) labels[p.label] = p; });
+  /* Inline code is text a reader sees ("Why is `batch_size` fixed?"): only
+     its backticks are skipped. Code blocks, HTML, images, definitions and
+     link destinations are not. */
   var excluded = model ? model.ranges.filter(function (r) {
-    return /^(?:code|codespan|html|image)$/.test(r.type);
+    return /^(?:code|html|image)$/.test(r.type);
   }).concat(model.definitions, model.unlocated, model.dropped, looseFenceRanges(draft)) : [];
   var mask = makeMask(draft.length, excluded), syntax = makeMask(draft.length, model ? model.hidden : []);
+  var quoted = makeMask(draft.length, model ? model.ranges.filter(function (r) { return r.type === 'blockquote'; }) : []);
   var flat = '', at = [], prevSpace = true;
   for (var i = 0; model && i < draft.length; i++) {
     if (mask[i]) {
@@ -5457,7 +5480,7 @@ function reviewCoverage(points, draft) {
     if (syntax[i]) continue;
     var ch = draft[i];
     if (/\s|>/.test(ch)) { if (!prevSpace) { flat += ' '; at.push(i); prevSpace = true; } continue; }
-    if (ch === '*' || ch === '_') continue;
+    if (ch === '*' || ch === '_' || ch === '`') continue;
     var folded = ch.toLowerCase();
     flat += folded;
     for (var n = 0; n < folded.length; n++) at.push(i);
@@ -5467,7 +5490,7 @@ function reviewCoverage(points, draft) {
      share it, only their full text distinguishes the corresponding answers. */
   var counts = Object.create(null);
   var needles = (points || []).map(function (p) {
-    var full = p.text.replace(/[*_]/g, '').replace(/[\s>]+/g, ' ').trim().toLowerCase();
+    var full = p.text.replace(/[*_`]/g, '').replace(/[\s>]+/g, ' ').trim().toLowerCase();
     var opening = full.slice(0, 40).trim();
     counts[opening] = (counts[opening] || 0) + 1;
     return { full: full, opening: opening };
@@ -5477,9 +5500,11 @@ function reviewCoverage(points, draft) {
     if (part) return { label: p.label, status: 'labelled', start: part.start, end: part.end };
     var needle = needles[index], probe = counts[needle.opening] > 1 ? needle.full : needle.opening;
     var hit = probe ? flat.indexOf(probe) : -1;
+    /* A point this short ("Runtime", "Why no data?") counts as quoted only
+       as a whole word inside a quote: in prose it is a coincidence. */
     if (probe.length < 15) {
       while (hit >= 0 && ((hit && REVIEW_WORD.test(flat.charAt(hit - 1)) && REVIEW_WORD.test(probe.charAt(0))) ||
-          (REVIEW_WORD.test(probe.slice(-1)) && REVIEW_WORD.test(flat.charAt(hit + probe.length))))) {
+          (REVIEW_WORD.test(probe.slice(-1)) && REVIEW_WORD.test(flat.charAt(hit + probe.length))) || !quoted[at[hit]])) {
         hit = flat.indexOf(probe, hit + 1);
       }
     }
@@ -8024,8 +8049,15 @@ function insertBlock(block, caret) {
   if (!draftReady || ta.readOnly) return false;
   var s = ta.selectionEnd, v = ta.value, ok = false;
   /* A point jump or a manual selection is a location, never text to replace.
-     Inside a paragraph advance to its end; a blank line is already a boundary. */
-  if (v.slice(0, s).trim() && v.slice(s).trim()) {
+     Inside a top-level Markdown block (a paragraph, a list, a code block) go
+     to its end, as Marked sees it: a blank line inside a fenced code block is
+     no boundary. At a block's start the caret is already between blocks. */
+  var blocks = blockSources(v), inBlock = false;
+  for (var k = 0; k < blocks.length; k++) {
+    if (s > blocks[k].start && s < blocks[k].end) { s = blocks[k].end; inBlock = true; break; }
+  }
+  /* An HTML block has no entry: fall back to the next blank line. */
+  if (!inBlock && v.slice(0, s).trim() && v.slice(s).trim() && !/\n[ \t]*$/.test(v.slice(0, s))) {
     var breaks = /\n[ \t]*\n(?:[ \t]*\n)*/g, m;
     while ((m = breaks.exec(v)) && breaks.lastIndex < s) { /* preceding paragraphs */ }
     if (!m) s = v.length;
