@@ -142,10 +142,11 @@ test('an import adds only new texts, under names no draft has, and replaces noth
       { name: 'General', text: 'g' },
     ],
     same: 2,
+    sameIn: ['', ''], // the paper (scope) each draft already here is in
   });
   // A draft whose text is not known here keeps its name but matches no text.
   assert.deepEqual(plain(A.importPlan([{ name: 'B', text: null }], [{ name: 'B', text: 'null' }, { name: 'X', text: '' }])),
-    { add: [{ name: 'B (2)', text: 'null' }, { name: 'X', text: '' }], same: 0 });
+    { add: [{ name: 'B (2)', text: 'null' }, { name: 'X', text: '' }], same: 0, sameIn: [] });
   // Texts that look like object keys are ordinary texts.
   assert.equal(A.importPlan([], [{ name: 'x', text: '__proto__' }, { name: 'y', text: 'constructor' }]).add.length, 2);
 });

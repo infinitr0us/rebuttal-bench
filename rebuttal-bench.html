@@ -5779,6 +5779,214 @@ function newDraftName(list) {
   return 'Draft ' + n;
 }
 
+/* ---- papers (pure): drafts grouped by the paper they answer ----
+   A paper owns no text: it is a label on drafts, kept under a key of its own
+   (PAPERS_KEY in the DOM section) that 3.12 never reads, so losing or rolling
+   back the record can only regroup drafts, all under "No paper" at worst.
+   The record is a set of flat maps of single values, {id: {v, at}}: a
+   paper's name, venue and typed limit, and each draft's paper. A merge takes,
+   per id, the entry that comes later in entryAfter's order: a
+   last-writer-wins map with no deletions, so windows and devices that merge
+   in any order end with the same record. One value per entry, so a stale
+   venue change cannot undo a rename; values are opaque here and kept as they
+   are, maps and fields this version does not know included; only papersView
+   and the venue and limit helpers read them. (Design note and Fable's review:
+   reviews/2026-11-28.) */
+var PAPER_ID = /^p[0-9a-z]{1,24}$/;
+var PAPERS_VERSION = 1;
+var PAPERS_MAP_ID = /^[0-9A-Za-z_-]{1,40}$/;
+/* Newest entries kept per map. A membership of a draft deleted long ago is
+   inert and drops out in time; pruning by this window's draft list instead
+   would be a deletion other copies never hear of (a draft re-created after a
+   deletion elsewhere would lose its paper). A cap over the entries' order
+   commutes with the merge, so it keeps the record convergent. */
+var PAPERS_KEPT = { member: 1000 };
+var PAPERS_KEPT_OTHER = 300;
+
+function newPaperId() {
+  return 'p' + newDraftId().slice(1);
+}
+
+/* JSON with keys in order, so two windows compare the same values alike. */
+function canonJSON(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v === undefined ? null : v);
+  if (Object.prototype.toString.call(v) === '[object Array]') return '[' + v.map(canonJSON).join(',') + ']';
+  return '{' + Object.keys(v).sort().map(function (k) { return JSON.stringify(k) + ':' + canonJSON(v[k]); }).join(',') + '}';
+}
+
+/* The total order of entries: `at`, then the value's canonical form. Positive
+   when `a` comes after `b` (and wins a merge). */
+function entryAfter(a, b) {
+  if (a.at !== b.at) return a.at > b.at ? 1 : -1;
+  var ca = canonJSON(a.v), cb = canonJSON(b.v);
+  return ca === cb ? 0 : ca > cb ? 1 : -1;
+}
+
+/* The newest `k` entries of a map, by entryAfter and then by id. */
+function capPaperMap(map, k) {
+  var ids = Object.keys(map);
+  if (ids.length <= k) return map;
+  ids.sort(function (x, y) { return entryAfter(map[y], map[x]) || (x < y ? 1 : x > y ? -1 : 0); });
+  var out = Object.create(null);
+  ids.slice(0, k).forEach(function (id) { out[id] = map[id]; });
+  return out;
+}
+
+/* A stored record, or garbage, as {version, newer, maps}. `newer`: written by
+   a later version of the page, which this one reads but never writes over. */
+function parsePapers(raw) {
+  var rec = null;
+  try { rec = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { rec = null; }
+  if (!rec || typeof rec !== 'object' || Object.prototype.toString.call(rec) === '[object Array]') rec = {};
+  var newer = typeof rec.version === 'number' && isFinite(rec.version) && rec.version > PAPERS_VERSION;
+  var out = { version: newer ? rec.version : PAPERS_VERSION, newer: newer, maps: Object.create(null) };
+  Object.keys(rec).forEach(function (name) {
+    var m = rec[name];
+    if (name === 'version' || !PAPERS_MAP_ID.test(name) || !m || typeof m !== 'object' ||
+        Object.prototype.toString.call(m) === '[object Array]') return;
+    var map = Object.create(null);
+    Object.keys(m).forEach(function (id) {
+      var e = m[id];
+      if (PAPERS_MAP_ID.test(id) && e && typeof e === 'object' && typeof e.at === 'number' && isFinite(e.at) &&
+          Object.prototype.hasOwnProperty.call(e, 'v')) map[id] = e;
+    });
+    out.maps[name] = capPaperMap(map, PAPERS_KEPT[name] || PAPERS_KEPT_OTHER);
+  });
+  return out;
+}
+
+/* Commutative, associative and idempotent: for every map and id, the entry
+   that comes later. A newer side marks the result newer. */
+function mergePapers(a, b) {
+  var out = { version: Math.max(a.version, b.version), newer: !!(a.newer || b.newer), maps: Object.create(null) };
+  var names = Object.keys(a.maps).concat(Object.keys(b.maps));
+  names.forEach(function (name) {
+    if (out.maps[name]) return;
+    var ma = a.maps[name] || {}, mb = b.maps[name] || {}, map = Object.create(null);
+    Object.keys(ma).concat(Object.keys(mb)).forEach(function (id) {
+      var ea = ma[id], eb = mb[id];
+      map[id] = !ea ? eb : !eb ? ea : entryAfter(eb, ea) > 0 ? eb : ea;
+    });
+    out.maps[name] = capPaperMap(map, PAPERS_KEPT[name] || PAPERS_KEPT_OTHER);
+  });
+  return out;
+}
+
+/* The record with `map[id]` set to `v`, stamped after the entry it replaces
+   (a fast clock elsewhere, or two changes in one millisecond, cannot undo
+   a later change). Setting the value an entry has changes nothing. */
+function setPaperEntry(rec, name, id, v, now) {
+  var old = rec.maps[name] && rec.maps[name][id];
+  if (old && canonJSON(old.v) === canonJSON(v)) return rec;
+  var maps = Object.create(null);
+  Object.keys(rec.maps).forEach(function (k) { maps[k] = rec.maps[k]; });
+  var map = Object.create(null);
+  Object.keys(maps[name] || {}).forEach(function (k) { map[k] = maps[name][k]; });
+  map[id] = { v: v, at: old ? Math.max(now, old.at + 1) : now };
+  maps[name] = map;
+  return { version: rec.version, newer: rec.newer, maps: maps };
+}
+
+/* The record as stored, in a canonical form. */
+function serializePapers(rec) {
+  var o = { version: rec.version };
+  Object.keys(rec.maps).forEach(function (k) { o[k] = rec.maps[k]; });
+  return canonJSON(o);
+}
+
+/* A paper's name: the string its entry holds, or null (no such paper). */
+function paperName(rec, pid) {
+  var e = rec.maps.name && rec.maps.name[pid];
+  return e && typeof e.v === 'string' && e.v ? e.v : null;
+}
+
+/* The drafts of `list` ([{id}], in tab order) grouped by paper: papers in the
+   order of their first draft, each with its drafts in tab order, and the
+   drafts of no paper. Every draft lands in exactly one group; a membership of
+   a draft the list lacks is inert, and one naming no paper counts as none. */
+function papersView(list, rec) {
+  var member = rec.maps.member || {}, groups = Object.create(null), order = [], none = [];
+  var paperOf = Object.create(null);
+  list.forEach(function (d) {
+    var m = member[d.id], pid = m && typeof m.v === 'string' && paperName(rec, m.v) !== null ? m.v : '';
+    paperOf[d.id] = pid;
+    if (!pid) { none.push(d.id); return; }
+    if (!groups[pid]) { groups[pid] = []; order.push(pid); }
+    groups[pid].push(d.id);
+  });
+  return {
+    papers: order.map(function (p) { return { id: p, name: paperName(rec, p), drafts: groups[p] }; }),
+    none: none,
+    paperOf: paperOf
+  };
+}
+
+/* The paper named `name` (in any capitals), shown or not, so that a new paper,
+   Group by name and Import reuse it (and its venue) instead of making a second
+   one: the newest such entry, or null. */
+function paperNamed(rec, name) {
+  var want = cleanDraftName(name).toLowerCase(), best = null, names = rec.maps.name || {};
+  if (!want) return null;
+  Object.keys(names).forEach(function (pid) {
+    var e = names[pid];
+    if (typeof e.v !== 'string' || e.v.toLowerCase() !== want || !PAPER_ID.test(pid)) return;
+    if (!best || entryAfter(e, names[best]) > 0 || (entryAfter(e, names[best]) === 0 && pid > best)) best = pid;
+  });
+  return best;
+}
+
+/* The venue of a draft in paper `pid` ('' when none): the paper's own choice
+   ('' is Custom), else the global one, so that grouping drafts changes no
+   card. A venue id this version does not know counts as the global one. */
+function paperVenue(rec, pid, globalVenue) {
+  var e = pid && rec.maps.venue && rec.maps.venue[pid];
+  return e && typeof e.v === 'string' && (e.v === '' || venueById(e.v)) ? e.v : globalVenue;
+}
+
+/* The limit of a draft in paper `pid`: one typed while in the paper; else, when
+   the paper has a venue of its own, that venue's number or the author's own
+   limit; else, as under "No paper", the global limit. */
+function paperLimit(rec, pid, globalLimit, ownLimit) {
+  if (!pid) return globalLimit;
+  var le = rec.maps.limit && rec.maps.limit[pid];
+  if (le && typeof le.v === 'number' && isFinite(le.v) && le.v >= 0) return Math.floor(le.v);
+  var ve = rec.maps.venue && rec.maps.venue[pid];
+  if (!ve || typeof ve.v !== 'string' || (ve.v !== '' && !venueById(ve.v))) return globalLimit;
+  var venue = venueById(ve.v);
+  return venue && venue.limit ? venue.limit : ownLimit;
+}
+
+/* A first word that names a reviewer or a kind of answer, not a paper. */
+var PREFIX_NOT_PAPER = /^(?:reviewers?|rev|response|responses|rebuttal|rebuttals|reply|replies|answer|answers|draft|drafts|comment|comments|part|general|global|common|summary|round|follow|followup|final|meta|ac|to|re|for|the|our|my|new|old|copy|untitled)$/i;
+
+/* The paper a tab name starts with: "[ARR] R3", "ICML-R1", "NeurIPS: R2",
+   "P2 R1"; null for "R1", "Reviewer Ab12", "Ab12 W1" or "R1 follow-up". */
+function namePrefix(name) {
+  name = cleanDraftName(name);
+  var m = /^\[([^\]]{1,24})\]\s*(\S.*)$/.exec(name) ||
+    /^([^\s:_\-–\/|]{1,24})\s*[:_\-–\/|]\s*(\S.*)$/.exec(name) ||
+    /^(\S{1,24})\s+(\S.*)$/.exec(name);
+  if (!m) return null;
+  var p = m[1].trim().replace(/[.,;]+$/, '');
+  if (!p || PREFIX_NOT_PAPER.test(p) || /^(?:r|rev)?\.?\d{1,2}$/i.test(p) || (p.length === 4 && idShaped(p))) return null;
+  return p;
+}
+
+/* Papers that tab names suggest ([{id, name}] of drafts in no paper): two or
+   more drafts whose names start with the same paper word. Only a proposal,
+   which the author edits before anything is written. */
+function prefixGroups(drafts) {
+  var groups = Object.create(null), order = [];
+  drafts.forEach(function (d) {
+    var p = namePrefix(d.name);
+    if (!p) return;
+    var k = p.toLowerCase();
+    if (!groups[k]) { groups[k] = { name: p, drafts: [] }; order.push(k); }
+    groups[k].drafts.push(d.id);
+  });
+  return order.map(function (k) { return groups[k]; }).filter(function (g) { return g.drafts.length >= 2; });
+}
+
 /* ---- earlier versions of a draft, and drafts as files (pure) ---- */
 
 /* A TeX control word is one edit. Unicode letters, marks and numbers stay
@@ -5936,11 +6144,19 @@ function cleanDraftName(name) {
 
 var DRAFTS_FILE = 'rebuttal-bench-drafts';
 
-/* Every draft ({name, text}, in tab order) as the file Export writes. */
+/* Every draft ({name, text, paper?, venue?}, in tab order) as the file Export
+   writes. A draft's paper (its name) and that paper's own venue are optional
+   fields of version 1: 3.12 reads only `name` and `text`, so it still imports
+   the file (ungrouped). */
 function draftsFile(drafts, now) {
   return JSON.stringify({
     format: DRAFTS_FILE, version: 1, exported: new Date(now).toISOString(),
-    drafts: drafts.map(function (d) { return { name: d.name, text: d.text }; })
+    drafts: drafts.map(function (d) {
+      var o = { name: d.name, text: d.text };
+      if (typeof d.paper === 'string' && d.paper) o.paper = d.paper;
+      if (typeof d.venue === 'string') o.venue = d.venue;
+      return o;
+    })
   }, null, 2) + '\n';
 }
 
@@ -5963,7 +6179,10 @@ function readDraftsFile(content, fileName) {
     var drafts = [];
     v.drafts.forEach(function (d) {
       if (d && typeof d.text === 'string') {
-        drafts.push({ name: cleanDraftName(d.name) || 'Imported', text: d.text.replace(/\r\n?/g, '\n') });
+        var got = { name: cleanDraftName(d.name) || 'Imported', text: d.text.replace(/\r\n?/g, '\n') };
+        if (cleanDraftName(d.paper)) got.paper = cleanDraftName(d.paper);
+        if (typeof d.venue === 'string' && (d.venue === '' || venueById(d.venue))) got.venue = d.venue;
+        drafts.push(got);
       }
     });
     return { drafts: drafts, error: drafts.length ? null : 'This file has no drafts.' };
@@ -5972,25 +6191,34 @@ function readDraftsFile(content, fileName) {
   return { drafts: [{ name: cleanDraftName(base) || 'Imported', text: content.replace(/\r\n?/g, '\n') }], error: null };
 }
 
-/* What an import adds to `existing` drafts ({name, text}; text null when it
-   is not known here): each incoming draft whose text no known draft has yet,
-   under a name no draft has yet. Nothing is ever replaced; `same` counts
-   the drafts already there. */
+/* What an import adds to `existing` drafts ({name, text, scope?}; text null
+   when it is not known here): each incoming draft ({name, text, scope?, …})
+   whose text no known draft has yet, under a name no draft of its scope has
+   yet. The scope is the paper a draft is (or goes) in, so paper 2's "R1"
+   stays "R1" beside paper 1's; texts are compared across scopes, so an Export
+   imported again adds nothing. Nothing is ever replaced; `same` counts the
+   drafts already there and `sameIn` lists the scope each one is in. Other
+   fields of an incoming draft are kept. */
 function importPlan(existing, incoming) {
-  var texts = Object.create(null), names = Object.create(null), add = [], same = 0;
+  var texts = Object.create(null), names = Object.create(null), add = [], same = 0, sameIn = [];
+  var scopeOf = function (d) { return typeof d.scope === 'string' ? d.scope : ''; };
   existing.forEach(function (d) {
-    if (typeof d.text === 'string') texts['t' + d.text] = true; /* null: a text not known here */
-    names[d.name.toLowerCase()] = true;
+    if (typeof d.text === 'string') texts['t' + d.text] = { scope: scopeOf(d) }; /* null: a text not known here */
+    names[scopeOf(d) + '\n' + d.name.toLowerCase()] = true;
   });
   incoming.forEach(function (d) {
-    if (texts['t' + d.text]) { same++; return; }
-    texts['t' + d.text] = true;
-    var name = d.name, n = 2;
-    while (names[name.toLowerCase()]) name = d.name.slice(0, 34) + ' (' + n++ + ')';
-    names[name.toLowerCase()] = true;
-    add.push({ name: name, text: d.text });
+    var known = texts['t' + d.text];
+    if (known) { same++; sameIn.push(known.scope); return; }
+    texts['t' + d.text] = { scope: scopeOf(d) };
+    var name = d.name, n = 2, scope = scopeOf(d);
+    while (names[scope + '\n' + name.toLowerCase()]) name = d.name.slice(0, 34) + ' (' + n++ + ')';
+    names[scope + '\n' + name.toLowerCase()] = true;
+    var out = {};
+    Object.keys(d).forEach(function (k) { out[k] = d[k]; });
+    out.name = name;
+    add.push(out);
   });
-  return { add: add, same: same };
+  return { add: add, same: same, sameIn: sameIn };
 }
 
 /* ---- sections of a comment (pure) ----
