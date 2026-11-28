@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.14.0 (unreleased)
+## 3.14.0 (2026-11-28)
 
 ### Ready to post
 - A *Ready to post* panel lists every draft of the open paper with its length against the
