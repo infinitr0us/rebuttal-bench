@@ -2738,19 +2738,34 @@ function analyzeText(src, opts) {
 
   /* 7. Indented text that Marked turns into a code block. Only TeX-looking
         blocks are flagged, and only unmistakable TeX gets the unindent fix, so
-        a deliberate shell snippet with $HOME or a Windows path is left alone. */
-  var TEXISH = /\$[^$\n]+\$|\\[a-zA-Z]{2,}/;
+        a deliberate shell snippet with $HOME or a Windows path is left alone.
+        Two prices on one line ("$7.50 each and $5.00") are not TeX either. */
   /* Positive evidence for the fix: a control word taking an argument, a
      subscript or a superscript, or one inside $…$ ("dir src\utils" is not). */
   var TEXWORD = /\\[a-zA-Z]{2,}\s*[{_^]|\$[^$\n]*\\[a-zA-Z]{2,}[^$\n]*\$/;
   /* Windows paths are not TeX: C:\data, \\server\share, src\utils\run.py. */
   var WINPATH = /[A-Za-z]:\\[^\s"'`]*|\\\\[^\s"'`\\]+\\[^\s"'`]*|[\w.-]+(?:\\[\w.-]+)+\.[A-Za-z0-9]{1,5}\b/g;
+  function indentedTeXish(text) {
+    if (/\\[a-zA-Z]{2,}/.test(text)) return true;
+    var re = /\$([^$\n]+)\$/g, m;
+    while ((m = re.exec(text))) {
+      var inner = m[1], after = text.slice(re.lastIndex);
+      /* Skip dollar pairs formed by two prices on one line, e.g.
+         "$7.50 each and $5.00" or "$7.50 = $15.00". */
+      var pricePair = !/[\\^_{}]/.test(inner) &&
+        /^\d[\d,.]*[kKmMbB]?(?:\s|[.,;:\-–—\/~])/.test(inner) &&
+        /[\s\-–—\/~+×=]$/.test(inner) &&
+        /^\d/.test(after);
+      if (!pricePair) return true;
+    }
+    return false;
+  }
   var sawExactIndented = false;
   markedRanges.forEach(function (r) {
     if (r.type !== 'code' || !r.token || r.token.codeBlockStyle !== 'indented') return;
     sawExactIndented = true;
     var body = src.slice(r.start, r.end), texBody = body.replace(WINPATH, ' ');
-    if (!TEXISH.test(texBody)) return;
+    if (!indentedTeXish(texBody)) return;
     var unindent = [], pos = r.start, lines = body.split('\n');
     for (var k = 0; k < lines.length; k++) {
       var lead = lines[k].match(/^(?: {1,4}|\t)/);
@@ -2766,7 +2781,7 @@ function analyzeText(src, opts) {
   if (!sawExactIndented && !model) {
     fallbackCodeRanges(src).forEach(function (r) {
       var raw = src.slice(r.start, r.end);
-      if (/^(?: {4}|\t)/.test(raw) && TEXISH.test(raw.replace(WINPATH, ' '))) {
+      if (/^(?: {4}|\t)/.test(raw) && indentedTeXish(raw.replace(WINPATH, ' '))) {
         push('warn', 'Indented text may be a code block',
           'Markdown can treat this indentation as code, which MathJax skips. Remove the leading indentation when the TeX should render.',
           r.start, Math.min(r.end, r.start + 8));
@@ -2854,14 +2869,20 @@ function analyzeText(src, opts) {
         struck[r.start] = struck[r.end - 1] = standalone ? 'standalone' : 'tie';
       } else if (r.type === 'html' && !codeMask[r.start]) {
         /* An inline token is one tag. A block such as <details> can contain
-           several tags and comments; quoted attributes can contain '>'. */
+           several tags and comments; quoted attributes can contain '>'. Only
+           real HTML elements and comments are flagged; invented angle-bracket
+           tokens such as <think> or <Goal> are meant to appear as typed. */
+        var htmlTags = /^(?:a|abbr|b|big|blockquote|br|center|cite|code|col|colgroup|dd|del|details|dfn|div|dl|dt|em|font|h[1-6]|hr|i|img|ins|kbd|li|mark|ol|p|pre|q|s|samp|small|span|strike|strong|sub|summary|sup|table|tbody|td|tfoot|th|thead|tr|tt|u|ul|var|wbr)$/;
         var tagRe = /<!--(?:-?>|[\s\S]*?(?:-->|$))|<\/?([A-Za-z][\w:-]*)(?=[\s/>])(?:[^<>"']|"[^"]*"|'[^']*')*>|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<![A-Za-z]+\s[^>]*>/g;
         var raw = src.slice(r.start, r.end), m;
         while ((m = tagRe.exec(raw))) {
           var start = r.start + m.index, end = r.start + tagRe.lastIndex;
-          if (!protectedText[start]) tags.push({ start: start, end: end, raw: m[0],
-            name: (m[1] || '').toLowerCase(), inline: r.inline });
-          protect(start, end);
+          var tagName = (m[1] || '').toLowerCase();
+          if (m[0].slice(0, 4) === '<!--' || htmlTags.test(tagName)) {
+            if (!protectedText[start]) tags.push({ start: start, end: end, raw: m[0],
+              name: tagName, inline: r.inline });
+            protect(start, end);
+          }
         }
       } else if (r.type === 'image' && !codeMask[r.start]) {
         if (r.token.href.indexOf('/images/') !== 0) images.push(r);
@@ -2942,20 +2963,72 @@ function analyzeText(src, opts) {
       }
     }
 
-    /* 13. The mirrored h4–h6 rules set 12px and font-weight 400. */
+    /* 13. The mirrored h4–h6 rules set 12px and font-weight 400. A heading
+           whose whole visible content is already bold (allowing spaces and
+           punctuation beside the bold) does not look like plain body text. */
+    function headingIsBold(tokens) {
+      if (!Array.isArray(tokens) || !tokens.length) return false;
+      var hasStrong = false;
+      for (var i = 0; i < tokens.length; i++) {
+        var tk = tokens[i];
+        if (tk.type === 'strong') {
+          if (tk.text && /\S/.test(tk.text)) hasStrong = true;
+        } else if ((tk.type === 'em' || tk.type === 'del' || tk.type === 'link') && headingIsBold(tk.tokens)) {
+          hasStrong = true;
+        } else if ((tk.type === 'text' || tk.type === 'escape') && /^[\s.,:;!?\-–—/()\[\]"'“”‘’]*$/.test(tk.text || '')) {
+          /* spaces or punctuation outside the bold */
+        } else {
+          return false;
+        }
+      }
+      return hasStrong;
+    }
     headings.forEach(function (r) {
+      if (headingIsBold(r.token.tokens)) return;
       var marker = /^ *(#{4,6})/.exec(r.token.raw);
       if (marker) push('note', 'This heading looks like body text',
         'OpenReview uses the body text’s size and regular weight for level 4–6 headings. Use <code>###</code> or bold text for more emphasis.',
         r.start + marker[0].length - marker[1].length, r.start + marker[0].length);
     });
 
-    /* 14. Pasted LaTeX prose. Work within each remaining text run so that
-           braces and quote marks cannot pair through code, math or a link
-           destination. Autolinked URLs may still be arguments of \href/\url. */
+    /* 14. Pasted LaTeX prose and undelimited math commands. Work within each
+           remaining text run so that braces and quote marks cannot pair through
+           code, math or a link destination. Autolinked URLs may still be
+           arguments of \href/\url. */
+    var MATH_CMD_LIST = 'alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega|' +
+      'varepsilon|vartheta|varkappa|varpi|varrho|varsigma|varphi|' +
+      'Gamma|Delta|Theta|Lambda|Xi|Pi|Sigma|Upsilon|Phi|Psi|Omega|' +
+      'varGamma|varDelta|varTheta|varLambda|varXi|varPi|varSigma|varUpsilon|varPhi|varPsi|varOmega|' +
+      'frac|dfrac|tfrac|sqrt|sum|prod|int|oint|lim|limsup|liminf|log|ln|exp|max|min|arg|sup|inf|det|' +
+      'leq|le|geq|ge|neq|ne|approx|sim|simeq|equiv|propto|in|notin|subset|subseteq|supset|supseteq|' +
+      'cup|cap|setminus|cdot|cdots|ldots|times|div|pm|mp|infty|partial|nabla|forall|exists|top|bot|' +
+      'mathbf|mathbb|mathcal|mathrm|mathit|boldsymbol|hat|tilde|bar|vec|dot|ddot|overline|widehat|widetilde|' +
+      'left|right|langle|rangle|lVert|rVert|mid|to|rightarrow|leftarrow|Rightarrow|mapsto|operatorname|star|circ|ell';
+    var mathCmdRe = new RegExp('\\\\(' + MATH_CMD_LIST + ')(?![A-Za-z])', 'g');
+    var mathCmdExact = new RegExp('^(?:' + MATH_CMD_LIST + ')$');
+    /* Skip formulas Check 2 already flagged as \(…\)/\[…\], and formulas whose
+       $…$ delimiters were stolen by an already-reported cut or currency span. */
+    var degradedRanges = [];
+    var currencyStarts = Object.create(null), unpairedDollars = Object.create(null);
+    issues.forEach(function (iss) {
+      if (/loses its MathJax delimiters$/.test(iss.title) && iss.fix && iss.fix.edits.length === 2) {
+        degradedRanges.push({ start: iss.fix.edits[0].start, end: iss.fix.edits[1].end });
+      } else if (iss.title === 'Currency dollars pair into a formula') {
+        currencyStarts[iss.start] = true;
+      } else if (iss.title === 'Unpaired $') {
+        unpairedDollars[iss.start] = true;
+      }
+    });
+    var degradedMask = makeMask(src.length, degradedRanges);
+    var shiftedOpen = Object.create(null), shiftedClose = Object.create(null);
+    spans.forEach(function (sp) {
+      if (sp.cut || currencyStarts[sp.start]) shiftedOpen[sp.end] = true;
+      if (sp.cut) shiftedClose[sp.start] = true;
+    });
+    Object.keys(unpairedDollars).forEach(function (k) { shiftedClose[k] = true; });
     function checkRun(start, end, literalBlock) {
       var raw = src.slice(start, end), m;
-      var commands = /\\(textbf|textit|emph|texttt|url|href|underline|cite(?:author|year|p|t)?)(?![A-Za-z])/g;
+      var commands = /\\(textbf|textit|emph|texttt|url|href|underline|footnote|cite(?:author|year|p|t)?)(?![A-Za-z])/g;
       var closeBrace;
       function argument(after) {
         while (after < raw.length && /\s/.test(raw[after])) after++;
@@ -2982,6 +3055,7 @@ function analyzeText(src, opts) {
         }
         var detail = 'OpenReview displays this LaTeX command in the prose. Markdown can express the formatting.';
         if (/^cite/.test(cmd)) detail = 'OpenReview has no bibliography for a comment. Write the reference out so reviewers can identify the work.';
+        else if (cmd === 'footnote') detail = 'OpenReview does not support footnotes and displays this command as typed. Write the note inline.';
         else if (cmd === 'underline') detail = 'Markdown has no underline syntax. Use bold or italics if the text needs emphasis.';
         else if (!arg || (cmd === 'href' && !second)) detail = 'This command needs balanced braced arguments in the same text run. Check the braces before converting it to Markdown.';
         else if (!literalBlock) {
@@ -2991,6 +3065,66 @@ function analyzeText(src, opts) {
         }
         push('warn', '\\' + cmd + ' is shown outside math', detail, at, last,
           out === null ? null : manual(cmd === 'url' ? 'keep the URL' : 'convert to Markdown', at, last, out));
+      }
+      if (!literalBlock) {
+        var shiftedEnd = -1;
+        if (shiftedOpen[start] && src[start - 1] === '$') {
+          if (shiftedClose[end] && src[end] === '$') shiftedEnd = end;
+          else {
+            for (var sd = start; sd < end; sd++) {
+              if (src[sd] === '$' && shiftedClose[sd]) { shiftedEnd = sd; break; }
+            }
+          }
+        }
+        var hits = [];
+        mathCmdRe.lastIndex = 0;
+        while ((m = mathCmdRe.exec(raw))) {
+          var mAt = start + m.index, mEnd = m.index + m[0].length;
+          if (mAt < shiftedEnd || urlMask[mAt] || degradedMask[mAt] || countBackslashesBefore(src, mAt) % 2) continue;
+          /* Skip path-like runs: C:\top, \\srv\share\top, src\min\run.py, \theta\data. */
+          var tokS = m.index, tokE = mEnd;
+          while (tokS > 0 && !/[\s"'`()[\]{},;]/.test(raw[tokS - 1])) tokS--;
+          while (tokE < raw.length && !/[\s"'`()[\]{},;]/.test(raw[tokE])) tokE++;
+          var token = raw.slice(tokS, tokE);
+          if (/^[A-Za-z]:\\|^\\\\/.test(token) || /^[\w.-]+(?:\\[\w.-]+)+\.[A-Za-z0-9]{1,5}$/.test(token)) continue;
+          var nextCmd = raw[mEnd] === '\\' ? /^\\([A-Za-z]+)(?![A-Za-z])/.exec(raw.slice(mEnd)) : null;
+          if (raw[mEnd] === '\\' && !(nextCmd && mathCmdExact.test(nextCmd[1])) && /^\\[A-Za-z0-9._-]+/.test(raw.slice(mEnd))) continue;
+          var prevSeg = raw[m.index - 1] !== '_' ? /\\([A-Za-z0-9._-]+)$/.exec(raw.slice(tokS, m.index)) : null;
+          if (prevSeg && !mathCmdExact.test(prevSeg[1])) continue;
+          /* Skip a command quoted by itself as a macro name, e.g. the macro "\alpha". */
+          var ql = src[mAt - 1] || '', qr = src[start + mEnd] || '', qr2 = src[start + mEnd + 1] || '';
+          var pair = ql === '"' ? '"' : ql === '\u201c' ? '\u201d' : ql === "'" ? "'" : ql === '\u2018' ? '\u2019' : '';
+          if (pair && (qr === pair || (/[.,;:!?]/.test(qr) && qr2 === pair))) continue;
+          var ext = mEnd;
+          for (var ar = 0; ar < 2; ar++) {
+            if (raw[ext] !== '{') break;
+            var ma = argument(ext);
+            if (!ma) break;
+            ext = ma.end;
+          }
+          if ((raw[ext] === '_' || raw[ext] === '^') && raw[ext + 1] === '{') {
+            var sc = argument(ext + 1);
+            if (sc) ext = sc.end;
+          }
+          hits.push({ name: m[1], start: m.index, end: ext });
+        }
+        /* Group adjacent commands belonging to one expression into a single card. */
+        for (var hi = 0; hi < hits.length; hi++) {
+          var grp = hits[hi], gEnd = grp.end;
+          while (hi + 1 < hits.length) {
+            var nx = hits[hi + 1];
+            if (nx.start < gEnd) { gEnd = Math.max(gEnd, nx.end); hi++; continue; }
+            var gap = raw.slice(gEnd, nx.start);
+            if (gap.length <= 24 && !/[\n.;:!?]/.test(gap) &&
+                !/[A-Za-z]{2,}/.test(gap.replace(/\\[A-Za-z]+/g, ' '))) {
+              gEnd = Math.max(gEnd, nx.end);
+              hi++;
+            } else break;
+          }
+          push('warn', '\\' + grp.name + ' is shown outside math',
+            'OpenReview shows this TeX as typed outside math delimiters. Put the expression between <code>$…$</code> so MathJax typesets it.',
+            start + grp.start, start + gEnd);
+        }
       }
       var quotes = /``([^`\n]+?)''/g;
       while ((m = quotes.exec(raw))) {
@@ -3003,6 +3137,11 @@ function analyzeText(src, opts) {
         var pos = start + p, left = src[pos - 1], right = src[pos + 1];
         if (!left || !right || /[\s~/]/.test(left) || /[\s~/]/.test(right) ||
             struck[pos] === 'standalone' || urlMask[pos] || countBackslashesBefore(src, pos) % 2) continue;
+        /* A bare tilde outside strikethrough is only a LaTeX tie between a
+           word of at least two letters (optionally with a period) and a label,
+           not an approximation or numeric range such as (~2GB) or 2K~4K. */
+        if (!struck[pos] && (!(/(?:^|[^A-Za-z0-9])[A-Za-z]{2,}\.?$/.test(raw.slice(0, p))) ||
+            !/[0-9A-Za-z\\(\[]/.test(right))) continue;
         push(struck[pos] ? 'err' : 'warn', struck[pos] ? 'LaTeX tie became strikethrough' : 'LaTeX tie is shown as a tilde',
           struck[pos] ? 'Marked paired two single tildes and crossed out the intervening text. Use a space for a LaTeX tie.'
             : 'A LaTeX tie in prose appears as a tilde. Use a space between the words.',
@@ -3069,17 +3208,41 @@ function analyzeText(src, opts) {
     /* a cross-reference to fill in: "Table X", "Fig. ??", "Section~XX", "Fig.X" */
     { re: /\b(?:(?:Tables?|Figures?|Sections?|Appendix|Equations?|Theorems?|Lemmas?|Lines?|Pages?)(?:[ \t]|~)+|(?:Tab|Fig|Sec|App|Eqs?|Thm)\.(?:[ \t]|~)*)(?:X{1,3}|\?{1,3})(?![\w?])/g, math: false },
     { re: /\bReviewer[ \t]+(?:X|XXXX|\?+)(?![\w?])/g, math: false },
-    { re: /\b(?:TODO|TBD|TBA|FIXME|[Ff]ixme)\b/g, math: true },
+    /* Skip hyphenated compounds such as "TBD-based tracking" (track-before-detect). */
+    { re: /\b(?:(?:TODO|TBD|TBA)(?!-[A-Za-z])|FIXME|[Ff]ixme)\b/g, math: true },
     { re: /\bXXX+\b/g, math: false },
     /* a number to fill in: "XX.X", "x.xx", "+X.X", "XX%" and "XX\%", also
        at the end of a sentence */
     { re: /(^|[^\w.])(X{1,3}(?:\.X{1,3})+|x{2,3}\.x{1,3}|x\.x{2,3}|X{1,3}(?=[ \t]?\\?%))(?!\w|\.\w)/g, math: true, group: 2 },
-    { re: /\?{2,}/g, math: false },
+    { re: /\?{2,}/g, math: false, qq: true },
     { re: /\[(?:cite|citation(?: needed)?|refs?|references?|todo|tbd|placeholder|(?:insert|add|fill in)\b[^\]\n]{0,60})\](?![(\[:])/gi, math: false },
     /* what a template or a chat assistant leaves for the author: "[Your Name]" */
     { re: /\[(?:insert )?your (?:full )?(?:names?|affiliations?|institution|e-?mail|title|signature)\](?![(\[:])/gi, math: false },
     { re: /\blorem ipsum\b/gi, math: true }
   ];
+  /* A placeholder quoted on its line ("We will correct \"Figure ??\" to
+     \"Figure 2\".") is being cited, not left unfilled. */
+  function inLineQuotes(ps, pe) {
+    var ls = src.lastIndexOf('\n', ps - 1) + 1;
+    var le = src.indexOf('\n', pe);
+    if (le < 0) le = src.length;
+    var before = src.slice(ls, ps), after = src.slice(pe, le);
+    if ((before.split('"').length - 1) % 2 && after.indexOf('"') >= 0) return true;
+    if (before.lastIndexOf('\u201c') > before.lastIndexOf('\u201d') && after.indexOf('\u201d') >= 0) return true;
+    var openCurly = false, openStraight = false;
+    for (var i = 0; i < before.length; i++) {
+      var ch = before[i], prev = before[i - 1] || '', next = src[ls + i + 1] || '';
+      if (ch === '\u2018') openCurly = true;
+      else if (ch === '\u2019' && !/[A-Za-z]/.test(next)) openCurly = false;
+      else if (ch === "'") {
+        if (!openStraight && (!prev || /[\s(\[]/.test(prev)) && !/\s/.test(next)) openStraight = true;
+        else if (openStraight && !/[A-Za-z]/.test(next)) openStraight = false;
+      }
+    }
+    if (openCurly && /\u2019(?![A-Za-z])/.test(after)) return true;
+    if (openStraight && /'(?![A-Za-z])/.test(after)) return true;
+    return false;
+  }
   var placed = new Uint8Array(src.length);
   PLACEHOLDERS.forEach(function (p) {
     var pm;
@@ -3088,6 +3251,10 @@ function analyzeText(src, opts) {
       var ps = pm.index + (p.group ? pm[1].length : 0), pe = ps + (p.group ? pm[p.group] : pm[0]).length;
       if (pe === ps) { p.re.lastIndex++; continue; }
       if (skipText[ps] || placed[ps] || (!p.math && mathMask[ps])) continue;
+      /* Emphatic "??" directly after a letter or digit at the end of a question ("feasible??"). */
+      if (p.qq && pe - ps === 2 && ps > 0 && WORD_CHAR.test(src[ps - 1]) &&
+          (pe === src.length || !WORD_CHAR.test(src[pe]))) continue;
+      if (inLineQuotes(ps, pe)) continue;
       for (var k = ps; k < pe; k++) placed[k] = 1;
       push('warn', 'Placeholder left in the text',
         '“' + escHtml(src.slice(ps, pe)) + '” looks like a placeholder. Reviewers would see it as typed: fill it in or remove it.',
