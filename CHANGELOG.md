@@ -7,24 +7,32 @@
   COLM). About one in eight of those with math had a formula that OpenReview showed differently
   from what was typed, and the cards pointed at most of them. It also found Fix all rewriting
   formulas that already showed what their authors meant, in 10 of the 126 responses it changed,
-  and a release review found ten more such inputs. Fix all now leaves these alone:
-  - both dollar signs escaped around a formula, `(\$\tilde{P}\$)` or `\$n=16\$`, are a formula;
-    only prices between escaped signs are currency. With one sign of a pair escaped, the fix
-    waits for your click;
-  - bars composed into a double bar (`\|\|h\|\|`), `\&` as the column separator of an
-    alignment, and braces that group (`R^\{P\}`, `\sqrt\{n+1\}`, `\frac\{a\}\{b\}`,
-    `\mathbf{x\}`) keep their escapes, while set braces (`\{x_i\}`, `\in \{0,1\}`) are still
-    repaired;
-  - a `\|` that may be an absolute value, a conditioning bar or a KL divergence's separator
-    (`\|x\|`, `P(A \| B)`, `[q\|p]`) gets a fix you click; only a scripted or sized norm
-    (`\|v\|_2`, `\left\|`) is repaired unattended, on both sides;
+  and two review rounds found more such inputs. The rule now: **Fix all repairs a Markdown-eaten
+  escape unattended only where the bare character cannot be what you meant.** A visible comma
+  instead of `\,`, a stray `#` or `&` (TeX errors) and a `%` (a comment) are still repaired;
+  `{`, `}` and `|` are valid TeX with other meanings, so their fixes mostly wait for your click:
+  - a `\|` always does: it can be a norm, an absolute value (`\|r\|^2` of a scalar), a
+    conditioning or evaluation bar (`P(A \big\| B)`, `F(t)\big\|\_{t=b}`) or a KL divergence's
+    separator (`[q\|p]`), and its card says which TeX symbol the fix gives;
+  - set braces are repaired only where only a set can open (`$\{x_i\}_{i=1}^N$`, `S = \{…\}`,
+    `\in \{0,1\}`, `\left\{`) or when a brace has no partner; elsewhere (`\bigcup_i\{x_i\}`)
+    the card's fix waits, and braces that group (`R^\{P\}`, `\sqrt\{n+1\}`, `\label\{eq:x\}`,
+    `\mathbf{x\}`) get no card at all;
+  - both dollar signs escaped around a formula (`(\$\tilde{P}\$)`, `\$n=16\$`, `\$16 GB\$`) are
+    a formula; only prices between escaped signs, the second leading into the next amount, are
+    currency. With one sign of a pair escaped, the fix waits for your click;
+  - bars composed into a double bar (`\|\|h\|\|`) and `\&` as the column separator of an
+    alignment keep their escapes;
   - emphasis between two prices (`**$484**) vs. B (**$1,500**`, `__$5__ versus __$8__`) cuts no
     formula, and escaping emphasis inside `\text{}` is manual, since the stars would then show.
+  On the 1,300 responses Fix all now changes 103 (rather than 126), none of them for the worse;
+  24 keep a card with a one-click fix instead.
 - Fourteen error cards that were wrong are gone; a lone `\$`, which shows as typed for now, is a
   warning.
-- A bare `%` right after a number in a formula (`$78.1%$`, `$\text{top 10%}$`) gets a card and a
-  fix: MathJax reads it as a TeX comment and drops the sign. A `%` followed by words, as in a
-  comment line copied from the paper, stays a comment, and so does one in `\verb`.
+- A bare `%` right after a number that ends a formula or comes before a closing bracket
+  (`$78.1%$`, `$\text{top 10%}$`) gets a card and a fix: MathJax reads it as a TeX comment and
+  drops the sign. Anything else after it, as in a comment copied from the paper (`x=1%\quad + 2`,
+  `% \vspace{-1mm}`, a line-joining `%`), stays a comment, and so does a `%` in `\verb`.
 - Math commands typed without delimiters in prose (`We use \alpha=10`, `c_\phi`, `\arg\max_i`)
   and `\footnote{…}` get a card: OpenReview shows them as typed. Adjacent commands of one
   expression share a card; paths (`results\min`), a macro quoted by name and quotes of the

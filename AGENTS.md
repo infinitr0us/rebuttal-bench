@@ -90,7 +90,8 @@ text, discard the grid and use the regular text importer.
   more often), check 13 not for a heading already all bold (`headingIsBold`), check 14's tie only
   between a word and its label (`Table~1`, not `(~2GB)`) and, besides text commands and
   `\footnote`, math-only commands outside math (`MATH_CMD_LIST`; paths, a command right after a
-  word (`results\min`, unlike `T\geq`), quoted names and quotes of the review skipped, adjacent
+  word with a small letter (`results\min`, unlike `T\geq` or `RMSE\leq`), quoted names and
+  quotes of the review skipped, adjacent
   commands grouped, nothing inside a span check 2 reports or one whose `$` a cut or currency
   span took). That last part reads the earlier cards by title, so keep those titles. Check 7
   does not take two prices on a line for TeX (and scans on from the second price's sign, which
@@ -165,16 +166,22 @@ text, discard the grid and use the regular text importer.
 - "Correctly" means what the author meant, which the source often shows: a field audit on
   1,300 real author responses (`reviews/2026-11-27/codex-field-audit`, git-ignored) found Fix
   all damaging 10 of the 126 it changed, by repairing escapes that already gave MathJax the
-  intended TeX; the release review (`reviews/2026-11-27/codex-review-312`) found ten more.
-  `slashedDollar`, `meantAsFormula`, `shieldMeant` and `opensGroup` in `analyzeText` hold what
-  they taught: both signs escaped around anything but prices are a formula; bars composed into
-  `||`, `\&` in an alignment and grouping braces (matched with a bare brace, or after `^`, `_`,
-  `}`, `]` or an argument-taking command in `ARG_CMD`) are meant as typed; a pair of prices
-  (an amount after the first sign, an amount or a backslash after the second) or of escaped
-  signs that emphasis "cuts" was never a formula. A consumed `\|` is ambiguous (absolute value,
-  conditioning bar, KL separator): its fix is automatic only for an even number of bars with a
-  script or a size, decided per formula so a pair is never fixed on one side. A bare `%` gets a
-  card only right after a digit with no words after it, never in `\verb`.
+  intended TeX; two review rounds (`reviews/2026-11-27/codex-review-312`, `codex-recheck-312`)
+  found seventeen more, each a hole in a rule that guessed. What ended it is the rule to keep:
+  **an escape Markdown ate is repaired unattended only where the bare character cannot be what
+  the author meant** (`,` `;` `:` `!` show as punctuation, `#` and a stray `&` are TeX errors,
+  `%` is a comment). `{`, `}` and `|` are valid TeX with other meanings: a `\|` fix is always
+  manual (no context made the norm certain), a brace fix is automatic only as a set
+  (`setBraces`: a pair opening at the formula's start, after `= ( , : | < > +` or a relation or
+  size in `SET_PREV`, or a brace without partner). Do not add context rules to make more of them
+  automatic; a manual card costs the author one click. `slashedDollar`, `meantAsFormula`,
+  `shieldMeant` and `opensGroup` hold the rest: both escaped signs are currency only around
+  prices with the second sign leading into the next amount; bars composed into `||`, `\&` in an
+  alignment and grouping braces (matched with a bare brace, after `^` or `_`, or after a command
+  in `ARG_CMD`) get no card; a pair of prices (an amount after the first sign, anything but a
+  close after the second), of escaped signs, or with two prose words and no TeX, is no formula
+  for emphasis to cut. A bare `%` gets a card only after a digit and before the formula's end or
+  a closing bracket, never in `\verb` or at a line end with more lines after it.
   `tests/field-fixall.test.js` holds each case and its near miss, compared with the independent
   MathJax oracle.
 - **Measure every change to a check on real text before review**: `npm run corpus --
