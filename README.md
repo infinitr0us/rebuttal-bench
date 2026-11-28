@@ -229,6 +229,9 @@ npm install
 npm test                          # regression cases, the example, page checks, short fuzz
 npm run fuzz -- 20000 42 blocks   # long fuzz: iterations, seed, alphabet (inline | blocks)
 npm run smoke                     # headless Chrome/Edge: undo, jump, status bar, persistence, copy
+npm run corpus -- texts.jsonl --baseline summary.json
+                                  # the analyzer on real texts ({id, text} per line): cards per
+                                  #   check, and what appeared or disappeared since a run
 npm run check-upstream            # did openreview-web change anything the page mirrors?
                                   #   exit 1: something changed; 2: the check itself failed
 ```
@@ -241,6 +244,7 @@ rebuttal-bench.html        the app (single self-contained file, no build step)
 index.html                 redirects the GitHub Pages site root to the app
 tests/
   regression.test.js       hazard + Fix-all cases, broken and correct input
+  field-fixall.test.js     Fix all on what real authors write: left alone, or still repaired
   compact.test.js          compaction: what each trick saves, what it must leave alone
   table-import.test.js     imported tables, rendered cells, warnings and MathJax input
   compact-math.test.js     formula compaction against independently typeset MathML
@@ -265,6 +269,7 @@ tests/
   lib/fuzz.js              differential fuzzer (+ CLI)
 scripts/smoke.mjs          browser smoke test over the DevTools protocol
 scripts/check-upstream.mjs compares openreview-web against upstream/openreview-web.json
+scripts/corpus.mjs         replays the analyzer on a corpus of real texts (npm run corpus)
 AGENTS.md                  engineering notes for contributors and coding agents
 .github/workflows/test.yml CI: npm test and the browser smoke test on every push and pull request
 .github/workflows/upstream.yml   weekly check-upstream, opening an issue on drift

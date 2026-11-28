@@ -2,6 +2,26 @@
 
 ## 3.12.0 (unreleased)
 
+### Checked on real author responses
+- A field audit ran the analyzer on 1,300 public author responses (ICLR, NeurIPS, ICML, TMLR,
+  COLM). About one in eight of those with math had a formula that OpenReview showed differently
+  from what was typed, and the cards pointed at most of them. It also found Fix all rewriting
+  formulas that already showed what their authors meant, in 10 of the 126 responses it changed.
+  Fix all now leaves these alone:
+  - both dollar signs escaped around TeX, `(\$\tilde{P}\$)`, are a formula, not two prices;
+    with only one of a pair's signs escaped, the fix waits for your click;
+  - bars composed into a double bar (`\|\|h\|\|`), `\&` as the column separator of an
+    alignment, and braces that group (`R^\{P\}`, `\mathbf{x\}`) keep their escapes, while set
+    braces (`\{x_i\}`, `\in \{0,1\}`) and a single `\|` are still repaired;
+  - emphasis between two prices (`**$484**) vs. B (**$1,500**`) cuts no formula, and escaping
+    emphasis inside `\text{}` is manual, since the stars would then show.
+- Fourteen error cards that were wrong are gone; a lone `\$`, which shows as typed for now, is a
+  warning.
+- A bare `%` after a number in a formula (`$78.1%$`) gets a card and a fix: MathJax reads it as a
+  TeX comment and drops the sign. A `% \vspace{-1mm}` line in a display stays a comment.
+- `npm run corpus` replays the analyzer on a corpus of texts and compares its cards with an
+  earlier run, so a change to any check can be measured on real text before review.
+
 ### Anonymity
 - The *Anonymity* panel keeps a private list of the words that would name you (your names,
   e-mail addresses, institution, lab, project and GitHub names, one per line). Each occurrence in

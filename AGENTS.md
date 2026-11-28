@@ -144,6 +144,20 @@ text, discard the grid and use the regular text importer.
   be intended) is **manual**: build it with `manual()` in `analyze`. `fixAllText` skips it, the
   Fix all button does not count it, and its card says "Not part of Fix all". Even so, verify
   in a regression case that the fixed text renders as promised.
+- "Correctly" means what the author meant, which the source often shows: a field audit on
+  1,300 real author responses (`reviews/2026-11-27/codex-field-audit`, git-ignored) found Fix
+  all damaging 10 of the 126 it changed, by repairing escapes that already gave MathJax the
+  intended TeX. `slashedDollar`, `meantAsFormula` and `shieldMeant` in `analyzeText` hold what
+  it taught: both signs escaped around TeX are a formula; bars composed into `||`, `\&` in an
+  alignment and grouping braces (`^\{`, a `\}` closing a bare `{`) are meant as typed; a pair
+  of prices or escaped signs that emphasis "cuts" was never a formula. `tests/field-fixall.test.js`
+  holds each case and its near miss, compared with the independent MathJax oracle.
+- **Measure every change to a check on real text before review**: `npm run corpus --
+  <corpus.jsonl> --baseline <summary.json>` lists the cards that appeared and disappeared per
+  text. Use the audit's corpus with its `summary.json` and the 310 responses of
+  `reviews/2026-11-27/codex-review-310` (id field `note`; make a baseline with `RB_PAGE` set to
+  the page before the change). Read every card that appears or disappears, and replay Fix all
+  with `recheck-fixall.mjs` in the audit's folder.
 
 ## Formatted prose paste
 
