@@ -72,7 +72,7 @@ test('draftReadiness marks a draft with an error hazard as not ready, while warn
 test('draftReadiness counts check 17 placeholders and marks the draft not ready', () => {
   const r = plain(A.draftReadiness('We will report TODO and value TBD shortly.', { limit: 5000 }));
   assert.equal(r.placeholders, 2);
-  assert.ok(r.hazards.warn >= 2);
+  assert.deepEqual(r.hazards, { err: 0, warn: 0, note: 0 }); /* counted once, as placeholders */
   assert.equal(r.ready, false);
 });
 
@@ -80,7 +80,7 @@ test('draftReadiness counts check 21 identity matches and marks the draft not re
   const opts = { limit: 5000, analyze: { identity: A.identityTerms('Jane Doe\nAcmeLab') } };
   const bad = plain(A.draftReadiness('Jane Doe ran the AcmeLab ablation.', opts));
   assert.equal(bad.identity, 2);
-  assert.equal(bad.hazards.err, 2);
+  assert.equal(bad.hazards.err, 0); /* counted once, as identity matches */
   assert.equal(bad.ready, false);
 
   const clean = plain(A.draftReadiness('We ran the ablation.', opts));

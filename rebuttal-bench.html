@@ -532,7 +532,11 @@ window.MathJax = {
   .findmarks span { position: absolute; border-radius: 2px; background: rgba(255, 200, 0, 0.28); }
   .findmarks span.cur { background: rgba(255, 140, 0, 0.5); outline: 1px solid rgba(200, 100, 0, 0.8); }
   .findresults {
-    max-height: 150px;
+    /* An item of the pane's column: as a shrinking item it lost its room to
+       the editor (down to its padding), so it keeps its height, capped at a
+       share of the pane, and scrolls. */
+    flex: none;
+    max-height: min(150px, 22%);
     overflow-y: auto;
     padding: 6px 18px 8px;
     background: var(--head-bg);
@@ -7678,9 +7682,11 @@ function findInText(text, query, caseSensitive) {
 }
 
 /* Per-draft readiness summary for the Ready to post panel: counts trimmed
-   length, analyzer hazards (with check 17 placeholders and check 21 identity
-   matches broken out), review coverage when a review has points, and promises
-   by kind. MathJax typeset errors are excluded because they require a render. */
+   length, analyzer hazards, review coverage when a review has points, and
+   promises by kind. Check 17's placeholders and check 21's identity matches
+   have counts of their own and are left out of `hazards`, so the panel never
+   shows one card twice. MathJax typeset errors are excluded because they
+   require a render. */
 function draftReadiness(text, opts) {
   text = typeof text === 'string' ? text : '';
   opts = opts || {};
@@ -7692,11 +7698,11 @@ function draftReadiness(text, opts) {
   var hazards = { err: 0, warn: 0, note: 0 };
   var placeholders = 0, identity = 0;
   res.issues.forEach(function (iss) {
-    if (iss.sev === 'err') hazards.err++;
+    if (iss.title === 'Placeholder left in the text') placeholders++;
+    else if (iss.title === 'Words that name the authors') identity++;
+    else if (iss.sev === 'err') hazards.err++;
     else if (iss.sev === 'warn') hazards.warn++;
     else if (iss.sev === 'note') hazards.note++;
-    if (iss.title === 'Placeholder left in the text') placeholders++;
-    if (iss.title === 'Words that name the authors') identity++;
   });
   var coverage = null;
   if (typeof opts.review === 'string' && opts.review.trim()) {

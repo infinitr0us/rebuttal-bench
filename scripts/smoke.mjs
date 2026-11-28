@@ -2208,6 +2208,9 @@ try {
     const scopedFind = !findResults.hidden && resRows.length === 2 && resRows[0] === a1 && resRows[1] === a2 && !resRows.includes(b1) &&
       /open draft only/i.test(replaceOneBtn.title) && /open draft only/i.test(replaceAllBtn.title) &&
       !!findResults.querySelector('.findres-snip b');
+    /* The list is an item of the pane's column: it once shrank to its padding
+       while the editor kept the room. Two drafts' rows must show. */
+    const listShown = findResults.clientHeight >= Math.min(findResults.scrollHeight, 90);
     const unchangedBeforeClick = localStorage.getItem(PREFS_KEY) === prefs0 &&
       localStorage.getItem(PAPERS_KEY) === papers0 &&
       localStorage.getItem(DRAFTS_KEY) === list0 &&
@@ -2230,8 +2233,8 @@ try {
     readyBox.querySelector('summary').click(); await wait(30);
     switchDraft(home); window.confirm = () => true;
     [a1, a2, b1].forEach(deleteDraft); await wait(50);
-    return reloadedOpen && defaultOff && scopedFind && unchangedBeforeClick && selectedA2 && unchangedAfterClick && replacedOpenOnly ||
-      { reloadedOpen, defaultOff, scopedFind, resRows, unchangedBeforeClick, selectedA2, unchangedAfterClick, replacedOpenOnly };`);
+    return reloadedOpen && defaultOff && scopedFind && listShown && unchangedBeforeClick && selectedA2 && unchangedAfterClick && replacedOpenOnly ||
+      { reloadedOpen, defaultOff, scopedFind, resRows, listShown, unchangedBeforeClick, selectedA2, unchangedAfterClick, replacedOpenOnly };`);
 
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
