@@ -425,6 +425,85 @@ cases, Chrome probes); keep their rules:
   only a text another device writes there during that read can still be overwritten (reviews:
   `reviews/2026-11-25/codex-review-storage36`, `codex-recheck-storage36`).
 
+## Papers
+
+Drafts are grouped into papers (3.13; design note and Fable's review in
+`reviews/2026-11-28`, git-ignored). The rules that keep it safe:
+
+- **A paper owns no text.** It is a label on drafts in a record of its own, `PAPERS_KEY`
+  (`rebuttal-bench-papers`), which 3.12 never reads. Losing or rolling back the record can only
+  regroup drafts (all under *No paper* at worst). Papers code changes the draft list only through
+  `createDraft`, `switchDraft`, `renameDraft` and `deleteDraft`, and no action deletes more than
+  one draft. Not a field on the list's entries: 3.12's `parseDraftMeta`/`mergeDraftMeta`
+  rebuild entries and would strip it.
+- **The record** (pure: `parsePapers`, `mergePapers`, `setPaperEntry`, `serializePapers`,
+  `tests/papers.test.js`) is flat maps of single values, `{id: {v, at}}`: `name`, `venue` and
+  `limit` per paper, `member` per draft. The merge takes per id the entry later in
+  `entryAfter`'s order (`at`, then the value's canonical JSON): a last-writer-wins map with **no
+  deletions and no pruning**, so any order of merges converges (property tests check it). Do
+  not prune memberships by this window's draft list: that is a deletion other copies never hear
+  of (a draft re-created after a deletion elsewhere would lose its paper). A membership of a
+  draft the list lacks is inert in `papersView`; the size is bounded by a cap over the entries'
+  order (`PAPERS_KEPT`), which commutes with the merge. One value per entry, so a stale venue
+  change cannot undo a rename; `setPaperEntry` stamps `max(now, old.at + 1)`. Values, entry
+  fields and maps this version does not know are kept verbatim; a record with a higher
+  `version` is read and never written (`newer`). Text the author types (3.15's paper context)
+  goes under keys of its own.
+- **In this browser only**, like reviews and the word list: never the asynchronous store, and
+  Export and Import carry papers to another browser. A first version synced the record through
+  the store; its start-up either scoped by paper before a fresh device had its papers or held
+  the drafts' start for them, and holding it replayed stale draft text and hid a new tab
+  (`reviews/2026-11-28/codex-review-313`, `codex-recheck-313`). **Keep the record out of the
+  drafts' start-up**: the boot sequence and its watchdog are unchanged from 3.12.
+- **Reads and writes** (DOM, after `var draftReady`): `papers` is this window's merge of every
+  copy it has seen. `changePapers(fn)` is the only writer: it merges the copy stored now
+  (`storedValue`) and applies `fn`. `writePapersLocal` writes with its own
+  `localStorage.setItem` (never `fallbackSet`, whose `memNewer` copy and `retryLocalWrites` would
+  write an old record back over a newer one), and every write is the merge of this window's
+  record **with the disk's at that moment**, made only when the disk lacks something, so a write
+  never takes back another window's change or one from a later version, and a write refused for
+  space leaves the disk as it was. Storage events and `pageshow` (persisted) merge in through
+  `takeInPapers`, which then writes back the same way: localStorage has no compare-and-set, so
+  another window's write can overtake ours between read and write, and the write-back keeps the
+  record from depending on a window staying open. Each write only adds to the record on disk,
+  so the windows stop once it holds the union (one write each, measured). With papers in this
+  browser, the venue and limit controls wait for the drafts (`papersBeforeBoot`); without papers
+  they work before as in 3.12.
+- **The open paper is the open draft's** (`openPaper`): nothing else is stored. **No papers state
+  lives in `prefs`**, which every window writes whole. Every reader of the venue and limit goes
+  through `openVenue()` and `openLimit()` (`paperVenue`, `paperLimit`: a paper's own entries, else
+  inherited from `prefs`, so grouping changes no card); in a paper the venue select and the limit
+  input write the paper's entries and leave `prefs` byte for byte (a new venue resets the
+  paper's typed limit to `null`). Before `draftReady` they write `prefs`, as in 3.12.
+- After a delete, `neighbourInPaper` opens a draft of the same paper, and the confirm names the
+  paper: drafts of several papers share names.
+- **The interface** (`renderPaperRow`, `renderDraftTabs`): the paper row shows only once a paper
+  exists, *No paper* whenever it holds drafts (a draft another window adds, or one
+  `recoverDraftBodies` gives back, must never be out of sight), every paper's draft count and
+  over-limit mark. The draft last opened in each paper is remembered in memory only
+  (`lastDraftInPaper`). *New paper*, *Group by name* and Import reuse a paper of the same name
+  (`paperNamed`), and a rename to another paper's name is refused: Export names each draft's
+  paper and Import groups by name, so two papers of one name would merge in a backup. A draft is
+  created before its membership is written, so a failed papers write leaves it visible under *No
+  paper*.
+- **Scoped to the open paper**: `reviewerCards` (and so the pointer check), `renderPromises`,
+  `printDrafts(true)`, Compare's first group, new drafts and Split's parts. **Global**: Export
+  (the backup; each draft with `paper` and its paper's own `venue`, from `papersForOutput`, a
+  private merge), the anonymity word list, `prefs`.
+- **Import** captures its target when the file is chosen; a file's paper name picks or creates a
+  paper and never renames one or changes an existing paper's venue; `importPlan` gets `scope`
+  on both sides (names unique per paper, texts compared across papers) and its `sameIn` says
+  where present drafts live; *New paper from a file* puts every draft in the one new paper.
+  **Group by name** (`#groupDialog`, modal) proposes from `prefixGroups` over the *No paper*
+  drafts, writes only rows set to a paper in one `changePapers`, skips a draft that got a paper
+  meanwhile (a move made while the dialog was open is newer than the proposal), and renames
+  nothing.
+- Known limits, accepted: grouping is per browser (where the page runs with an asynchronous
+  store, another device shows the drafts under *No paper* until grouped there or imported); a
+  3.12 window's new drafts appear under *No paper*; two windows moving one draft, renaming one
+  paper or creating papers of one name at the same moment (the later write wins, or two papers
+  of one name).
+
 ## Splitting
 
 `splitComment(text, limit, {label})` (pure) cuts only where a comment can end: between top-level
@@ -612,7 +691,12 @@ with a stubbed asynchronous `window.storage`: keystrokes before a reload, a draf
 leaving before the restore), `/images/` attributes, the theme toggle, the Sections and Wording
 panels, find and replace (with its boxes and one undo), a double-click from the preview to the
 source, the spellcheck switch across a draft switch, the Anonymity panel (cards, its own undo,
-across a reload), the footer's report links (no draft text in them), and that no page errors
+across a reload), the footer's report links (no draft text in them), papers (the storage layer:
+a paper's venue and limit with `prefs` byte for byte, a delete staying in its paper, another
+window's change merged; the interface: the row, *New paper*, moving, renaming, scoped cards,
+Promises, Print and Compare, *Group by name*, Export and Import, a reload, the draft list byte
+for byte after every papers action; and the released 3.12 page in a second tab on the same
+storage, which shares localStorage across `file:` pages in Chrome), and that no page errors
 were thrown. Add a
 check there for any new browser-only behavior.
 

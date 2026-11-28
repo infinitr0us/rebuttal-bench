@@ -381,6 +381,80 @@ window.MathJax = {
   }
   .pane-head .hint { font-size: 11.5px; color: var(--dim); }
 
+  /* papers: a quieter segmented row above the draft tabs, shown once a paper exists */
+  .paperbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 18px;
+    background: var(--head-bg);
+    border-top: 1px solid var(--line);
+  }
+  .ptabs {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    min-width: 0;
+  }
+  .ptab {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--sans);
+    font-size: 11.5px;
+    line-height: 1.35;
+    padding: 2px 8px;
+    border-radius: 5px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--dim);
+    white-space: nowrap;
+  }
+  .ptab .pname { max-width: 18ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ptab .pcount { flex: none; font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+  .ptab .pover { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--err); }
+  .ptab.over .pcount { color: var(--err); }
+  .ptab[aria-selected="true"] {
+    background: var(--panel);
+    border-color: var(--line);
+    color: var(--text);
+    font-weight: 500;
+  }
+  .ptab:hover { color: var(--text); background: var(--btn-hover); }
+  .ptab[aria-selected="true"]:hover { background: var(--panel); }
+  .ptab:focus-visible, .padd:focus-visible, .pselect:focus-visible, .dmove:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .padd {
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.35;
+    padding: 2px 8px;
+    border-radius: 6px;
+    border: 1px dashed var(--line);
+    background: var(--btn-bg);
+    color: var(--dim);
+    white-space: nowrap;
+  }
+  .padd:hover { background: var(--btn-hover); color: var(--text); }
+  .pselect {
+    display: none;
+    max-width: 220px;
+    background: var(--btn-bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 3px 6px;
+    font-family: var(--sans);
+    font-size: 12px;
+  }
+  .pnote { font-size: 11px; color: var(--title-warn); margin-left: auto; }
+  .dtool.dmove { max-width: 160px; cursor: pointer; padding: 2px 6px; } /* after .dtool's 260 px, which it must beat */
+
   /* drafts */
   .drafts {
     display: flex;
@@ -745,6 +819,27 @@ window.MathJax = {
     background: var(--snippet-bg);
   }
   .split-warn { margin: 0; padding: 6px 10px; font-size: 12px; color: var(--title-warn); border-bottom: 1px solid var(--line); }
+  .group-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--card-line);
+    font-size: 13px;
+  }
+  .group-row:last-child { border-bottom: none; }
+  .group-draft { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+  .group-select {
+    flex: none;
+    max-width: 240px;
+    padding: 4px 6px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--editor-bg);
+    color: var(--text);
+    font-size: 12.5px;
+  }
 
   /* cheat sheet */
   .cheat {
@@ -1050,6 +1145,8 @@ window.MathJax = {
     main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(45vh, 1fr) 1px minmax(45vh, 1fr); }
     #mjStatus { margin-left: 0; }
     .lint { max-height: 34%; }
+    .paperbar .ptabs { display: none; }
+    .paperbar .pselect { display: block; }
   }
 </style>
 </head>
@@ -1101,6 +1198,7 @@ window.MathJax = {
   <section class="pane" aria-label="Source editor">
     <div class="pane-head"><h2>Source</h2><span class="hint">exactly what you'll paste into OpenReview, or its compact form</span>
       <span class="pane-tools"><button type="button" id="findBtn" title="Find and replace in the source (Ctrl+F in the editor)">Find</button><label title="Underline misspelled words in the editor, with the browser’s spellchecker"><input type="checkbox" id="spellBox"> Spellcheck</label></span></div>
+    <div class="paperbar" id="paperBar" hidden><div class="ptabs" id="paperTabs" role="tablist" aria-label="Papers"></div><select class="pselect" id="paperSelect" aria-label="Paper"></select><button type="button" class="padd" id="paperAddBtn" title="Create a new paper with its first draft">+ Paper</button><span class="pnote" id="paperNote" hidden></span></div>
     <div class="drafts" id="draftBar"><div class="dtabs" id="draftTabs" role="tablist" aria-label="Drafts"></div><div class="dtools" id="draftTools"></div></div>
     <div id="tableOffer" hidden>
       <span id="pasteQuestion">Convert the pasted table to Markdown?</span>
@@ -1276,6 +1374,7 @@ window.MathJax = {
         <button type="button" id="exportAllBtn" title="Every draft in one .json file, which Import reads back">Export all drafts</button>
         <button type="button" id="exportOneBtn" title="The open draft as a Markdown file">Download this draft (.md)</button>
         <button type="button" id="importBtn" title="The drafts of an exported .json file, or a .md or .txt file as one draft, as new tabs">Import…</button>
+        <button type="button" id="importPaperBtn" title="Import a file into a new paper named after the file">New paper from a file…</button>
         <input type="file" id="importFile" accept=".json,.md,.markdown,.txt" hidden>
         <button type="button" data-close>Close</button>
       </div>
@@ -1290,6 +1389,21 @@ window.MathJax = {
       <p id="compareSummary" role="status"></p>
       <pre id="compareDiff" aria-label="Changes"></pre>
       <button type="button" id="compareBack">Back to versions</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="groupDialog" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="groupTitle">
+    <div class="modal-head">
+      <h3 id="groupTitle">Group drafts by name</h3>
+      <button type="button" class="modal-x" data-close aria-label="Close">×</button>
+    </div>
+    <p class="modal-note" id="groupNote">Drafts in <em>No paper</em> whose names share a prefix are filled in below. No draft is renamed, and rows left as <em>No paper</em> are not changed.</p>
+    <div id="groupList" class="split-parts"></div>
+    <div class="modal-actions">
+      <button type="button" id="groupApplyBtn" class="primary">Apply</button>
+      <button type="button" data-close>Cancel</button>
     </div>
   </div>
 </div>
@@ -5779,6 +5893,221 @@ function newDraftName(list) {
   return 'Draft ' + n;
 }
 
+/* ---- papers (pure): drafts grouped by the paper they answer ----
+   A paper owns no text: it is a label on drafts, kept under a key of its own
+   (PAPERS_KEY in the DOM section) that 3.12 never reads, so losing or rolling
+   back the record can only regroup drafts, all under "No paper" at worst.
+   The record is a set of flat maps of single values, {id: {v, at}}: a
+   paper's name, venue and typed limit, and each draft's paper. A merge takes,
+   per id, the entry that comes later in entryAfter's order: a
+   last-writer-wins map with no deletions, so windows and devices that merge
+   in any order end with the same record. One value per entry, so a stale
+   venue change cannot undo a rename; values are opaque here and kept as they
+   are, maps and fields this version does not know included; only papersView
+   and the venue and limit helpers read them. (Design note and Fable's review:
+   reviews/2026-11-28.) */
+var PAPER_ID = /^p[0-9a-z]{1,24}$/;
+var PAPERS_VERSION = 1;
+var PAPERS_MAP_ID = /^[0-9A-Za-z_-]{1,40}$/;
+/* Newest entries kept per map. A membership of a draft deleted long ago is
+   inert and drops out in time; pruning by this window's draft list instead
+   would be a deletion other copies never hear of (a draft re-created after a
+   deletion elsewhere would lose its paper). A cap over the entries' order
+   commutes with the merge, so it keeps the record convergent. */
+var PAPERS_KEPT = { member: 1000 };
+var PAPERS_KEPT_OTHER = 300;
+
+function newPaperId() {
+  return 'p' + newDraftId().slice(1);
+}
+
+/* JSON with keys in order, so two windows compare the same values alike. */
+function canonJSON(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v === undefined ? null : v);
+  if (Object.prototype.toString.call(v) === '[object Array]') return '[' + v.map(canonJSON).join(',') + ']';
+  return '{' + Object.keys(v).sort().map(function (k) { return JSON.stringify(k) + ':' + canonJSON(v[k]); }).join(',') + '}';
+}
+
+/* The total order of entries: `at`, then the value's canonical form; for two
+   entries alike in both, the one with more fields (a later version's) and then
+   the whole entry's canonical form, so they merge alike in either order and the
+   later version's field is kept (codex-review-313). Positive when `a` comes
+   after `b` (and wins a merge). */
+function entryAfter(a, b) {
+  if (a.at !== b.at) return a.at > b.at ? 1 : -1;
+  var va = canonJSON(a.v), vb = canonJSON(b.v);
+  if (va !== vb) return va > vb ? 1 : -1;
+  var ka = Object.keys(a).length, kb = Object.keys(b).length;
+  if (ka !== kb) return ka > kb ? 1 : -1;
+  var ca = canonJSON(a), cb = canonJSON(b);
+  return ca === cb ? 0 : ca > cb ? 1 : -1;
+}
+
+/* The newest `k` entries of a map, by entryAfter and then by id. */
+function capPaperMap(map, k) {
+  var ids = Object.keys(map);
+  if (ids.length <= k) return map;
+  ids.sort(function (x, y) { return entryAfter(map[y], map[x]) || (x < y ? 1 : x > y ? -1 : 0); });
+  var out = Object.create(null);
+  ids.slice(0, k).forEach(function (id) { out[id] = map[id]; });
+  return out;
+}
+
+/* A stored record, or garbage, as {version, newer, maps}. `newer`: written by
+   a later version of the page, which this one reads but never writes over. */
+function parsePapers(raw) {
+  var rec = null;
+  try { rec = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { rec = null; }
+  if (!rec || typeof rec !== 'object' || Object.prototype.toString.call(rec) === '[object Array]') rec = {};
+  var newer = typeof rec.version === 'number' && isFinite(rec.version) && rec.version > PAPERS_VERSION;
+  var out = { version: newer ? rec.version : PAPERS_VERSION, newer: newer, maps: Object.create(null) };
+  Object.keys(rec).forEach(function (name) {
+    var m = rec[name];
+    if (name === 'version' || !PAPERS_MAP_ID.test(name) || !m || typeof m !== 'object' ||
+        Object.prototype.toString.call(m) === '[object Array]') return;
+    var map = Object.create(null);
+    Object.keys(m).forEach(function (id) {
+      var e = m[id];
+      if (PAPERS_MAP_ID.test(id) && e && typeof e === 'object' && typeof e.at === 'number' && isFinite(e.at) &&
+          Object.prototype.hasOwnProperty.call(e, 'v')) map[id] = e;
+    });
+    out.maps[name] = capPaperMap(map, PAPERS_KEPT[name] || PAPERS_KEPT_OTHER);
+  });
+  return out;
+}
+
+/* Commutative, associative and idempotent: for every map and id, the entry
+   that comes later. A newer side marks the result newer. */
+function mergePapers(a, b) {
+  var out = { version: Math.max(a.version, b.version), newer: !!(a.newer || b.newer), maps: Object.create(null) };
+  var names = Object.keys(a.maps).concat(Object.keys(b.maps));
+  names.forEach(function (name) {
+    if (out.maps[name]) return;
+    var ma = a.maps[name] || {}, mb = b.maps[name] || {}, map = Object.create(null);
+    Object.keys(ma).concat(Object.keys(mb)).forEach(function (id) {
+      var ea = ma[id], eb = mb[id];
+      map[id] = !ea ? eb : !eb ? ea : entryAfter(eb, ea) > 0 ? eb : ea;
+    });
+    out.maps[name] = capPaperMap(map, PAPERS_KEPT[name] || PAPERS_KEPT_OTHER);
+  });
+  return out;
+}
+
+/* The record with `map[id]` set to `v`, stamped after the entry it replaces
+   (a fast clock elsewhere, or two changes in one millisecond, cannot undo
+   a later change). Setting the value an entry has changes nothing. */
+function setPaperEntry(rec, name, id, v, now) {
+  var old = rec.maps[name] && rec.maps[name][id];
+  if (old && canonJSON(old.v) === canonJSON(v)) return rec;
+  var maps = Object.create(null);
+  Object.keys(rec.maps).forEach(function (k) { maps[k] = rec.maps[k]; });
+  var map = Object.create(null);
+  Object.keys(maps[name] || {}).forEach(function (k) { map[k] = maps[name][k]; });
+  map[id] = { v: v, at: old ? Math.max(now, old.at + 1) : now };
+  maps[name] = map;
+  return { version: rec.version, newer: rec.newer, maps: maps };
+}
+
+/* The record as stored, in a canonical form. */
+function serializePapers(rec) {
+  var o = { version: rec.version };
+  Object.keys(rec.maps).forEach(function (k) { o[k] = rec.maps[k]; });
+  return canonJSON(o);
+}
+
+/* A paper's name: the string its entry holds, or null (no such paper). */
+function paperName(rec, pid) {
+  var e = rec.maps.name && rec.maps.name[pid];
+  return e && typeof e.v === 'string' && e.v ? e.v : null;
+}
+
+/* The drafts of `list` ([{id}], in tab order) grouped by paper: papers in the
+   order of their first draft, each with its drafts in tab order, and the
+   drafts of no paper. Every draft lands in exactly one group; a membership of
+   a draft the list lacks is inert, and one naming no paper counts as none. */
+function papersView(list, rec) {
+  var member = rec.maps.member || {}, groups = Object.create(null), order = [], none = [];
+  var paperOf = Object.create(null);
+  list.forEach(function (d) {
+    var m = member[d.id], pid = m && typeof m.v === 'string' && paperName(rec, m.v) !== null ? m.v : '';
+    paperOf[d.id] = pid;
+    if (!pid) { none.push(d.id); return; }
+    if (!groups[pid]) { groups[pid] = []; order.push(pid); }
+    groups[pid].push(d.id);
+  });
+  return {
+    papers: order.map(function (p) { return { id: p, name: paperName(rec, p), drafts: groups[p] }; }),
+    none: none,
+    paperOf: paperOf
+  };
+}
+
+/* The paper named `name` (in any capitals), shown or not, so that a new paper,
+   Group by name and Import reuse it (and its venue) instead of making a second
+   one: the newest such entry, or null. */
+function paperNamed(rec, name) {
+  var want = cleanDraftName(name).toLowerCase(), best = null, names = rec.maps.name || {};
+  if (!want) return null;
+  Object.keys(names).forEach(function (pid) {
+    var e = names[pid];
+    if (typeof e.v !== 'string' || e.v.toLowerCase() !== want || !PAPER_ID.test(pid)) return;
+    if (!best || entryAfter(e, names[best]) > 0 || (entryAfter(e, names[best]) === 0 && pid > best)) best = pid;
+  });
+  return best;
+}
+
+/* The venue of a draft in paper `pid` ('' when none): the paper's own choice
+   ('' is Custom), else the global one, so that grouping drafts changes no
+   card. A venue id this version does not know counts as the global one. */
+function paperVenue(rec, pid, globalVenue) {
+  var e = pid && rec.maps.venue && rec.maps.venue[pid];
+  return e && typeof e.v === 'string' && (e.v === '' || venueById(e.v)) ? e.v : globalVenue;
+}
+
+/* The limit of a draft in paper `pid`: one typed while in the paper; else, when
+   the paper has a venue of its own, that venue's number or the author's own
+   limit; else, as under "No paper", the global limit. */
+function paperLimit(rec, pid, globalLimit, ownLimit) {
+  if (!pid) return globalLimit;
+  var le = rec.maps.limit && rec.maps.limit[pid];
+  if (le && typeof le.v === 'number' && isFinite(le.v) && le.v >= 0) return Math.floor(le.v);
+  var ve = rec.maps.venue && rec.maps.venue[pid];
+  if (!ve || typeof ve.v !== 'string' || (ve.v !== '' && !venueById(ve.v))) return globalLimit;
+  var venue = venueById(ve.v);
+  return venue && venue.limit ? venue.limit : ownLimit;
+}
+
+/* A first word that names a reviewer or a kind of answer, not a paper. */
+var PREFIX_NOT_PAPER = /^(?:reviewers?|rev|response|responses|rebuttal|rebuttals|reply|replies|answer|answers|draft|drafts|comment|comments|part|general|global|common|summary|round|follow|followup|final|meta|ac|to|re|for|the|our|my|new|old|copy|untitled)$/i;
+
+/* The paper a tab name starts with: "[ARR] R3", "ICML-R1", "NeurIPS: R2",
+   "P2 R1"; null for "R1", "Reviewer Ab12", "Ab12 W1" or "R1 follow-up". */
+function namePrefix(name) {
+  name = cleanDraftName(name);
+  var m = /^\[([^\]]{1,24})\]\s*(\S.*)$/.exec(name) ||
+    /^([^\s:_\-–\/|]{1,24})\s*[:_\-–\/|]\s*(\S.*)$/.exec(name) ||
+    /^(\S{1,24})\s+(\S.*)$/.exec(name);
+  if (!m) return null;
+  var p = m[1].trim().replace(/[.,;]+$/, '');
+  if (!p || PREFIX_NOT_PAPER.test(p) || /^(?:r|rev)?\.?\d{1,2}$/i.test(p) || (p.length === 4 && idShaped(p))) return null;
+  return p;
+}
+
+/* Papers that tab names suggest ([{id, name}] of drafts in no paper): two or
+   more drafts whose names start with the same paper word. Only a proposal,
+   which the author edits before anything is written. */
+function prefixGroups(drafts) {
+  var groups = Object.create(null), order = [];
+  drafts.forEach(function (d) {
+    var p = namePrefix(d.name);
+    if (!p) return;
+    var k = p.toLowerCase();
+    if (!groups[k]) { groups[k] = { name: p, drafts: [] }; order.push(k); }
+    groups[k].drafts.push(d.id);
+  });
+  return order.map(function (k) { return groups[k]; }).filter(function (g) { return g.drafts.length >= 2; });
+}
+
 /* ---- earlier versions of a draft, and drafts as files (pure) ---- */
 
 /* A TeX control word is one edit. Unicode letters, marks and numbers stay
@@ -5936,11 +6265,19 @@ function cleanDraftName(name) {
 
 var DRAFTS_FILE = 'rebuttal-bench-drafts';
 
-/* Every draft ({name, text}, in tab order) as the file Export writes. */
+/* Every draft ({name, text, paper?, venue?}, in tab order) as the file Export
+   writes. A draft's paper (its name) and that paper's own venue are optional
+   fields of version 1: 3.12 reads only `name` and `text`, so it still imports
+   the file (ungrouped). */
 function draftsFile(drafts, now) {
   return JSON.stringify({
     format: DRAFTS_FILE, version: 1, exported: new Date(now).toISOString(),
-    drafts: drafts.map(function (d) { return { name: d.name, text: d.text }; })
+    drafts: drafts.map(function (d) {
+      var o = { name: d.name, text: d.text };
+      if (typeof d.paper === 'string' && d.paper) o.paper = d.paper;
+      if (typeof d.venue === 'string') o.venue = d.venue;
+      return o;
+    })
   }, null, 2) + '\n';
 }
 
@@ -5963,7 +6300,10 @@ function readDraftsFile(content, fileName) {
     var drafts = [];
     v.drafts.forEach(function (d) {
       if (d && typeof d.text === 'string') {
-        drafts.push({ name: cleanDraftName(d.name) || 'Imported', text: d.text.replace(/\r\n?/g, '\n') });
+        var got = { name: cleanDraftName(d.name) || 'Imported', text: d.text.replace(/\r\n?/g, '\n') };
+        if (cleanDraftName(d.paper)) got.paper = cleanDraftName(d.paper);
+        if (typeof d.venue === 'string' && (d.venue === '' || venueById(d.venue))) got.venue = d.venue;
+        drafts.push(got);
       }
     });
     return { drafts: drafts, error: drafts.length ? null : 'This file has no drafts.' };
@@ -5972,25 +6312,60 @@ function readDraftsFile(content, fileName) {
   return { drafts: [{ name: cleanDraftName(base) || 'Imported', text: content.replace(/\r\n?/g, '\n') }], error: null };
 }
 
-/* What an import adds to `existing` drafts ({name, text}; text null when it
-   is not known here): each incoming draft whose text no known draft has yet,
-   under a name no draft has yet. Nothing is ever replaced; `same` counts
-   the drafts already there. */
+/* What an import adds to `existing` drafts ({name, text, scope?}; text null
+   when it is not known here): each incoming draft ({name, text, scope?, …})
+   whose text no known draft has yet, under a name no draft of its scope has
+   yet. The scope is the paper a draft is (or goes) in, so paper 2's "R1"
+   stays "R1" beside paper 1's; texts are compared across scopes, so an Export
+   imported again adds nothing. Nothing is ever replaced; `same` counts the
+   drafts already there and `sameIn` lists the scope each one is in. Other
+   fields of an incoming draft are kept. */
 function importPlan(existing, incoming) {
-  var texts = Object.create(null), names = Object.create(null), add = [], same = 0;
+  var texts = Object.create(null), names = Object.create(null), add = [], same = 0, sameIn = [];
+  var scopeOf = function (d) { return typeof d.scope === 'string' ? d.scope : ''; };
   existing.forEach(function (d) {
-    if (typeof d.text === 'string') texts['t' + d.text] = true; /* null: a text not known here */
-    names[d.name.toLowerCase()] = true;
+    if (typeof d.text === 'string') texts['t' + d.text] = { scope: scopeOf(d) }; /* null: a text not known here */
+    names[scopeOf(d) + '\n' + d.name.toLowerCase()] = true;
   });
   incoming.forEach(function (d) {
-    if (texts['t' + d.text]) { same++; return; }
-    texts['t' + d.text] = true;
-    var name = d.name, n = 2;
-    while (names[name.toLowerCase()]) name = d.name.slice(0, 34) + ' (' + n++ + ')';
-    names[name.toLowerCase()] = true;
-    add.push({ name: name, text: d.text });
+    var known = texts['t' + d.text];
+    if (known) { same++; sameIn.push(known.scope); return; }
+    texts['t' + d.text] = { scope: scopeOf(d) };
+    var name = d.name, n = 2, scope = scopeOf(d);
+    while (names[scope + '\n' + name.toLowerCase()]) name = d.name.slice(0, 34) + ' (' + n++ + ')';
+    names[scope + '\n' + name.toLowerCase()] = true;
+    var out = {};
+    Object.keys(d).forEach(function (k) { out[k] = d[k]; });
+    out.name = name;
+    add.push(out);
   });
-  return { add: add, same: same };
+  return { add: add, same: same, sameIn: sameIn };
+}
+
+/* A paper name from an imported file's base name (strip directory and known
+   extensions, clean like a draft name). */
+function paperNameFromFile(fileName) {
+  var base = String(fileName || '').replace(/^.*[\\\/]/, '').replace(/\.(?:json|md|markdown|txt|text)$/i, '');
+  return cleanDraftName(base) || 'Imported';
+}
+
+/* Where drafts already present on import live, from importPlan's `sameIn`:
+   ", in ICML #1234", ", in ICML #1234 and ARR", or "" when no scope has a
+   label to show (e.g. no papers exist yet). */
+function formatSameIn(sameIn, labelOf) {
+  if (!sameIn || !sameIn.length || typeof labelOf !== 'function') return '';
+  var seen = Object.create(null), labels = [];
+  sameIn.forEach(function (scope) {
+    var name = labelOf(scope);
+    if (!name || seen[name]) return;
+    seen[name] = true;
+    labels.push(name);
+  });
+  if (!labels.length) return '';
+  if (labels.length === 1) return ', in ' + labels[0];
+  if (labels.length === 2) return ', in ' + labels[0] + ' and ' + labels[1];
+  var rest = labels.length - 2;
+  return ', in ' + labels[0] + ', ' + labels[1] + ' and ' + rest + ' other' + (rest === 1 ? '' : 's');
 }
 
 /* ---- sections of a comment (pure) ----
@@ -7507,14 +7882,8 @@ function applyPrefs() {
   fsEditorVal.textContent = prefs.fsEditor;
   fsPreviewVal.textContent = prefs.zoomPreview + '%';
   themeBtn.textContent = prefs.theme === 'dark' ? 'Light mode' : 'Dark mode';
-  limitInput.value = prefs.limit;
   syncBox.checked = !!prefs.sync;
-  var venue = venueById(prefs.venue);
-  venueSelect.value = venue ? venue.id : '';
-  venueSelect.title = venue
-    ? venue.name + ': ' + venue.rule + '. Source: ' + venue.source + (venue.also ? '; also ' + venue.also.join(', ') : '') +
-      ' (checked ' + VENUES_CHECKED + '; rules change every year)'
-    : 'Choose a venue to set its character limit and check links against its rebuttal rules';
+  applyVenueLimit();
   compactBox.open = !!prefs.compactOpen;
   wordingBox.open = !!prefs.wordingOpen;
   sectionsBox.open = !!prefs.sectionsOpen;
@@ -7526,8 +7895,6 @@ function applyPrefs() {
   Array.prototype.forEach.call(compactList.querySelectorAll('input[data-trick]'), function (box) {
     box.checked = !!prefs.compact[box.getAttribute('data-trick')];
   });
-  renderVenueStat();
-  renderReportLinks();
   skeletonQuote.checked = !!prefs.skeletonQuotes;
   applyView();
   themeReviewBox();
@@ -7538,25 +7905,45 @@ function applyPrefs() {
    counts and its link rule, or that the limit is the author's own (the venue
    states no number, or the author typed another one). It opens the official
    page, which carries nothing of the draft. */
+/* The venue and limit controls, the rule beside the counter and the report
+   links, for the open draft's paper (openVenue, openLimit). A limit being
+   typed is left as it is while it says the same number. */
+function applyVenueLimit() {
+  var limit = openLimit(), pid = openPaper(), pName = pid ? paperName(papers, pid) : null;
+  if (document.activeElement !== limitInput || (parseInt(limitInput.value, 10) || 0) !== limit) limitInput.value = limit;
+  var venue = venueById(openVenue());
+  venueSelect.value = venue ? venue.id : '';
+  venueSelect.title = venue
+    ? (pName ? 'Applies to ' + pName + '. ' : '') + venue.name + ': ' + venue.rule + '. Source: ' + venue.source + (venue.also ? '; also ' + venue.also.join(', ') : '') +
+      ' (checked ' + VENUES_CHECKED + '; rules change every year)'
+    : pName
+      ? 'Choose a venue for ' + pName + ' to set its character limit and check links against its rebuttal rules'
+      : 'Choose a venue to set its character limit and check links against its rebuttal rules';
+  renderVenueStat();
+  renderReportLinks();
+}
+
 function renderVenueStat() {
-  var venue = venueById(prefs.venue);
+  var venue = venueById(openVenue()), pid = openPaper(), pName = pid ? paperName(papers, pid) : null;
   venueStat.hidden = !venue;
   if (!venue) {
     venueStat.textContent = '';
     venueStat.removeAttribute('href');
-    limitInput.title = 'Your own character limit';
+    limitInput.title = pName ? 'Your own character limit for ' + pName : 'Your own character limit';
     return;
   }
-  var own = !venue.limit || prefs.limit !== venue.limit;
+  var own = !venue.limit || openLimit() !== venue.limit;
   var parts = [venue.label,
     own ? 'your limit (' + (venue.limit ? 'rule: ' + fmt(venue.limit) + ' ' + venue.unit : 'none stated') + ')' : venue.unit];
   if (venue.linksBrief) parts.push(venue.linksBrief);
+  if (pName) parts.push('for ' + pName);
   venueStat.textContent = parts.join(' · ');
   venueStat.href = venue.source;
-  venueStat.title = venue.name + ': ' + venue.rule + '. Source: ' + venue.source +
+  venueStat.title = (pName ? 'Applies to ' + pName + '. ' : '') + venue.name + ': ' + venue.rule + '. Source: ' + venue.source +
     (venue.also ? '; also ' + venue.also.join(', ') : '') +
     ' (checked ' + VENUES_CHECKED + '; rules change every year). Click to open the first.';
-  limitInput.title = own ? 'Your own character limit' : 'The character limit of ' + venue.label + ' (' + venue.unit + ')';
+  limitInput.title = (own ? 'Your own character limit' : 'The character limit of ' + venue.label + ' (' + venue.unit + ')') +
+    (pName ? ' for ' + pName : '');
 }
 
 /* The footer's version and report links, set as plain hrefs so a middle
@@ -7565,7 +7952,7 @@ function renderVenueStat() {
 function renderReportLinks() {
   appVersion.textContent = APP_VERSION;
   reportLink.href = reportUrl('problem.yml', {
-    version: APP_VERSION, browser: browserLabel(navigator.userAgent), venue: reportVenue(venueById(prefs.venue))
+    version: APP_VERSION, browser: browserLabel(navigator.userAgent), venue: reportVenue(venueById(openVenue()))
   });
   ideaLink.href = reportUrl('idea.yml', { version: APP_VERSION });
 }
@@ -7617,6 +8004,127 @@ var readCache = {};        /* key -> a text read from the store that did not fit
 var remoteQueue = {};      /* key -> writes waiting for the asynchronous store */
 var draftReady = false;    /* the open draft has been restored */
 var draftTimer = null;
+
+/* ---- papers: drafts grouped by the paper they answer ----
+   The pure part (parsePapers, mergePapers, papersView, paperVenue, …) says
+   why the record can only regroup drafts, never lose one. `papers` is this
+   window's merge of every copy it has seen. A change is merged with the copy
+   this browser stores now, then written whole, straight to localStorage
+   (never through fallbackSet, whose memory copy and retries would write an
+   old record back over another window's newer one). Another window's write
+   arrives as a storage event; every copy is merged, none replaces another. A
+   record written by a later version is read, never written. No papers state
+   lives in `prefs`, which every window writes whole (3.12's word list was
+   clobbered that way). The open paper is the open draft's: nothing else to
+   store.
+   The record stays in this browser, like reviews and the word list: never in
+   the asynchronous store. Grouping is a label, and keeping it off the store
+   keeps it out of the store's start-up: with it there, a fresh device either
+   scoped by paper before its papers arrived or had to hold the drafts' start
+   for them, and the second replayed stale draft text (codex-recheck-313).
+   Export and Import carry papers between browsers. */
+var PAPERS_KEY = 'rebuttal-bench-papers';
+var papers = parsePapers(storedValue(PAPERS_KEY));
+var papersStored = true;   /* false: this window's last write to localStorage was refused */
+var lastDraftInPaper = Object.create(null); /* pid -> draft id last opened in this window; never stored in prefs */
+var paperBar = document.getElementById('paperBar');
+var paperTabs = document.getElementById('paperTabs');
+var paperSelect = document.getElementById('paperSelect');
+var paperAddBtn = document.getElementById('paperAddBtn');
+var paperNote = document.getElementById('paperNote');
+
+/* Write this window's merge with what is on disk now, and only when the disk
+   lacks something: every write is the union of all copies this window knows,
+   so it never takes back another window's change, and nothing is written over
+   a record from a later version (merging it marks the result `newer`). A write
+   refused for space leaves the disk as it was. */
+function writePapersLocal() {
+  if (!canLocalRead) return;
+  var disk = storedValue(PAPERS_KEY);
+  papers = mergePapers(papers, parsePapers(disk));
+  if (papers.newer || disk === serializePapers(papers)) { papersStored = true; return; }
+  try {
+    localStorage.setItem(PAPERS_KEY, serializePapers(papers));
+    papersStored = true;
+  } catch (e) {
+    papersStored = false; /* kept in memory; the next change or event tries again */
+  }
+}
+/* Another window's copy (a storage event, or the copy stored now after the
+   back/forward cache): merged, so this window's own changes stay; then written
+   back when the disk lacks something this window knows. localStorage has no
+   compare-and-set, so another window's write can overtake ours between its
+   read and its write, and a write refused for space leaves an older copy:
+   without the write-back the record would depend on a window staying open
+   (codex-review-313). Each write only adds to the record on disk, so windows
+   stop writing once it holds the union. True when it changed something here. */
+function takeInPapers(rec) {
+  var before = serializePapers(papers);
+  papers = mergePapers(papers, rec);
+  writePapersLocal();
+  var changed = serializePapers(papers) !== before;
+  if (changed) papersChanged();
+  return changed;
+}
+/* Change the record: `change(rec, now)` returns the new one (setPaperEntry
+   returns the same record for no change). Only with the drafts restored, and
+   never on a record from a later version. */
+function changePapers(change) {
+  if (!draftReady) return false;
+  papers = mergePapers(papers, parsePapers(storedValue(PAPERS_KEY)));
+  if (papers.newer) { papersChanged(); return false; }
+  papers = change(papers, Date.now());
+  writePapersLocal();
+  papersChanged();
+  return true;
+}
+/* Before the drafts are restored the open draft's paper is not known. When
+   this browser already holds papers with drafts, the venue and limit controls
+   wait (a choice made now would land in the preferences, not in the paper);
+   without papers they work as in 3.12. */
+function papersBeforeBoot() {
+  return papersView(parseDraftMeta(fallbackGet(DRAFTS_KEY)).list, papers).papers.length > 0;
+}
+window.addEventListener('storage', function (e) {
+  if (e.key === PAPERS_KEY) takeInPapers(parsePapers(e.newValue));
+});
+window.addEventListener('pageshow', function (e) {
+  if (e.persisted) takeInPapers(parsePapers(storedValue(PAPERS_KEY)));
+});
+
+/* The paper of a draft ('' for none) and the open draft's venue and limit,
+   from its paper's own entries, else the global preferences. Every reader of
+   the venue and limit goes through these. */
+function paperOfDraft(id) {
+  return papersView([{ id: id }], papers).paperOf[id] || '';
+}
+function openPaper() {
+  return draftReady ? paperOfDraft(draftMeta.active) : '';
+}
+function openVenue() {
+  return paperVenue(papers, openPaper(), prefs.venue);
+}
+function openLimit() {
+  return paperLimit(papers, openPaper(), prefs.limit, prefs.ownLimit);
+}
+/* A private merge of memory and the stored record, for Export, Print and
+   reusing existing paper names without adopting or writing anything. */
+function papersForOutput() {
+  return mergePapers(papers, parsePapers(storedValue(PAPERS_KEY)));
+}
+/* Everything the open draft's paper decides: the venue and limit shown, the
+   cards (check 15, the counters, reviewer cards), an open Split dialog and
+   the paper and draft tabs. */
+function papersChanged() {
+  if (draftReady) lastDraftInPaper[openPaper()] = draftMeta.active;
+  applyVenueLimit();
+  if (!draftReady) return;
+  renderDraftTabs();
+  updateAll();
+  refreshReviewerCards();
+  if (splitDialog && !splitDialog.hidden) renderSplit();
+}
+
 function keyOfDraft(id) { return id === 'd1' ? DRAFT_KEY : DRAFT_KEY + '-' + id; }
 function pendingKey(key) { return key + '-pending'; }
 function deletingKey(key) { return key + ':deleting'; }
@@ -8095,7 +8603,7 @@ function characterStat(chars, limit) {
    by updateAll and texProblemIssues so macro-fix verification sees the same
    hazards as the cards, while Fix all and compaction stay independent of them. */
 function pageAnalyzeOptions() {
-  return { venue: prefs.venue, identity: identityTerms(identityText) };
+  return { venue: openVenue(), identity: identityTerms(identityText) };
 }
 
 function updateAll() {
@@ -8203,8 +8711,8 @@ function renderSections(text, total) {
 function reviewerCards(text, spans) {
   var self = draftReady ? draftById(draftMeta.active) : null;
   if (!self || !text.trim()) return [];
-  var lead = leadOf(text);
-  var others = draftMeta.list.filter(function (d) { return d.id !== self.id; }).map(function (d) {
+  var lead = leadOf(text), pid = paperOfDraft(self.id);
+  var others = draftMeta.list.filter(function (d) { return d.id !== self.id && paperOfDraft(d.id) === pid; }).map(function (d) {
     return { name: d.name, text: knownDraftText(d.id) };
   });
   return reviewerIssues(text.trim(), self.name, others, spans.map(function (sp) {
@@ -8221,7 +8729,8 @@ var promisesByDraft = Object.create(null), promisesHtml = '', pendingPromise = n
 function renderPromises() {
   var next = Object.create(null), html = '', count = 0, checklist = [];
   if (!draftReady) return checklist;
-  draftMeta.list.forEach(function (d) {
+  var pid = openPaper();
+  draftMeta.list.filter(function (d) { return paperOfDraft(d.id) === pid; }).forEach(function (d) {
     var text = knownDraftText(d.id);
     if (text !== null) text = text.replace(/\r\n?/g, '\n'); /* textarea offsets when opened */
     var entry = promisesByDraft[d.id];
@@ -8445,7 +8954,9 @@ function saveDraftMeta() {
    staying hidden; so does an answer written by an older version under the
    first draft's key after that draft was deleted. Only localStorage can be
    listed, and only exactly keyed, nonempty bodies count. */
+var recoveredDraftIds = [];
 function recoverDraftBodies() {
+  recoveredDraftIds = [];
   if (!canLocalRead) return false;
   var listed = {}, found = false, ids = [];
   draftMeta.list.forEach(function (d) { listed[d.id] = true; });
@@ -8463,23 +8974,174 @@ function recoverDraftBodies() {
     draftMeta.list.push({ id: id, name: 'Recovered draft', at: Date.now() });
     delete draftMeta.gone[id];
     listed[id] = true;
+    recoveredDraftIds.push(id);
     found = true;
   });
   return found;
 }
 
+function draftsInPaper(pid) {
+  return draftMeta.list.filter(function (d) { return paperOfDraft(d.id) === pid; });
+}
+
+/* The quieter row of paper tabs above the draft tabs, shown once at least one
+   paper exists. Below 920 px the tabs give way to a select. Every paper shows
+   its draft count and a mark when any of its drafts exceeds that paper's own
+   limit; No paper is always shown while it holds drafts so nothing is hidden. */
+function renderPaperRow(view) {
+  view = view || papersView(draftMeta.list, papers);
+  if (!view.papers.length) {
+    paperBar.hidden = true;
+    paperTabs.innerHTML = '';
+    paperSelect.textContent = '';
+    paperNote.hidden = true;
+    return;
+  }
+  paperBar.hidden = false;
+  var focused = document.activeElement && document.activeElement.closest && document.activeElement.closest('#paperTabs .ptab');
+  var focusPid = focused ? focused.getAttribute('data-paper') : null;
+  var activePid = openPaper(), html = '';
+  paperSelect.textContent = '';
+  function addTab(pid, label, draftIds) {
+    var selected = pid === activePid;
+    var pLimit = paperLimit(papers, pid, prefs.limit, prefs.ownLimit);
+    var over = pLimit > 0 && draftIds.some(function (id) { return draftText(id).trim().length > pLimit; });
+    var tip = label + ' (' + draftIds.length + ' draft' + (draftIds.length === 1 ? '' : 's') + (over ? ', over limit' : '') + ')' +
+      (pid ? (selected ? ' (F2 or double-click to rename)' : ' (F2 to rename)') : '');
+    html += '<button type="button" role="tab" class="ptab' + (over ? ' over' : '') + '" data-paper="' + escAttr(pid) +
+      '" aria-selected="' + selected + '" tabindex="' + (selected ? 0 : -1) + '" title="' + escAttr(tip) + '">' +
+      '<span class="pname">' + escHtml(label) + '</span>' +
+      '<span class="pcount">' + draftIds.length + '</span>' +
+      (over ? '<span class="pover" aria-label="Over limit" title="At least one draft is over the limit"></span>' : '') +
+      '</button>';
+    var opt = new Option(label + ' (' + draftIds.length + (over ? ', over' : '') + ')', pid);
+    opt.selected = selected;
+    paperSelect.appendChild(opt);
+  }
+  view.papers.forEach(function (p) { addTab(p.id, p.name, p.drafts); });
+  if (view.none.length) addTab('', 'No paper', view.none);
+  paperTabs.innerHTML = html;
+  paperSelect.value = activePid;
+  paperAddBtn.disabled = papers.newer;
+  if (papers.newer) {
+    paperNote.textContent = 'Papers from a newer version (read-only)';
+    paperNote.hidden = false;
+  } else if (!papersStored) {
+    paperNote.textContent = 'Paper grouping in memory only (storage is full)';
+    paperNote.hidden = false;
+  } else {
+    paperNote.textContent = '';
+    paperNote.hidden = true;
+  }
+  if (focusPid !== null) {
+    var again = paperTabs.querySelector('.ptab[data-paper="' + focusPid + '"]') ||
+      paperTabs.querySelector('.ptab[aria-selected="true"]');
+    if (again) again.focus();
+  }
+}
+
+/* Open the draft this window opened last in paper `pid` ('' for No paper),
+   else its first draft, through switchDraft. */
+function selectPaper(pid) {
+  if (!draftReady || pid === openPaper()) return;
+  var view = papersView(draftMeta.list, papers), group = null;
+  if (!pid) group = view.none;
+  else {
+    for (var i = 0; i < view.papers.length; i++) if (view.papers[i].id === pid) { group = view.papers[i].drafts; break; }
+  }
+  if (!group || !group.length) return;
+  var remembered = lastDraftInPaper[pid];
+  var target = remembered && group.indexOf(remembered) >= 0 ? remembered : group[0];
+  switchDraft(target);
+}
+
+/* Create a paper (or reuse an existing one of the same name, even if hidden)
+   together with its first draft, named over that paper's drafts, and open it. */
+function createPaper() {
+  if (!draftReady) return;
+  if (papers.newer) { showToast('Papers were written by a newer version of Rebuttal Bench.'); return; }
+  var name = window.prompt('Name this paper (e.g. "ICML #1234", "Paper 2"):', '');
+  if (name === null) return;
+  name = cleanDraftName(name);
+  if (!name) return;
+  var latest = papersForOutput(), existing = paperNamed(latest, name), pid = existing || newPaperId();
+  var view = papersView(draftMeta.list, latest), paperDrafts = [];
+  if (existing) {
+    for (var i = 0; i < view.papers.length; i++) {
+      if (view.papers[i].id === existing) {
+        paperDrafts = view.papers[i].drafts.map(draftById).filter(Boolean);
+        break;
+      }
+    }
+  }
+  var id = createDraft(newDraftName(paperDrafts), '');
+  changePapers(function (rec, now) {
+    var use = paperNamed(rec, name) || pid;
+    if (!paperName(rec, use)) rec = setPaperEntry(rec, 'name', use, name, now);
+    return setPaperEntry(rec, 'member', id, use, now);
+  });
+  switchDraft(id);
+  ta.focus();
+}
+
+function renamePaper(pid) {
+  if (!draftReady || !pid) return;
+  if (papers.newer) { showToast('Papers were written by a newer version of Rebuttal Bench.'); return; }
+  var cur = paperName(papers, pid);
+  if (!cur) return;
+  var name = window.prompt('Rename this paper:', cur);
+  if (name === null) return;
+  name = cleanDraftName(name);
+  if (!name) return;
+  /* Two papers of one name would become one in a backup: Export names each
+     draft's paper, and Import groups by that name (codex-review-313). */
+  var same = paperNamed(papersForOutput(), name);
+  if (same && same !== pid) { showToast('A paper named “' + paperName(papersForOutput(), same) + '” exists already: choose another name.'); return; }
+  changePapers(function (rec, now) { return setPaperEntry(rec, 'name', pid, name, now); });
+}
+
+function moveOpenDraftTo(val) {
+  if (!draftReady || val === '__move__') return;
+  if (papers.newer) { showToast('Papers were written by a newer version of Rebuttal Bench.'); renderDraftTabs(); return; }
+  var id = draftMeta.active, d = draftById(id);
+  if (!d) return;
+  if (val === '__new__') {
+    var name = window.prompt('Name the new paper to move “' + d.name + '” into:', '');
+    if (name === null) { renderDraftTabs(); return; }
+    name = cleanDraftName(name);
+    if (!name) { renderDraftTabs(); return; }
+    changePapers(function (rec, now) {
+      var use = paperNamed(rec, name) || newPaperId();
+      if (!paperName(rec, use)) rec = setPaperEntry(rec, 'name', use, name, now);
+      return setPaperEntry(rec, 'member', id, use, now);
+    });
+    return;
+  }
+  changePapers(function (rec, now) { return setPaperEntry(rec, 'member', id, val, now); });
+}
+
 /* Tabs carry their length as OpenReview counts it, red when over the limit,
-   so four answers can be balanced at a glance. Keyboard: the tabs form one
-   stop (arrows move, Enter opens, F2 renames the focused one); Rename, Delete
-   and + Draft sit beside them. */
+   so four answers can be balanced at a glance. With papers, only the open
+   paper's drafts (or No paper's) are listed here. Keyboard: the tabs form one
+   stop (arrows move, Enter opens, F2 renames the focused one); Rename, Delete,
+   Move to paper and + Draft sit beside them. */
 function renderDraftTabs() {
   if (!draftReady) return;
+  var view = papersView(draftMeta.list, papers);
+  renderPaperRow(view);
+  var hasPapers = view.papers.length > 0, pid = openPaper();
+  var shownIds = !hasPapers ? null : !pid ? view.none : null;
+  if (hasPapers && pid) {
+    for (var i = 0; i < view.papers.length; i++) if (view.papers[i].id === pid) { shownIds = view.papers[i].drafts; break; }
+  }
+  var shown = shownIds ? shownIds.map(draftById).filter(Boolean) : draftMeta.list;
+  draftTabs.setAttribute('aria-label', !hasPapers ? 'Drafts' : pid ? 'Drafts of ' + paperName(papers, pid) : 'Drafts (No paper)');
   var limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
   var focusedTab = document.activeElement && document.activeElement.closest && document.activeElement.closest('#draftTabs .dtab');
   var focusedTool = document.activeElement && document.activeElement.closest && document.activeElement.closest('#draftTools .dtool');
   var focusId = focusedTab ? focusedTab.getAttribute('data-id') : null;
   var focusAct = focusedTool ? focusedTool.getAttribute('data-act') : null, html = '';
-  draftMeta.list.forEach(function (d) {
+  shown.forEach(function (d) {
     var active = d.id === draftMeta.active, n = draftText(d.id).trim().length;
     html += '<button type="button" role="tab" class="dtab" id="dtab-' + d.id + '" data-id="' + d.id + '" aria-controls="draftPanel"' +
       ' aria-selected="' + active + '" tabindex="' + (active ? 0 : -1) + '" title="' +
@@ -8487,11 +9149,25 @@ function renderDraftTabs() {
       escHtml(d.name) + '</span><span class="dcount' + (limit > 0 && n > limit ? ' over' : '') + '">' + fmt(n) + '</span></button>';
   });
   draftTabs.innerHTML = html;
+  var moveHtml = '';
+  if (hasPapers && !papers.newer) {
+    moveHtml = '<select class="dtool dmove" data-act="move" aria-label="Move this draft to a paper" title="Move the open draft to another paper">' +
+      '<option value="__move__" disabled selected hidden>Move to…</option>';
+    view.papers.forEach(function (p) { moveHtml += '<option value="' + escAttr(p.id) + '">' + escHtml(p.name) + '</option>'; });
+    moveHtml += '<option value="">No paper</option><option value="__new__">New paper…</option></select>';
+  }
+  var noneDrafts = view.none.map(draftById).filter(Boolean);
+  var canGroup = !papers.newer && prefixGroups(noneDrafts).length > 0;
   draftTools.innerHTML = '<button type="button" class="dtool" data-act="rename" title="Rename the open draft (F2)">Rename</button>' +
     (draftMeta.list.length > 1 ? '<button type="button" class="dtool dclose" data-act="delete" title="Delete the open draft">Delete</button>' : '') +
+    moveHtml +
     '<button type="button" class="dtool" data-act="history" title="Earlier versions of the open draft, and backups of your drafts as files">History</button>' +
-    '<button type="button" class="dtool dadd" data-act="add" title="A new draft: one per reviewer, a general response, a follow-up">+ Draft</button>';
+    '<button type="button" class="dtool dadd" data-act="add" title="A new draft: one per reviewer, a general response, a follow-up">+ Draft</button>' +
+    (!hasPapers && !papers.newer ? '<button type="button" class="dtool" data-act="new-paper" title="Create a new paper with its first draft">New paper</button>' : '') +
+    (canGroup ? '<button type="button" class="dtool" data-act="group" title="Group ungrouped drafts into papers by their shared name prefixes">Group by name</button>' : '');
   draftPanel.setAttribute('aria-labelledby', 'dtab-' + draftMeta.active);
+  var moveSel = draftTools.querySelector('.dmove');
+  if (moveSel) moveSel.addEventListener('change', function () { moveOpenDraftTo(moveSel.value); });
   var again = focusId ? draftTabs.querySelector('.dtab[data-id="' + focusId + '"]')
     : focusAct ? draftTools.querySelector('.dtool[data-act="' + focusAct + '"]') : null;
   if (again) again.focus();
@@ -8517,6 +9193,7 @@ function openDraft(id) {
   var text = typeof local === 'string' ? local : (draftTexts[id] || '');
   var state = bodyState[id] || 'ready';
   draftMeta.active = id;
+  lastDraftInPaper[paperOfDraft(id)] = id;
   draftKey = keyOfDraft(id);
   delete draftTexts[id];
   savedText = text;
@@ -8535,6 +9212,7 @@ function openDraft(id) {
     load.then(function (res) { clearTimeout(give); unlockDraft(id, res); });
   }
   loadReviewBox(id);
+  applyVenueLimit(); /* the draft opened may be another paper's, with its own venue and limit */
   updateAll();
   renderPreview();
 }
@@ -8600,7 +9278,11 @@ function newDraft(name, text, mustFit) {
 
 function addDraft() {
   if (!draftReady) return;
-  switchDraft(createDraft(newDraftName(draftMeta.list), ''));
+  var pid = openPaper();
+  var scopeDrafts = pid ? draftsInPaper(pid) : (papersView(draftMeta.list, papers).papers.length ? draftsInPaper('') : draftMeta.list);
+  var id = createDraft(newDraftName(scopeDrafts), '');
+  if (pid) changePapers(function (rec, now) { return setPaperEntry(rec, 'member', id, pid, now); });
+  switchDraft(id);
   ta.focus();
 }
 
@@ -8619,6 +9301,17 @@ function renameDraft(id) {
   refreshReviewerCards(); /* the reviewer cards read the tabs' names */
 }
 
+/* The draft to open after the one at `i` (already taken out of the list) is
+   deleted: the previous draft of the same paper, else the next one, else the
+   global neighbour. Opening another paper's draft would put the author in that
+   paper, where a second Delete could remove a draft of the same name. */
+function neighbourInPaper(i, pid) {
+  var list = draftMeta.list;
+  for (var j = i - 1; j >= 0; j--) if (paperOfDraft(list[j].id) === pid) return list[j];
+  for (var k = i; k < list.length; k++) if (paperOfDraft(list[k].id) === pid) return list[k];
+  return list[Math.max(0, i - 1)];
+}
+
 function deleteDraft(id) {
   /* Another window may have deleted drafts meanwhile: never delete the last. */
   var latest = fallbackGet(DRAFTS_KEY);
@@ -8628,15 +9321,18 @@ function deleteDraft(id) {
   /* Ask whenever there is text, in this editor or stored by another window
      since this one last looked. */
   var stored = fallbackGet(keyOfDraft(id));
+  /* With papers, drafts of several papers share names ("R2"): say whose. */
+  var pid = paperOfDraft(id), named = !papersView(draftMeta.list, papers).papers.length ? ''
+    : pid ? ' of ' + paperName(papers, pid) : ' (no paper)';
   if ((draftText(id).trim() || (typeof stored === 'string' && stored.trim())) &&
-      !window.confirm('Delete the draft “' + d.name + '”? Its text cannot be brought back.')) return;
+      !window.confirm('Delete the draft “' + d.name + '”' + named + '? Its text cannot be brought back.')) return;
   var i = draftMeta.list.indexOf(d);
   draftMeta.list.splice(i, 1);
   draftMeta.gone[id] = Math.max(Date.now(), d.at + 1);
   delete draftTexts[id];
   if (id === draftMeta.active) {
     clearTimeout(draftTimer);
-    openDraft(draftMeta.list[Math.max(0, i - 1)].id);
+    openDraft(neighbourInPaper(i, pid).id);
   }
   deleteDraftStorage(keyOfDraft(id));
   dropHistory(id);
@@ -8646,6 +9342,43 @@ function deleteDraft(id) {
   renderDraftTabs();
   refreshReviewerCards(); /* the reviewer cards read the other tabs */
 }
+
+paperTabs.addEventListener('click', function (e) {
+  var tab = e.target.closest('.ptab');
+  if (!tab) return;
+  selectPaper(tab.getAttribute('data-paper'));
+  var now = paperTabs.querySelector('.ptab[aria-selected="true"]');
+  if (now) now.focus();
+});
+paperTabs.addEventListener('dblclick', function (e) {
+  var tab = e.target.closest('.ptab');
+  if (!tab) return;
+  var pid = tab.getAttribute('data-paper');
+  if (pid && pid === openPaper()) renamePaper(pid);
+});
+paperTabs.addEventListener('keydown', function (e) {
+  var tab = e.target.closest('.ptab');
+  if (!tab) return;
+  if (e.key === 'F2') {
+    e.preventDefault();
+    var pid = tab.getAttribute('data-paper');
+    if (pid) renamePaper(pid);
+    return;
+  }
+  var tabs = Array.prototype.slice.call(paperTabs.querySelectorAll('.ptab')), i = tabs.indexOf(tab), to = -1;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') to = (i + 1) % tabs.length;
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') to = (i - 1 + tabs.length) % tabs.length;
+  else if (e.key === 'Home') to = 0;
+  else if (e.key === 'End') to = tabs.length - 1;
+  if (to < 0) return;
+  e.preventDefault();
+  var targetPid = tabs[to].getAttribute('data-paper');
+  selectPaper(targetPid);
+  var nextTab = paperTabs.querySelector('.ptab[data-paper="' + targetPid + '"]');
+  if (nextTab) nextTab.focus();
+});
+paperSelect.addEventListener('change', function () { selectPaper(paperSelect.value); });
+paperAddBtn.addEventListener('click', createPaper);
 
 draftTabs.addEventListener('click', function (e) {
   var tab = e.target.closest('.dtab');
@@ -8673,13 +9406,154 @@ draftTabs.addEventListener('keydown', function (e) {
   tabs[to].focus();
 });
 draftTools.addEventListener('click', function (e) {
-  var b = e.target.closest('.dtool');
+  var b = e.target.closest('button.dtool');
   if (!b) return;
   var act = b.getAttribute('data-act');
   if (act === 'add') addDraft();
   else if (act === 'rename') renameDraft(draftMeta.active);
   else if (act === 'delete') deleteDraft(draftMeta.active);
   else if (act === 'history') openHistory();
+  else if (act === 'new-paper') createPaper();
+  else if (act === 'group') openGroupDialog();
+});
+
+/* ---- Group by name: migrate ungrouped drafts into papers in one write ---- */
+var groupDialog = document.getElementById('groupDialog');
+var groupList = document.getElementById('groupList');
+var groupApplyBtn = document.getElementById('groupApplyBtn');
+var groupSeq = 0, groupRows = [];
+
+function buildGroupRows() {
+  if (papers.newer) {
+    groupList.innerHTML = '<p class="modal-note">Papers were written by a newer version of Rebuttal Bench and cannot be edited here.</p>';
+    groupApplyBtn.disabled = true;
+    return;
+  }
+  var view = papersView(draftMeta.list, papers);
+  var noneDrafts = view.none.map(draftById).filter(Boolean);
+  groupRows = [];
+  if (!noneDrafts.length) {
+    groupList.innerHTML = '<p class="modal-note">Every draft is already in a paper.</p>';
+    groupApplyBtn.disabled = true;
+    return;
+  }
+  var groups = prefixGroups(noneDrafts), proposed = Object.create(null);
+  var opts = [], seen = Object.create(null);
+  view.papers.forEach(function (p) {
+    var v = 'id:' + p.id;
+    opts.push({ value: v, label: p.name });
+    seen[v] = true;
+  });
+  groups.forEach(function (g) {
+    var existing = paperNamed(papers, g.name);
+    var v = existing ? 'id:' + existing : 'new:' + g.name;
+    if (!seen[v]) {
+      opts.push({ value: v, label: existing ? paperName(papers, existing) : g.name + ' (new paper)' });
+      seen[v] = true;
+    }
+    g.drafts.forEach(function (id) { proposed[id] = v; });
+  });
+  opts.push({ value: '', label: 'No paper' });
+  groupList.textContent = '';
+  noneDrafts.forEach(function (d) {
+    var initial = proposed[d.id] || '';
+    groupRows.push({ id: d.id, initial: initial });
+    var row = document.createElement('div');
+    row.className = 'group-row';
+    var nameEl = document.createElement('span');
+    nameEl.className = 'group-draft';
+    nameEl.textContent = d.name;
+    nameEl.title = d.name;
+    var sel = document.createElement('select');
+    sel.className = 'group-select';
+    sel.setAttribute('data-draft', d.id);
+    sel.setAttribute('aria-label', 'Paper for ' + d.name);
+    opts.forEach(function (o) { sel.appendChild(new Option(o.label, o.value)); });
+    sel.value = initial;
+    row.appendChild(nameEl);
+    row.appendChild(sel);
+    groupList.appendChild(row);
+  });
+  groupApplyBtn.disabled = false;
+}
+
+function openGroupDialog() {
+  if (!draftReady) return;
+  if (papers.newer) { showToast('Papers were written by a newer version of Rebuttal Bench.'); return; }
+  ++groupSeq;
+  groupDialog.hidden = false;
+  setModal(groupDialog, true);
+  groupDialog.querySelector('.modal-x').focus();
+  /* The papers record lives in this browser only: its copy as stored now. */
+  takeInPapers(parsePapers(storedValue(PAPERS_KEY)));
+  buildGroupRows();
+}
+
+function closeGroupDialog() {
+  if (groupDialog.hidden) return;
+  groupSeq++;
+  groupDialog.hidden = true;
+  groupRows = [];
+  groupList.textContent = '';
+  setModal(groupDialog, false);
+  var btn = draftTools.querySelector('.dtool[data-act="group"]');
+  (btn || ta).focus();
+}
+
+function applyGroupDialog() {
+  if (groupDialog.hidden || !draftReady || papers.newer) return;
+  var picks = [];
+  groupRows.forEach(function (row) {
+    var sel = groupList.querySelector('select[data-draft="' + row.id + '"]');
+    var val = sel ? sel.value : '';
+    /* Write only rows the author changed or left as proposed and not No paper,
+       so untouched No paper drafts are not restamped over another window's move. */
+    if (val) picks.push({ id: row.id, val: val });
+  });
+  if (!picks.length) { closeGroupDialog(); showToast('No drafts were grouped.'); return; }
+  function commit() {
+    if (!draftReady || papers.newer) { closeGroupDialog(); return; }
+    var moved = 0;
+    changePapers(function (rec, now) {
+      var created = Object.create(null);
+      picks.forEach(function (p) {
+        if (!draftById(p.id)) return;
+        /* The dialog listed this draft under No paper. If it is in a paper now
+           (moved in another window while the dialog was open, and read just
+           before applying), that move is newer than the proposal: keep it
+           (codex-review-313). */
+        if (papersView([{ id: p.id }], rec).paperOf[p.id]) return;
+        var pid = '';
+        if (p.val.indexOf('id:') === 0) {
+          pid = p.val.slice(3);
+          if (!paperName(rec, pid)) return;
+        } else if (p.val.indexOf('new:') === 0) {
+          var name = cleanDraftName(p.val.slice(4));
+          if (!name) return;
+          var k = name.toLowerCase();
+          pid = created[k] || paperNamed(rec, name) || newPaperId();
+          created[k] = pid;
+          if (!paperName(rec, pid)) rec = setPaperEntry(rec, 'name', pid, name, now);
+        }
+        if (pid) {
+          rec = setPaperEntry(rec, 'member', p.id, pid, now);
+          moved++;
+        }
+      });
+      return rec;
+    });
+    closeGroupDialog();
+    if (moved) showToast('Grouped ' + moved + ' draft' + (moved === 1 ? '' : 's') + ' into papers.');
+  }
+  commit(); /* changePapers merges the copy stored now before it applies */
+}
+
+groupDialog.addEventListener('click', function (e) {
+  if (e.target === groupDialog || e.target.closest('[data-close]')) closeGroupDialog();
+});
+groupApplyBtn.addEventListener('click', applyGroupDialog);
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && !groupDialog.hidden) closeGroupDialog();
 });
 
 /* Another window of this browser changed the list: show its drafts here too.
@@ -8732,7 +9606,7 @@ var splitDraftsBtn = document.getElementById('splitDraftsBtn');
 var splitResult = null;
 
 function renderSplit() {
-  var limit = Math.max(0, parseInt(limitInput.value, 10) || 0), venue = venueById(prefs.venue);
+  var limit = Math.max(0, parseInt(limitInput.value, 10) || 0), venue = venueById(openVenue());
   var compact = splitCompactBox.checked ? compactResult(true) : null;
   /* The comment as posted: its first block may read differently untrimmed. */
   splitResult = limit ? splitComment((compact ? compact.text : ta.value).trim(), limit, { label: splitLabelBox.checked }) : null;
@@ -8791,11 +9665,18 @@ document.addEventListener('keydown', function (e) {
 });
 splitDraftsBtn.addEventListener('click', function () {
   if (!splitResult || splitResult.parts.length < 2 || !draftReady) return;
-  var base = draftById(draftMeta.active).name.slice(0, 30), n = splitResult.parts.length, first = null;
+  var base = draftById(draftMeta.active).name.slice(0, 30), n = splitResult.parts.length, first = null, pid = openPaper(), ids = [];
   splitResult.parts.forEach(function (p, i) {
     var id = createDraft(base + ' (' + (i + 1) + '/' + n + ')', p.text);
+    ids.push(id);
     if (!first) first = id;
   });
+  if (pid) {
+    changePapers(function (rec, now) {
+      ids.forEach(function (id) { rec = setPaperEntry(rec, 'member', id, pid, now); });
+      return rec;
+    });
+  }
   closeSplit();
   switchDraft(first);
   showToast(n + ' new drafts, one per part; the draft you split is unchanged.');
@@ -9021,9 +9902,10 @@ function renderHistory() {
   (again || historyDialog.querySelector('.modal-x')).focus();
 }
 function drawHistory() {
-  var d = draftById(draftMeta.active);
+  var d = draftById(draftMeta.active), pid = openPaper(), pName = pid ? paperName(papers, pid) : null;
   historyFor = draftMeta.active;
   historyTitle.textContent = 'History of “' + (d ? d.name : 'this draft') + '”';
+  document.getElementById('printAllBtn').title = pName ? 'Print all drafts of ' + pName : 'Print all drafts';
   historyShown = readHistory(historyFor);
   var now = ta.value.trim().length;
   if (!historyShown.length) {
@@ -9088,17 +9970,30 @@ function openCompare() {
   compareSource.add(new Option('Pasted text', 'paste'));
   var others = draftMeta.list.filter(function (d) { return d.id !== historyFor; });
   if (others.length) {
-    var drafts = group('Other drafts');
-    others.forEach(function (d) {
-      var opt = new Option(d.name, 'draft-' + d.id);
+    var view = papersView(draftMeta.list, papers), myPid = view.paperOf[historyFor] || '';
+    var samePaper = others.filter(function (d) { return (view.paperOf[d.id] || '') === myPid; });
+    var otherPapers = others.filter(function (d) { return (view.paperOf[d.id] || '') !== myPid; });
+    function addDraftOpt(parent, d, baseLabel) {
+      var opt = new Option(baseLabel, 'draft-' + d.id);
       function available() {
         opt.disabled = knownDraftText(d.id) === null;
-        opt.textContent = d.name + (opt.disabled ? ' (text unavailable)' : '');
+        opt.textContent = baseLabel + (opt.disabled ? ' (text unavailable)' : '');
       }
       available();
-      drafts.appendChild(opt);
+      parent.appendChild(opt);
       if (opt.disabled && bodyLoads[d.id]) bodyLoads[d.id].then(available);
-    });
+    }
+    if (samePaper.length) {
+      var sameGroup = group(myPid ? 'Other drafts in ' + paperName(papers, myPid) : 'Other drafts');
+      samePaper.forEach(function (d) { addDraftOpt(sameGroup, d, d.name); });
+    }
+    if (otherPapers.length) {
+      var otherGroup = group('Other papers');
+      otherPapers.forEach(function (d) {
+        var dp = view.paperOf[d.id], prefix = dp ? paperName(papers, dp) : 'No paper';
+        addDraftOpt(otherGroup, d, prefix + ' · ' + d.name);
+      });
+    }
   }
   drawCompare();
   compareSource.focus();
@@ -9250,11 +10145,18 @@ function draftsForOutput() {
 }
 function exportAllDrafts() {
   if (!draftReady) return;
+  var outList = draftsForOutput(), outPapers = papersForOutput(), view = papersView(outList, outPapers);
   var drafts = [], missing = [];
-  draftsForOutput().forEach(function (d) {
+  outList.forEach(function (d) {
     var text = knownDraftText(d.id);
-    if (text === null) missing.push('“' + d.name + '”');
-    else drafts.push({ name: d.name, text: text });
+    if (text === null) { missing.push('“' + d.name + '”'); return; }
+    var item = { name: d.name, text: text }, pid = view.paperOf[d.id];
+    if (pid) {
+      item.paper = paperName(outPapers, pid);
+      var ve = outPapers.maps.venue && outPapers.maps.venue[pid];
+      if (ve && typeof ve.v === 'string' && (ve.v === '' || venueById(ve.v))) item.venue = ve.v;
+    }
+    drafts.push(item);
   });
   if (!drafts.length) { showToast('No draft has loaded yet: try again in a moment'); return; }
   if (missing.length && !window.confirm(missing.join(', ') + (missing.length === 1 ? ' has' : ' have') +
@@ -9319,10 +10221,18 @@ function renderPrint() {
 
 function printDrafts(all) {
   if (historyDialog.hidden || historyFor !== draftMeta.active || printRoot) return;
-  var drafts = all ? draftsForOutput() : [draftById(historyFor)];
+  var drafts, limit;
+  if (all) {
+    var outList = draftsForOutput(), outPapers = papersForOutput(), view = papersView(outList, outPapers);
+    var pid = view.paperOf[historyFor] || '';
+    drafts = outList.filter(function (d) { return (view.paperOf[d.id] || '') === pid; });
+    limit = paperLimit(outPapers, pid, prefs.limit, prefs.ownLimit);
+  } else {
+    drafts = [draftById(historyFor)];
+    limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
+  }
   var root = document.createElement('div'), missing = [];
   root.id = 'printDrafts';
-  var limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
   try {
     drafts.forEach(function (d) {
       var text = knownDraftText(d.id);
@@ -9364,27 +10274,90 @@ window.addEventListener('afterprint', function () {
    an imported text, so it cannot cost any text: a draft this browser has no
    room for is left out and named, and the file is still there to import
    again. */
-function importDrafts(content, fileName) {
+function importDrafts(content, fileName, opts) {
   if (!draftReady) { showToast('Wait until the drafts have loaded, then import again.'); return; }
+  opts = opts || {};
   var got = readDraftsFile(content, fileName);
   if (got.error) { showToast(got.error); return; }
   takeInList(storedValue(DRAFTS_KEY)); /* a draft another window just added is here too */
+  takeInPapers(parsePapers(storedValue(PAPERS_KEY)));
+  var view = papersView(draftMeta.list, papers), hasPapers = view.papers.length > 0;
+  var newPaperMode = !!opts.newPaper;
+  var fallbackName = newPaperMode ? paperNameFromFile(fileName) : '';
+  var fallbackExisting = newPaperMode ? paperNamed(papers, fallbackName) : null;
+  var captured = typeof opts.targetPaper === 'string' ? opts.targetPaper : openPaper();
+  var fallbackPid = !newPaperMode && captured && paperName(papers, captured) !== null ? captured : '';
+  var newNames = Object.create(null);
+  var incoming = got.drafts.map(function (d) {
+    var out = { name: d.name, text: d.text };
+    if (typeof d.venue === 'string') out.venue = d.venue;
+    /* New paper from a file puts every draft in that one paper, as its button
+       says; a plain Import follows the papers the file names. */
+    if (d.paper && !newPaperMode) {
+      var ep = paperNamed(papers, d.paper);
+      if (ep) { out.scope = ep; out._targetPid = ep; }
+      else { out.scope = 'new:' + d.paper.toLowerCase(); out._newPaper = d.paper; newNames[out.scope] = d.paper; }
+    } else if (newPaperMode) {
+      if (fallbackExisting) { out.scope = fallbackExisting; out._targetPid = fallbackExisting; }
+      else { out.scope = 'new:' + fallbackName.toLowerCase(); out._newPaper = fallbackName; newNames[out.scope] = fallbackName; }
+    } else {
+      out.scope = fallbackPid;
+      out._targetPid = fallbackPid;
+    }
+    return out;
+  });
   /* Only texts known here count as already here; unknown ones keep their names. */
-  var plan = importPlan(draftMeta.list.map(function (d) { return { name: d.name, text: knownDraftText(d.id) }; }), got.drafts);
+  var plan = importPlan(draftMeta.list.map(function (d) {
+    return { name: d.name, text: knownDraftText(d.id), scope: view.paperOf[d.id] || '' };
+  }), incoming);
+  var showPlaces = hasPapers || newPaperMode || incoming.some(function (d) { return !!(d._targetPid || d._newPaper); });
+  var samePlace = showPlaces ? formatSameIn(plan.sameIn, function (scope) {
+    if (!scope) return 'No paper';
+    if (scope.indexOf('new:') === 0) return newNames[scope] || '';
+    return paperName(papers, scope) || 'No paper';
+  }) : '';
   if (!plan.add.length) {
-    showToast(plan.same === 1 ? 'That draft is already here.' : 'All ' + plan.same + ' drafts are already here.');
+    showToast((plan.same === 1 ? 'That draft is already here' : 'All ' + plan.same + ' drafts are already here') + samePlace + '.');
     return;
   }
-  var added = [], left = [], made = [];
+  var added = [], left = [], made = [], memberships = [];
   plan.add.forEach(function (d) {
     var m = newDraft(d.name, d.text, true);
-    if (m) { added.push('“' + d.name + '”'); made.push({ stored: m.stored, name: '“' + d.name + '”' }); }
-    else left.push('“' + d.name + '”');
+    if (m) {
+      added.push('“' + d.name + '”');
+      made.push({ stored: m.stored, name: '“' + d.name + '”' });
+      if (d._targetPid || d._newPaper) memberships.push({ id: m.id, pid: d._targetPid || '', name: d._newPaper || '', venue: d.venue });
+    } else left.push('“' + d.name + '”');
   });
   function names(list) {
     return list.length > 5 ? list.slice(0, 5).join(', ') + ' and ' + (list.length - 5) + ' more' : list.join(', ');
   }
+  var grouped = true;
   if (added.length) {
+    if (memberships.length) {
+      grouped = changePapers(function (rec, now) {
+        var created = Object.create(null), createdNow = Object.create(null);
+        memberships.forEach(function (item) {
+          var pid = item.pid;
+          if (!pid && item.name) {
+            var k = item.name.toLowerCase();
+            pid = created[k] || paperNamed(rec, item.name) || newPaperId();
+            created[k] = pid;
+            if (!paperName(rec, pid)) {
+              rec = setPaperEntry(rec, 'name', pid, item.name, now);
+              createdNow[pid] = true;
+            }
+            /* Only when created now: a file never changes an existing paper's venue. */
+            if (createdNow[pid] && !(rec.maps.venue && rec.maps.venue[pid]) &&
+                typeof item.venue === 'string' && (item.venue === '' || venueById(item.venue))) {
+              rec = setPaperEntry(rec, 'venue', pid, item.venue, now);
+            }
+          }
+          if (pid && paperName(rec, pid)) rec = setPaperEntry(rec, 'member', item.id, pid, now);
+        });
+        return rec;
+      });
+    }
     var listSaved = saveDraftMeta();
     renderDraftTabs();
     refreshReviewerCards(); /* new tabs, perhaps named for a reviewer */
@@ -9403,8 +10376,11 @@ function importDrafts(content, fileName) {
     }
   }
   var msg = (added.length ? 'Imported ' + added.length + ' draft' + (added.length === 1 ? '' : 's') + ' as new tabs: ' + names(added) + '.'
-    : 'Nothing was imported.') + (plan.same ? ' Already here: ' + plan.same + '.' : '') +
+    : 'Nothing was imported.') + (plan.same ? ' Already here: ' + plan.same + samePlace + '.' : '') +
     (left.length ? ' No room in this browser for ' + names(left) + ': delete drafts you no longer need, then import the file again.' : '');
+  if (added.length && memberships.length && (!grouped || !papersStored)) {
+    msg += ' Could not save their paper grouping in this browser: after a reload, they may appear under No paper.';
+  }
   if (added.length && memNewer[DRAFTS_KEY]) msg += ' The list of drafts did not fit: after a reload, those with text come back as “Recovered draft”.';
   if (added.length && !canLocalRead && !canArtifactStore) msg += ' This browser cannot keep drafts: export them before you leave.';
   /* Without localStorage, the asynchronous store is the only copy. */
@@ -9444,23 +10420,32 @@ window.addEventListener('storage', function (e) {
 document.getElementById('exportAllBtn').addEventListener('click', exportAllDrafts);
 document.getElementById('exportOneBtn').addEventListener('click', exportOpenDraft);
 var importFile = document.getElementById('importFile');
+var importMode = 'open';
 document.getElementById('importBtn').addEventListener('click', function () {
+  importMode = 'open';
   importFile.value = ''; /* the same file chosen again is a new import */
   importFile.click();
 });
+document.getElementById('importPaperBtn').addEventListener('click', function () {
+  importMode = 'new-paper';
+  importFile.value = '';
+  importFile.click();
+});
 /* Import is bound to no draft: a file read that ends after a switch, or with
-   History closed, still only adds tabs. */
+   History closed, still only adds tabs; the target paper is captured when
+   the file is chosen. */
 importFile.addEventListener('change', function () {
   var f = importFile.files && importFile.files[0];
   if (!f) return;
   /* An export escapes control characters six times over: far beyond what
      browser storage holds, so any export of it still fits under this. */
   if (f.size > 100e6) { showToast('That file is too large to be drafts.'); return; }
+  var opts = importMode === 'new-paper' ? { newPaper: true } : { targetPaper: openPaper() };
   var reader = new FileReader();
   reader.onload = function () {
     var got = decodeTextFile(new Uint8Array(reader.result));
     if (got.error) showToast(got.error);
-    else importDrafts(got.text, f.name);
+    else importDrafts(got.text, f.name, opts);
   };
   reader.onerror = function () { showToast('Could not read that file.'); };
   reader.readAsArrayBuffer(f);
@@ -10398,8 +11383,20 @@ window.addEventListener('pagehide', flushDraft);
    own limit or the stored ownLimit. Recorded even when the value equals the
    default, which savePrefs's comparison would not notice. */
 var limitAction = null;
+/* In a paper, the venue and limit are the paper's (its entries in the papers
+   record), and the preferences stay as they are; under "No paper" they are the
+   preferences, as in 3.12. Before the drafts are restored the open draft's
+   paper is not known: with papers in this browser the controls wait
+   (papersBeforeBoot); without, they write the preferences, as in 3.12. */
+if (papersBeforeBoot()) venueSelect.disabled = limitInput.disabled = true;
 limitInput.addEventListener('input', function () {
-  prefs.limit = prefs.ownLimit = Math.max(0, parseInt(limitInput.value, 10) || 0);
+  if (!draftReady && papersBeforeBoot()) { applyVenueLimit(); return; }
+  var typed = Math.max(0, parseInt(limitInput.value, 10) || 0), pid = openPaper();
+  if (pid) {
+    changePapers(function (rec, now) { return setPaperEntry(rec, 'limit', pid, typed, now); });
+    return;
+  }
+  prefs.limit = prefs.ownLimit = typed;
   if (!prefsRestored) { limitAction = 'typed'; prefsTouched.limit = prefsTouched.ownLimit = true; }
   renderVenueStat();
   savePrefs();
@@ -10407,14 +11404,22 @@ limitInput.addEventListener('input', function () {
 });
 
 venueSelect.addEventListener('change', function () {
-  var venue = venueById(venueSelect.value);
-  prefs.venue = venue ? venue.id : '';
-  prefs.limit = venue && venue.limit ? venue.limit : prefs.ownLimit;
-  if (!prefsRestored) { limitAction = 'venue'; prefsTouched.venue = true; }
-  applyPrefs();
-  savePrefs();
-  updateAll();
-  if (venue) showToast(venue.name + ': ' + venue.rule + '.' + (venue.limit ? '' : ' Limit: your own, ' + fmt(prefs.limit) + '.'));
+  if (!draftReady && papersBeforeBoot()) { applyVenueLimit(); return; }
+  var venue = venueById(venueSelect.value), pid = openPaper();
+  if (pid) {
+    /* A new venue replaces a limit typed for the old one, as below. */
+    changePapers(function (rec, now) {
+      return setPaperEntry(setPaperEntry(rec, 'venue', pid, venue ? venue.id : '', now), 'limit', pid, null, now);
+    });
+  } else {
+    prefs.venue = venue ? venue.id : '';
+    prefs.limit = venue && venue.limit ? venue.limit : prefs.ownLimit;
+    if (!prefsRestored) { limitAction = 'venue'; prefsTouched.venue = true; }
+    applyPrefs();
+    savePrefs();
+    updateAll();
+  }
+  if (venue) showToast(venue.name + ': ' + venue.rule + '.' + (venue.limit ? '' : ' Limit: your own, ' + fmt(openLimit()) + '.'));
 });
 
 syncBox.addEventListener('change', function () {
@@ -10792,10 +11797,19 @@ function finishBoot(draft, note) {
   }
   if (metaChanged) saveDraftMeta();
   pruneHistory();
+  lastDraftInPaper[openPaper()] = draftMeta.active;
   renderDraftTabs();
   loadReviewBox(draftMeta.active);
+  venueSelect.disabled = limitInput.disabled = false; /* see papersBeforeBoot */
+  applyVenueLimit(); /* the open draft's paper is known now */
   updateAll();
   renderPreview();
+  if (recoveredDraftIds.length && papersView(draftMeta.list, papers).papers.length) {
+    var where = formatSameIn(recoveredDraftIds.map(paperOfDraft), function (pid) {
+      return pid ? paperName(papers, pid) || 'No paper' : 'No paper';
+    });
+    showToast('Recovered ' + recoveredDraftIds.length + ' draft' + (recoveredDraftIds.length === 1 ? '' : 's') + where + '.');
+  }
 }
 </script>
 </body>

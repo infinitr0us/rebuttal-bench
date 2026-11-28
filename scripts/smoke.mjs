@@ -5,8 +5,8 @@
 //   npm run smoke                      (BROWSER=/path/to/chrome to choose a browser)
 //
 // Needs internet access: the page loads its libraries from CDNs.
-import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -1422,6 +1422,392 @@ try {
     return persisted && unchanged && undoIsolated && beforeClear && cleared ||
       { persisted, unchanged, undoIsolated, beforeClear, cleared, afterUndoTa, afterUndoAnon, sum: anonSum.textContent };`);
 
+  /* Papers, the storage layer (the paper row comes with its own checks): a
+     paper's venue and limit live in the papers record, never in the
+     preferences; a delete stays in the paper; another window's change is
+     merged in. */
+  await check('a paper’s venue and limit are its own, and the preferences stay byte for byte', `
+    const startId = draftMeta.active, prefsBefore = localStorage.getItem(PREFS_KEY);
+    const a1 = createDraft('A R1', 'Answer A1.'), a2 = createDraft('A R2', 'Answer A2.'), b1 = createDraft('B R2', 'Answer B2.');
+    switchDraft(a1);
+    const pa = newPaperId(), pb = newPaperId();
+    changePapers((rec, now) => {
+      rec = setPaperEntry(rec, 'name', pa, 'Paper A', now);
+      rec = setPaperEntry(rec, 'name', pb, 'Paper B', now);
+      for (const [d, p] of [[a1, pa], [a2, pa], [b1, pb]]) rec = setPaperEntry(rec, 'member', d, p, now);
+      return rec;
+    });
+    venueSelect.value = 'arr'; venueSelect.dispatchEvent(new Event('change')); await wait(30);
+    const inA = limitInput.value === '5000' && openVenue() === 'arr' && /ACL ARR/.test(venueStat.textContent);
+    limitInput.value = '4321'; limitInput.dispatchEvent(new Event('input')); await wait(30);
+    const typed = openLimit() === 4321 && /your limit/.test(venueStat.textContent);
+    switchDraft(b1); await wait(30);
+    const inB = openVenue() === prefs.venue && limitInput.value === String(prefs.limit);
+    switchDraft(a2); await wait(30);
+    const backInA = openVenue() === 'arr' && limitInput.value === '4321';
+    const prefsSame = localStorage.getItem(PREFS_KEY) === prefsBefore;
+    const stored = parsePapers(localStorage.getItem(PAPERS_KEY));
+    const recorded = stored.maps.venue[pa].v === 'arr' && stored.maps.limit[pa].v === 4321 && !stored.maps.venue[pb];
+    window.__papersSmoke = { startId, a1, a2, b1, pa, pb };
+    return inA && typed && inB && backInA && prefsSame && recorded ||
+      { inA, typed, inB, backInA, prefsSame, recorded, venue: openVenue(), limit: limitInput.value };`);
+
+  await check('deleting a paper’s open draft opens a draft of the same paper and names the paper', `
+    const { a1, a2, b1 } = window.__papersSmoke;
+    switchDraft(a2); await wait(30);
+    let asked = '';
+    window.confirm = (m) => { asked = m; return true; };
+    deleteDraft(a2); await wait(30);
+    const stayed = draftMeta.active === a1 && openPaper() === window.__papersSmoke.pa;
+    return stayed && /“A R2” of Paper A/.test(asked) && !!draftById(b1) ||
+      { stayed, active: draftMeta.active, asked };`);
+
+  await check('another window’s paper change is merged in, never replacing this window’s', `
+    const { a1, b1, pa, pb } = window.__papersSmoke;
+    /* Another window renames paper B and moves A R1 there, with a stale copy that
+       lacks this window's venue for paper A. */
+    let theirs = setPaperEntry(parsePapers('{}'), 'name', pb, 'Paper B renamed', Date.now() + 5);
+    theirs = setPaperEntry(theirs, 'member', a1, pb, Date.now() + 5);
+    localStorage.setItem(PAPERS_KEY, serializePapers(theirs));
+    window.dispatchEvent(new StorageEvent('storage', { key: PAPERS_KEY, newValue: serializePapers(theirs) }));
+    await wait(30);
+    const venueOf = (rec) => (rec.maps.venue && rec.maps.venue[pa] || {}).v;
+    const merged = paperName(papers, pb) === 'Paper B renamed' && paperOfDraft(a1) === pb && venueOf(papers) === 'arr';
+    const state1 = serializePapers(papers);
+    /* The next change here writes the merge, so the other window's copy is kept. */
+    changePapers((rec, now) => setPaperEntry(rec, 'name', pa, 'Paper A', now));
+    const kept = parsePapers(localStorage.getItem(PAPERS_KEY));
+    const written = paperName(kept, pb) === 'Paper B renamed' && venueOf(kept) === 'arr';
+    /* Clean up: back to the start draft, these drafts deleted, no papers left shown. */
+    window.confirm = () => true;
+    switchDraft(window.__papersSmoke.startId);
+    [a1, b1].forEach(deleteDraft);
+    await wait(30);
+    return merged && written && !papersView(draftMeta.list, papers).papers.length || { merged, written, state1 };`);
+
+  /* Papers UI: paper row, + Paper / New paper, move, switch remembering last
+     opened draft, rename paper, new drafts in open paper, over-limit mark, and
+     the draft list left byte for byte by move, rename paper and venue. */
+  await check('paper row: create papers, switch remembering last draft, move, rename and keep the draft list byte for byte', `
+    const startId = draftMeta.active, origPrompt = window.prompt;
+    const noPapersHidden = paperBar.hidden === true && !!draftTools.querySelector('[data-act="new-paper"]') && !draftTools.querySelector('.dmove');
+    window.prompt = () => 'ICML #1234';
+    draftTools.querySelector('[data-act="new-paper"]').click(); await wait(30);
+    const p1 = openPaper(), d1p1 = draftMeta.active;
+    const firstNamed = draftById(d1p1).name === 'Draft 1' && !paperBar.hidden &&
+      draftTabs.getAttribute('aria-label') === 'Drafts of ICML #1234';
+    const counts1 = [...paperTabs.querySelectorAll('.ptab')].map((t) => [t.querySelector('.pname').textContent, t.querySelector('.pcount').textContent]);
+    const tabsOnlyP1 = draftTabs.querySelectorAll('.dtab').length === 1;
+    /* + Draft lands in the open paper. */
+    draftTools.querySelector('.dadd').click(); await wait(30);
+    const d2p1 = draftMeta.active;
+    const addedInP1 = openPaper() === p1 && draftById(d2p1).name === 'Draft 2' &&
+      paperTabs.querySelector('.ptab[data-paper="' + p1 + '"] .pcount').textContent === '2';
+    /* Mark over-limit on paper 1, then create paper 2 with + Paper. */
+    setSourceText('X'.repeat(30), 0); updateAll();
+    limitInput.value = '10'; limitInput.dispatchEvent(new Event('input')); await wait(30);
+    window.prompt = () => 'ARR #5678';
+    paperAddBtn.click(); await wait(30);
+    const p2 = openPaper(), d1p2 = draftMeta.active;
+    const p2Named = draftById(d1p2).name === 'Draft 1' && p2 !== p1 && draftTabs.querySelectorAll('.dtab').length === 1;
+    const p1OverMark = !!paperTabs.querySelector('.ptab[data-paper="' + p1 + '"].over .pover');
+    /* Switch back to paper 1 via the paper row: opens Draft 2 (the last opened there). */
+    paperTabs.querySelector('.ptab[data-paper="' + p1 + '"]').click(); await wait(30);
+    const remembered = draftMeta.active === d2p1 && openPaper() === p1;
+    /* Move, rename paper and venue leave the draft list byte for byte unchanged. */
+    const listBefore = localStorage.getItem(DRAFTS_KEY);
+    const moveSel = draftTools.querySelector('.dmove');
+    moveSel.value = p2; moveSel.dispatchEvent(new Event('change')); await wait(30);
+    const moved = openPaper() === p2 && draftTabs.querySelectorAll('.dtab').length === 2 &&
+      paperTabs.querySelector('.ptab[data-paper="' + p1 + '"] .pcount').textContent === '1' &&
+      paperTabs.querySelector('.ptab[data-paper="' + p2 + '"] .pcount').textContent === '2' &&
+      localStorage.getItem(DRAFTS_KEY) === listBefore;
+    window.prompt = () => 'ARR #9999';
+    paperTabs.querySelector('.ptab[data-paper="' + p2 + '"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); await wait(30);
+    const renamed = paperName(papers, p2) === 'ARR #9999' &&
+      paperTabs.querySelector('.ptab[data-paper="' + p2 + '"] .pname').textContent === 'ARR #9999' &&
+      localStorage.getItem(DRAFTS_KEY) === listBefore;
+    venueSelect.value = 'arr'; venueSelect.dispatchEvent(new Event('change')); await wait(30);
+    const venueLabeled = /for ARR #9999/.test(venueStat.textContent) && /ARR #9999/.test(venueSelect.title) &&
+      localStorage.getItem(DRAFTS_KEY) === listBefore;
+    window.prompt = origPrompt;
+    window.__papersUi = { startId, p1, p2, ids: [d1p1, d2p1, d1p2] };
+    return noPapersHidden && firstNamed && counts1.length === 2 && counts1[0][0] === 'ICML #1234' && counts1[0][1] === '1' &&
+      counts1[1][0] === 'No paper' && tabsOnlyP1 && addedInP1 && p2Named && p1OverMark && remembered && moved && renamed && venueLabeled ||
+      { noPapersHidden, firstNamed, counts1, tabsOnlyP1, addedInP1, p2Named, p1OverMark, remembered, moved, renamed, venueLabeled };`);
+
+  await check('reviewer cards, pointers, Promises, Print all and Compare are scoped to the open paper', `
+    const pa = newPaperId(), pb = newPaperId();
+    const a1 = createDraft('R1', 'Dear Reviewer 1, see our answer to Reviewer 2, Q1. As Reviewer Ab12 noted, we will add an ablation.');
+    const a2 = createDraft('R2', '**Q1.** Answered here. We will release the weights.');
+    const b1 = createDraft('R1', 'Dear Reviewer 1, see our answer to Reviewer 2, Q1. As Reviewer Ab12 noted, we will include a table.');
+    const b2 = createDraft('R2', '**W1.** Only W1 here.');
+    const b3 = createDraft('Reviewer ab12', 'Hello.');
+    changePapers((rec, now) => {
+      rec = setPaperEntry(rec, 'name', pa, 'Scope A', now);
+      rec = setPaperEntry(rec, 'name', pb, 'Scope B', now);
+      for (const [d, p] of [[a1, pa], [a2, pa], [b1, pb], [b2, pb], [b3, pb]]) rec = setPaperEntry(rec, 'member', d, p, now);
+      return rec;
+    });
+    switchDraft(a1); await wait(50);
+    /* In Scope A: no Reviewer ab12 tab (it lives in Scope B), and Scope A's R2 has Q1 (unlike Scope B's R2). */
+    const aNoLeak = !currentIssues.some((i) => i.title === 'Reviewer ID written differently from its tab' ||
+      i.title === 'This draft addresses another reviewer' || i.title === 'Pointer to a point the other draft does not have');
+    /* Promises and Copy as checklist show Scope A only. */
+    promisesBox.open = true; await wait(30);
+    let copied = '';
+    Object.defineProperty(navigator, 'clipboard', { configurable: true,
+      value: { writeText: (text) => { copied = text; return Promise.resolve(); } } });
+    copyPromises.click(); await wait(20);
+    const aPromises = /add an ablation/.test(copied) && /release the weights/.test(copied) && !/include a table/.test(copied) &&
+      promisesSum.textContent === '2 promises';
+    promisesBox.open = false;
+    /* Print all prints Scope A's 2 drafts only; Compare puts other papers in "Other papers". */
+    const origPrint = window.print; let printedNames = [];
+    window.print = () => {
+      printedNames = [...document.querySelectorAll('#printDrafts .print-heading h1')].map((h) => h.textContent);
+      window.dispatchEvent(new Event('afterprint'));
+    };
+    draftTools.querySelector('[data-act="history"]').click(); await wait(30);
+    document.getElementById('printAllBtn').click();
+    for (let i = 0; i < 60 && !printedNames.length; i++) await wait(100);
+    window.print = origPrint;
+    const printScoped = printedNames.length === 2 && printedNames[0] === 'R1' && printedNames[1] === 'R2';
+    document.getElementById('compareBtn').click(); await wait(30);
+    const groups = [...compareSource.querySelectorAll('optgroup')].map((g) => ({
+      label: g.label, opts: [...g.querySelectorAll('option')].map((o) => o.textContent)
+    }));
+    const compareScoped = groups.some((g) => /Scope A/.test(g.label) && g.opts.length === 1 && g.opts[0] === 'R2') &&
+      groups.some((g) => g.label === 'Other papers' && g.opts.some((t) => /Scope B · R1/.test(t)));
+    closeHistory();
+    /* In Scope B: Reviewer ab12 IS in Scope B (case mismatch on Ab12), and Scope B's R2 lacks Q1. */
+    switchDraft(b1); await wait(50);
+    const bCards = currentIssues.some((i) => i.title === 'Reviewer ID written differently from its tab') &&
+      currentIssues.some((i) => i.title === 'Pointer to a point the other draft does not have');
+    window.__papersUi.ids.push(a1, a2, b1, b2, b3);
+    window.__papersUi.pa = pa; window.__papersUi.pb = pb;
+    return aNoLeak && aPromises && printScoped && compareScoped && bCards ||
+      { aNoLeak, aPromises, copied, printScoped, printedNames, compareScoped, groups, bCards, titles: currentIssues.map((i) => i.title) };`);
+
+  await check('Group by name proposes papers from prefixes, applies only kept rows, renames no draft, and keeps the draft list byte for byte', `
+    const g1 = createDraft('P2 R1', 'P2 first.'), g2 = createDraft('P2 R2', 'P2 second.');
+    const g3 = createDraft('P3 R1', 'P3 first.'), g4 = createDraft('P3 R2', 'P3 second.');
+    const g5 = createDraft('Scratch notes', 'Ungrouped.');
+    saveDraftMeta(); renderDraftTabs(); await wait(30);
+    const btn = draftTools.querySelector('[data-act="group"]');
+    if (!btn) return 'no Group by name button';
+    const listBefore = localStorage.getItem(DRAFTS_KEY);
+    btn.click(); await wait(30);
+    const opened = !groupDialog.hidden;
+    const sel = (id) => groupList.querySelector('select[data-draft="' + id + '"]');
+    const prefilled = sel(g1).value === 'new:P2' && sel(g2).value === 'new:P2' &&
+      sel(g3).value === 'new:P3' && sel(g4).value === 'new:P3' && sel(g5).value === '';
+    /* Leave P3 R2 as No paper so only P2 R1, P2 R2 and P3 R1 are written. */
+    sel(g4).value = '';
+    groupApplyBtn.click(); await wait(30);
+    const p2id = paperNamed(papers, 'P2'), p3id = paperNamed(papers, 'P3');
+    const grouped = groupDialog.hidden && !!p2id && !!p3id &&
+      paperOfDraft(g1) === p2id && paperOfDraft(g2) === p2id &&
+      paperOfDraft(g3) === p3id && paperOfDraft(g4) === '' && paperOfDraft(g5) === '' &&
+      !(papers.maps.member && (papers.maps.member[g4] || papers.maps.member[g5]));
+    const notRenamed = draftById(g1).name === 'P2 R1' && draftById(g3).name === 'P3 R1';
+    const listUnchanged = localStorage.getItem(DRAFTS_KEY) === listBefore;
+    window.__papersUi.ids.push(g1, g2, g3, g4, g5);
+    window.__papersUi.g1 = g1; window.__papersUi.p2id = p2id;
+    return opened && prefilled && grouped && notRenamed && listUnchanged ||
+      { opened, prefilled, grouped, notRenamed, listUnchanged };`);
+
+  await check('Export carries paper and venue fields; Import and New paper from a file scope names per paper without switching', `
+    const OrigBlob = window.Blob; let exportedText = '';
+    window.Blob = function (parts, opts) { if (opts && opts.type === 'application/json') exportedText = parts.join(''); return new OrigBlob(parts, opts); };
+    draftTools.querySelector('[data-act="history"]').click(); await wait(20);
+    document.getElementById('exportAllBtn').click(); await wait(30);
+    window.Blob = OrigBlob;
+    closeHistory();
+    const parsed = JSON.parse(exportedText);
+    const arrDraft = parsed.drafts.find((d) => d.paper === 'ARR #9999');
+    const scopeADraft = parsed.drafts.find((d) => d.paper === 'Scope A');
+    const scratchDraft = parsed.drafts.find((d) => d.name === 'Scratch notes');
+    const exportOk = !!arrDraft && arrDraft.venue === 'arr' && !!scopeADraft && !('venue' in scopeADraft) && !!scratchDraft && !('paper' in scratchDraft);
+    /* Re-importing the export skips everything and says where they live. */
+    const openBefore = draftMeta.active;
+    importDrafts(exportedText, 'rebuttal-drafts.json'); await wait(20);
+    const dupMsg = toast.textContent;
+    const dupOk = /already here/.test(dupMsg) && /, in /.test(dupMsg) && draftMeta.active === openBefore;
+    /* Import without paper field into the open paper (Scope B): R1 becomes R1 (2). */
+    const openB = draftMeta.active;
+    importDrafts(JSON.stringify({ format: 'rebuttal-bench-drafts', version: 1,
+      drafts: [{ name: 'R1', text: 'Imported into Scope B.' }] }), 'into-b.json'); await wait(30);
+    const inB = draftMeta.list.find((d) => draftText(d.id) === 'Imported into Scope B.');
+    const inBOk = !!inB && inB.name === 'R1 (2)' && paperOfDraft(inB.id) === window.__papersUi.pb && draftMeta.active === openB;
+    /* Import with a new paper and venue: R1 stays R1 (unique per paper). */
+    importDrafts(JSON.stringify({ format: 'rebuttal-bench-drafts', version: 1,
+      drafts: [{ name: 'R1', text: 'Imported with paper.', paper: 'Imported Paper', venue: 'icml' }] }), 'with-p.json'); await wait(30);
+    const inNew = draftMeta.list.find((d) => draftText(d.id) === 'Imported with paper.');
+    const impPid = paperNamed(papers, 'Imported Paper');
+    const withPOk = !!inNew && inNew.name === 'R1' && !!impPid && paperOfDraft(inNew.id) === impPid &&
+      paperVenue(papers, impPid, '') === 'icml' && draftMeta.active === openB;
+    /* New paper from a file: paper named after the file base name, without switching. */
+    importDrafts('Fresh markdown text for CVPR.', 'CVPR 2027.md', { newPaper: true }); await wait(30);
+    const inFile = draftMeta.list.find((d) => draftText(d.id) === 'Fresh markdown text for CVPR.');
+    const cvprPid = paperNamed(papers, 'CVPR 2027');
+    const fileOk = !!inFile && !!cvprPid && paperOfDraft(inFile.id) === cvprPid && draftMeta.active === openB;
+    window.__papersUi.reloadCheck = { g1: window.__papersUi.g1, p2id: window.__papersUi.p2id, impId: inNew.id, impPid, cvprId: inFile.id, cvprPid,
+      cleanup: window.__papersUi.ids.concat([inB.id, inNew.id, inFile.id]), startId: window.__papersUi.startId };
+    sessionStorage.setItem('__papersReload', JSON.stringify(window.__papersUi.reloadCheck));
+    return exportOk && dupOk && inBOk && withPOk && fileOk ||
+      { exportOk, dupOk, dupMsg, inBOk, withPOk, fileOk };`);
+
+  await load();
+  await check('a reload keeps every paper, venue and grouping', `
+    const rc = JSON.parse(sessionStorage.getItem('__papersReload'));
+    sessionStorage.removeItem('__papersReload');
+    const kept = paperOfDraft(rc.g1) === rc.p2id && paperName(papers, rc.p2id) === 'P2' &&
+      paperOfDraft(rc.impId) === rc.impPid && paperVenue(papers, rc.impPid, '') === 'icml' &&
+      paperOfDraft(rc.cvprId) === rc.cvprPid && !paperBar.hidden;
+    window.confirm = () => true;
+    switchDraft(rc.startId);
+    rc.cleanup.forEach(deleteDraft);
+    await wait(50);
+    return kept && paperBar.hidden === true || { kept, hidden: paperBar.hidden };`);
+
+  /* Release bar: a 3.12 window open beside 3.13 on the same storage keeps its
+     draft list, texts and preferences untouched, and its saves leave the papers
+     record intact. */
+  {
+    let ok312 = false, info312 = '';
+    try {
+      const html312 = execFileSync('git', ['show', 'cef55bf:rebuttal-bench.html'], {
+        cwd: fileURLToPath(new URL('..', import.meta.url)),
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      const file312 = join(profile, 'rebuttal-bench-312.html');
+      writeFileSync(file312, html312);
+      const { targetId: t312 } = await send('Target.createTarget', { url: 'about:blank' });
+      const { sessionId: s312 } = await send('Target.attachToTarget', { targetId: t312, flatten: true });
+      await send('Runtime.enable', {}, s312);
+      await send('Page.enable', {}, s312);
+      const evalIn = async (sid, body) => {
+        const r = await send('Runtime.evaluate', {
+          expression: `(async () => { const wait = (ms) => new Promise((r) => setTimeout(r, ms)); ${body} })()`,
+          awaitPromise: true, returnByValue: true, userGesture: true,
+        }, sid);
+        if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+        return r.result.value;
+      };
+      await send('Page.navigate', { url: pathToFileURL(file312).href }, s312);
+      const loaded312 = await evalIn(s312, `for (let i = 0; i < 100; i++) { if (window.MJ_READY && draftReady) { await wait(300); return true; } await wait(200); } return false;`);
+      if (!loaded312) throw new Error('3.12 tab did not finish loading');
+      const setup312 = await evalIn(s312, `
+        const id312 = createDraft('Old 312 draft', 'Text from 3.12.');
+        switchDraft(id312); await wait(50);
+        venueSelect.value = 'neurips'; venueSelect.dispatchEvent(new Event('change')); await wait(50);
+        return { id312, prefs: localStorage.getItem(PREFS_KEY), theme: prefs.theme };`);
+      /* Run 3.13 paper actions on the shared storage. */
+      const after313 = await inPage(`
+        const origPrompt = window.prompt, startId = draftMeta.active;
+        takeInList(storedValue(DRAFTS_KEY));
+        window.prompt = () => 'Paper 313';
+        draftTools.querySelector('[data-act="new-paper"]').click(); await wait(30);
+        const p313 = openPaper(), d313 = draftMeta.active;
+        venueSelect.value = 'arr'; venueSelect.dispatchEvent(new Event('change')); await wait(30);
+        limitInput.value = '3456'; limitInput.dispatchEvent(new Event('input')); await wait(30);
+        switchDraft(${JSON.stringify(setup312.id312)}); await wait(30);
+        const moveSel = draftTools.querySelector('.dmove');
+        moveSel.value = p313; moveSel.dispatchEvent(new Event('change')); await wait(30);
+        window.prompt = () => 'Paper 313 renamed';
+        paperTabs.querySelector('.ptab[data-paper="' + p313 + '"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); await wait(30);
+        const gx = createDraft('G1 R1', 'G1 one.'), gy = createDraft('G1 R2', 'G1 two.');
+        saveDraftMeta(); renderDraftTabs(); await wait(30);
+        draftTools.querySelector('[data-act="group"]').click(); await wait(30);
+        groupApplyBtn.click(); await wait(30);
+        window.prompt = origPrompt;
+        return { startId, p313, d313, gx, gy, papersBefore: localStorage.getItem(PAPERS_KEY) };`);
+      /* Check 3.12 saw no loss of its draft, text or preferences, and its saves leave PAPERS_KEY intact. */
+      const check312 = await evalIn(s312, `
+        await wait(80);
+        const stillListed = !!draftById(${JSON.stringify(setup312.id312)});
+        const textSame = draftText(${JSON.stringify(setup312.id312)}) === 'Text from 3.12.';
+        const prefsUntouched = localStorage.getItem(PREFS_KEY) === ${JSON.stringify(setup312.prefs)};
+        /* Now 3.12 edits its draft, saves preferences and adds a new draft. */
+        setSourceText('Edited in 3.12.', 0); updateAll(); saveDraftNow(); await wait(50);
+        themeBtn.click(); await wait(50);
+        themeBtn.click(); await wait(50);
+        const addedBy312 = createDraft('Added by 3.12', 'From old window.'); saveDraftMeta(); await wait(50);
+        const papersAfter = localStorage.getItem('rebuttal-bench-papers');
+        return { stillListed, textSame, prefsUntouched, addedBy312, papersIntact: papersAfter === ${JSON.stringify(after313.papersBefore)} };`);
+      /* Check 3.13 sees 3.12's new draft in No paper and keeps the moved draft in its paper with 3.12's edit. */
+      const check313 = await inPage(`
+        await wait(80);
+        const view = papersView(draftMeta.list, papers);
+        const inNoPaper = view.none.indexOf(${JSON.stringify(check312.addedBy312)}) >= 0 &&
+          !!paperTabs.querySelector('.ptab[data-paper=""]');
+        const keptMoved = paperOfDraft(${JSON.stringify(setup312.id312)}) === ${JSON.stringify(after313.p313)} &&
+          storedValue(keyOfDraft(${JSON.stringify(setup312.id312)})) === 'Edited in 3.12.';
+        return { inNoPaper, keptMoved };`);
+      /* Close the 3.12 tab before cleanup so it does not re-create its open draft. */
+      await send('Target.closeTarget', { targetId: t312 });
+      await sleep(50);
+      await inPage(`
+        window.confirm = () => true;
+        switchDraft(${JSON.stringify(after313.startId)});
+        [${JSON.stringify(setup312.id312)}, ${JSON.stringify(after313.d313)}, ${JSON.stringify(after313.gx)}, ${JSON.stringify(after313.gy)}, ${JSON.stringify(check312.addedBy312)}].forEach(deleteDraft);
+        venueSelect.value = ''; venueSelect.dispatchEvent(new Event('change'));
+        limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input')); await wait(50);
+        return true;`);
+      ok312 = check312.stillListed && check312.textSame && check312.prefsUntouched &&
+        check312.papersIntact && check313.inNoPaper && check313.keptMoved;
+      if (!ok312) info312 = JSON.stringify({ check312, check313 });
+    } catch (e) {
+      info312 = e.message;
+    }
+    results.push([ok312, 'a 3.12 window beside 3.13 keeps its drafts, texts and preferences, and leaves the papers record intact', info312]);
+  }
+
+  /* codex-review-313's fixes in the storage layer and the paper actions. */
+  await check('a stored copy that lacks what this window knows is written back on the next event', `
+    const startId = draftMeta.active, d1 = createDraft('W R1', 'Answer W1.'), pw = newPaperId();
+    changePapers((rec, now) => setPaperEntry(setPaperEntry(rec, 'name', pw, 'Paper W', now), 'member', d1, pw, now));
+    /* Another window's write overtook ours: the stored copy lacks Paper W. */
+    let theirs = setPaperEntry(parsePapers('{}'), 'name', newPaperId(), 'Paper V', Date.now());
+    localStorage.setItem(PAPERS_KEY, serializePapers(theirs));
+    window.dispatchEvent(new StorageEvent('storage', { key: PAPERS_KEY, newValue: serializePapers(theirs) }));
+    await wait(30);
+    const stored = parsePapers(localStorage.getItem(PAPERS_KEY));
+    const both = paperName(stored, pw) === 'Paper W' && paperNamed(stored, 'Paper V') !== null && paperOfDraft(d1) === pw;
+    window.__w = { startId, d1, pw };
+    return both || { stored: serializePapers(stored) };`);
+
+  await check('a paper cannot be renamed to another paper’s name (a backup would merge the two)', `
+    const { d1, pw } = window.__w, d2 = createDraft('X R1', 'Answer X1.'), px = newPaperId();
+    changePapers((rec, now) => setPaperEntry(setPaperEntry(rec, 'name', px, 'Paper X', now), 'member', d2, px, now));
+    switchDraft(d2); await wait(30);
+    window.prompt = () => 'paper w';
+    renamePaper(px); await wait(30);
+    const refused = paperName(papers, px) === 'Paper X' && /exists already/.test(toast.textContent);
+    window.prompt = () => 'Paper X2';
+    renamePaper(px); await wait(30);
+    const renamed = paperName(papers, px) === 'Paper X2';
+    window.__w.d2 = d2; window.__w.px = px;
+    return refused && renamed || { refused, renamed, name: paperName(papers, px), toast: toast.textContent };`);
+
+  await check('Group by name keeps a move another window made while the dialog was open', `
+    const { d1, d2 } = window.__w, g1 = createDraft('P2 R1', 'One.'), g2 = createDraft('P2 R2', 'Two.');
+    switchDraft(g1); await wait(30);
+    openGroupDialog(); await wait(50);
+    /* Another window moves P2 R1 into Paper W meanwhile. */
+    const moved = setPaperEntry(mergePapers(papers, parsePapers('{}')), 'member', g1, window.__w.pw, Date.now() + 10);
+    localStorage.setItem(PAPERS_KEY, serializePapers(moved));
+    window.dispatchEvent(new StorageEvent('storage', { key: PAPERS_KEY, newValue: serializePapers(moved) }));
+    await wait(30);
+    groupApplyBtn.click(); await wait(50);
+    const kept = paperOfDraft(g1) === window.__w.pw, grouped = paperName(papers, paperOfDraft(g2)) === 'P2';
+    window.confirm = () => true;
+    switchDraft(window.__w.startId); await wait(30);
+    [d1, d2, g1, g2].forEach(deleteDraft); await wait(30);
+    return kept && grouped && !papersView(draftMeta.list, papers).papers.length ||
+      { kept, grouped, g1paper: paperName(papers, paperOfDraft(g1)), g2paper: paperName(papers, paperOfDraft(g2)) };`);
+
   /* codex-review-312: in the preferences object, another window's save of an
      unrelated switch wrote its old copy over the list. */
   await check('the word list has its own key: another window’s preference save leaves it, and its edit arrives', `
@@ -1765,17 +2151,33 @@ try {
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).
+  // A key's own delay ('stub:delay:<key>') stalls that key alone.
   await send('Page.addScriptToEvaluateOnNewDocument', { source: `
-    const later = (f) => new Promise((r) => setTimeout(() => r(f()), +(localStorage.getItem('stub:delay') || 50)));
+    const later = (k, f) => new Promise((r) => setTimeout(() => r(f()),
+      +(localStorage.getItem('stub:delay:' + k) || localStorage.getItem('stub:delay') || 50)));
     window.storage = {
-      get: (k) => later(() => { const v = localStorage.getItem('stub:' + k); return v === null ? null : { value: v }; }),
-      set: (k, v) => later(() => { localStorage.setItem('stub:' + k, v); }),
-      delete: (k) => later(() => { localStorage.removeItem('stub:' + k); }),
+      get: (k) => later(k, () => { const v = localStorage.getItem('stub:' + k); return v === null ? null : { value: v }; }),
+      set: (k, v) => later(k, () => { localStorage.setItem('stub:' + k, v); }),
+      delete: (k) => later(k, () => { localStorage.removeItem('stub:' + k); }),
     };` }, sessionId);
   await load();
   await check('with an asynchronous store, the autosave reaches it', `
     setSourceText('Old $x$.', 0); ta.dispatchEvent(new Event('input')); await wait(1200);
     return localStorage.getItem('stub:rebuttal-bench-draft') === 'Old $x$.' || localStorage.getItem('stub:rebuttal-bench-draft');`);
+
+  /* codex-recheck-313: the papers record stays in this browser, like reviews
+     and the word list, so the store's start-up never waits for it, and a
+     papers action writes nothing to the store. */
+  await check('with an asynchronous store, papers stay in this browser and the store never sees them', `
+    const id = draftMeta.active, pid = newPaperId();
+    changePapers((rec, now) => setPaperEntry(setPaperEntry(rec, 'name', pid, 'Local paper', now), 'member', id, pid, now));
+    await wait(400);
+    const local = paperOfDraft(id) === pid && parsePapers(localStorage.getItem(PAPERS_KEY)).maps.member[id].v === pid;
+    const remote = localStorage.getItem('stub:' + PAPERS_KEY);
+    changePapers((rec, now) => setPaperEntry(rec, 'member', id, '', now)); /* back to No paper */
+    await wait(400);
+    return local && remote === null && localStorage.getItem('stub:' + PAPERS_KEY) === null || { local, remote };`);
+  await load();
   await inPage(`setSourceText('New $y$.', 0); ta.dispatchEvent(new Event('input')); return true;`);
   await load(); /* reload before the 700 ms autosave can reach the store */
   await check('text typed just before a reload wins over the older stored draft', `
