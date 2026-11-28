@@ -103,13 +103,24 @@ test('draftReadiness computes review coverage and requires complete coverage whe
   assert.deepEqual(full.coverage, { covered: 3, total: 3 });
   assert.equal(full.ready, true);
 
-  // A review without extractable points has null coverage and does not block readiness.
+  // A review without extractable points is {0, 0}, unlike no review (null),
+  // and does not block readiness.
   const noPoints = plain(A.draftReadiness('Thank you for the positive review.', {
     limit: 5000,
     review: 'Summary:\nNice paper.\n\nWeaknesses:\nNone.',
   }));
-  assert.equal(noPoints.coverage, null);
+  assert.deepEqual(noPoints.coverage, { covered: 0, total: 0 });
   assert.equal(noPoints.ready, true);
+  const noReview = plain(A.draftReadiness('Thank you for the positive review.', { limit: 5000 }));
+  assert.equal(noReview.coverage, null);
+});
+
+test('draftReadiness counts every identity match, beyond the 30 cards a draft shows', () => {
+  const opts = { limit: 50000, analyze: { identity: A.identityTerms('Acme') } };
+  const r = plain(A.draftReadiness('Acme ran it. '.repeat(32), opts));
+  assert.equal(r.identity, 32);
+  assert.equal(r.hazards.err, 0);
+  assert.equal(r.ready, false);
 });
 
 test('draftReadiness counts promises by kind without blocking readiness', () => {

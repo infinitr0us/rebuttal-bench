@@ -2236,6 +2236,71 @@ try {
     return reloadedOpen && defaultOff && scopedFind && listShown && unchangedBeforeClick && selectedA2 && unchangedAfterClick && replacedOpenOnly ||
       { reloadedOpen, defaultOff, scopedFind, resRows, listShown, unchangedBeforeClick, selectedA2, unchangedAfterClick, replacedOpenOnly };`);
 
+  /* Codex review of 3.14, blocker 1: every window wrote its whole preferences
+     object, so opening a panel here undid a limit another window had saved. */
+  await check('a preference saved here keeps what another window saved meanwhile, and this window’s own change wins', `
+    const lim0 = prefs.limit, own0 = prefs.ownLimit, fs0 = prefs.fsEditor, open0 = readyBox.open;
+    /* Another window saves a limit and a font size. */
+    const theirs = Object.assign(JSON.parse(localStorage.getItem(PREFS_KEY)), { limit: 4321, ownLimit: 4321, fsEditor: 15 });
+    localStorage.setItem(PREFS_KEY, JSON.stringify(theirs));
+    /* Here: a font size of this window's own, then a panel opened. */
+    const mineFs = fs0 === 14 ? 12 : 14;
+    prefs.fsEditor = mineFs; savePrefs();
+    readyBox.querySelector('summary').click(); await wait(50);
+    const s = JSON.parse(localStorage.getItem(PREFS_KEY));
+    const keptTheirs = s.limit === 4321 && s.ownLimit === 4321 && prefs.limit === 4321;
+    const keptMine = s.fsEditor === mineFs && prefs.fsEditor === mineFs && s.readyOpen === !open0;
+    /* Put everything back as this window's own change. */
+    prefs.limit = lim0; prefs.ownLimit = own0; prefs.fsEditor = fs0; savePrefs(); applyPrefs();
+    if (readyBox.open !== open0) { readyBox.querySelector('summary').click(); await wait(30); }
+    return keptTheirs && keptMine || { keptTheirs, keptMine, s };`);
+
+  /* Codex review of 3.14, blocker 2: for the open draft the panels read the
+     newest stored copy, which another window may have saved, while the editor
+     (and the hazards, the counter, the find boxes) held another text. */
+  await check('Ready, Find across drafts and Promises describe the open editor, not a newer copy another window saved; a rebuilt results list keeps the focus', `
+    const home = draftMeta.active, pa = newPaperId();
+    const d1 = createDraft('Active R1', 'Our result is TBD. We will add the table.');
+    const d2 = createDraft('Active R2', 'Another answer with TBD inside.');
+    saveDraftMeta();
+    changePapers((rec, now) => {
+      rec = setPaperEntry(rec, 'name', pa, 'Active paper', now);
+      rec = setPaperEntry(rec, 'member', d1, pa, now);
+      return setPaperEntry(rec, 'member', d2, pa, now);
+    });
+    switchDraft(d1); await wait(50);
+    readyBox.querySelector('summary').click(); await wait(50);
+    if (!promisesBox.open) { promisesBox.querySelector('summary').click(); await wait(30); }
+    /* Another window saves a newer text of the open draft. */
+    const key1 = keyOfDraft(d1), newer = 'Our result is final.';
+    localStorage.setItem(key1, newer);
+    window.dispatchEvent(new StorageEvent('storage', { key: key1, newValue: newer, storageArea: localStorage }));
+    await wait(50);
+    const row = readyList.querySelector('[data-draft="' + d1 + '"]');
+    const readyOk = ta.value.indexOf('TBD') >= 0 && !!row && row.getAttribute('data-ready') === '0' &&
+      /1 placeholder/.test(row.textContent) && row.textContent.indexOf(String(ta.value.trim().length)) >= 0;
+    const promisesOk = /We will add the table/.test(promisesList.textContent);
+    openFind(false); if (!findAll.checked) findAll.click();
+    findInput.value = 'TBD'; findInput.dispatchEvent(new Event('input')); await wait(50);
+    const res = [...findResults.querySelectorAll('.findres-row')].map((r) => r.getAttribute('data-draft'));
+    const findOk = res.indexOf(d1) >= 0 && res.indexOf(d2) >= 0 && findMatches().length === 1;
+    /* A snippet keeps the focus when the list is rebuilt for another draft. */
+    const snip = findResults.querySelector('.findres-snip[data-draft="' + d1 + '"]');
+    if (snip) snip.focus(); /* missing when the list read another copy: findOk says so */
+    const key2 = keyOfDraft(d2), more = 'Another answer with TBD inside, and TBD again.';
+    localStorage.setItem(key2, more);
+    window.dispatchEvent(new StorageEvent('storage', { key: key2, newValue: more, storageArea: localStorage }));
+    await wait(50);
+    const rebuilt = /2 matches/.test(findResults.textContent);
+    const a = document.activeElement;
+    const focusOk = rebuilt && !!a && a.classList.contains('findres-snip') && a.getAttribute('data-draft') === d1;
+    findInput.value = ''; findAll.checked = false; closeFind();
+    readyBox.querySelector('summary').click(); await wait(30);
+    switchDraft(home); window.confirm = () => true;
+    [d1, d2].forEach(deleteDraft); await wait(50);
+    return readyOk && promisesOk && findOk && focusOk ||
+      { readyOk, row: row && row.textContent, promisesOk, findOk, res, focusOk, rebuilt, active: a && a.outerHTML.slice(0, 80) };`);
+
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).

@@ -19,6 +19,12 @@
   so while *All drafts* is on. The box is not stored: a reload turns it off.
 
 ### Fixed
+- Changing a setting in one window (opening a panel, the theme, a font size) no longer undoes a
+  setting another window of the same browser saved meanwhile, such as its character limit: each
+  window now takes in what the others changed before it saves. A window of 3.13 or older still
+  writes its own copy of every setting.
+- Promises (and the new panels) describe the open draft as its editor shows it, also when
+  another window saved a newer copy of that draft since.
 - Split's warnings about a macro or label used across parts gave the wrong reason. OpenReview's
   forum does not typeset each comment on its own: MathJax keeps definitions and labels from the
   comments typeset before on the page, so whether a part sees another part's definition depends

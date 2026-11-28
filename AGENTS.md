@@ -470,7 +470,9 @@ Drafts are grouped into papers (3.13; design note and Fable's review in
   browser, the venue and limit controls wait for the drafts (`papersBeforeBoot`); without papers
   they work before as in 3.12.
 - **The open paper is the open draft's** (`openPaper`): nothing else is stored. **No papers state
-  lives in `prefs`**, which every window writes whole. Every reader of the venue and limit goes
+  lives in `prefs`**, which every window writes whole (since 3.14 after taking in, per setting,
+  what another window of this browser saved since: `takeStoredPrefs`, below). Every reader of
+  the venue and limit goes
   through `openVenue()` and `openLimit()` (`paperVenue`, `paperLimit`: a paper's own entries, else
   inherited from `prefs`, so grouping changes no card); in a paper the venue select and the limit
   input write the paper's entries and leave `prefs` byte for byte (a new venue resets the
@@ -573,10 +575,25 @@ models a comment typeset with nothing before it, the case an author must write f
   view counts it), `promisesIn` by kind, and `ready`. MathJax's own errors are not in it (they
   need a typeset). The *Ready to post* panel (`#readyBox`, `renderReady`) is **read-only**: it
   lists `openPaperDrafts()` (the open paper's drafts in tab order, shared with Promises and Find
-  across drafts), reads texts through `knownDraftText` and reviews through `draftReviewText`
+  across drafts), reads texts through `shownDraftText` and reviews through `draftReviewText`
   (the open review box, else `storedReview`), writes nothing but `prefs.readyOpen`, caches by
   draft, text, review, venue, word list and limit (`readyByDraft`, reusing `lastAnalysis` for
-  the open draft), and renders only while open.
+  the open draft), and renders only while open. A review with no points is `{covered: 0,
+  total: 0}` (*no points*), no review `null`; `identity` is `analyze`'s `identityCount`, not
+  the 30 cards a draft shows.
+- **The panels that describe drafts** (Promises, Ready to post, Find across drafts) read
+  `shownDraftText(id)`: for the open draft the editor, which the hazards, the counter and the
+  find boxes describe, also when another window saved a newer copy since; for the others
+  `knownDraftText` with LF line breaks, as the textarea will give them. `knownDraftText` alone
+  prefers that newer copy for an unchanged editor, as Export must, and Ready approved text the
+  editor did not hold (Codex review of 3.14, `reviews/2026-11-28/codex-review-314`). Their
+  lists are replaced with `setListHtml`, which keeps the focus on the same row.
+- **Preferences** are one object every window writes whole. `savePrefs` first takes in each
+  setting another window of this browser changed in localStorage since this window last saw it
+  (`prefsSeen`) and this window has not changed since its last save (`prefsBase`); the panels'
+  open state and the view are this window's layout and are never taken in. A window of 3.13 or
+  older still writes its whole old copy. Before the stored preferences arrive, `prefsTouched`
+  rules as before (`readStoredPrefs` reads both).
 - `findInText(text, query, caseSensitive)` (pure, `tests/editing.test.js`) is the literal,
   non-overlapping match behind the find bar and Find across drafts. *All drafts* (`#findAll`,
   never stored) lists `openPaperDrafts()` with up to three snippets each in `#findResults` (an
