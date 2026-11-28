@@ -7630,7 +7630,11 @@ function splitComment(text, limit, opts) {
   var n = parts.length, warnings = [];
   if (numbered && n > 1) parts = parts.map(function (p, i) { return '(' + (i + 1) + '/' + n + ')\n\n' + p; });
 
-  /* What each part defines and uses, for the fresh TeX state of each comment. */
+  /* What each part defines and uses across parts. OpenReview's forum never
+     resets MathJax's TeX state (no texReset in openreview-web), so a comment
+     sees the definitions and labels of the comments typeset before it on the
+     page, and only those: that order depends on how the forum sorts and loads
+     its replies, and the e-mail shows the source. Each part must stand alone. */
   var defRe = /\\(?:newcommand|renewcommand|providecommand|DeclareMathOperator)\*?\s*\{?\s*\\([A-Za-z]+)|\\def\s*\\([A-Za-z]+)/g;
   var info = parts.map(function (p) {
     var defined = {}, labels = {}, m2;
@@ -7649,7 +7653,7 @@ function splitComment(text, limit, opts) {
         if (new RegExp('\\\\' + name + '(?![A-Za-z])').test(pi.text)) {
           reported['\\' + name] = true;
           warnings.push({ part: j + 1, message: 'Part ' + (j + 1) + ' uses \\' + name + ', defined in part ' + (i + 1) +
-            ': each comment is typeset on its own, so repeat the definition.' });
+            ': whether a comment sees another comment’s definitions depends on the order OpenReview shows them in, so repeat the definition.' });
         }
       });
       Object.keys(other.labels).forEach(function (lab) {
@@ -7657,7 +7661,7 @@ function splitComment(text, limit, opts) {
         if (new RegExp('\\\\(?:eq)?ref\\{' + escRe(lab) + '\\}').test(pi.text)) {
           reported[lab] = true;
           warnings.push({ part: j + 1, message: 'Part ' + (j + 1) + ' refers to \\label{' + lab + '} in part ' + (i + 1) +
-            ': OpenReview will show (???).' });
+            ': OpenReview shows (???) unless part ' + (i + 1) + ' happens to be typeset first, so write the number out.' });
         }
       });
     });
@@ -8555,7 +8559,9 @@ function clearOldMath(target) {
 }
 
 /* MathJax keeps \label keys and \newcommand definitions from one typeset to
-   the next, but OpenReview renders a comment once. Without a reset, every
+   the next. OpenReview's forum does not reset them either, across comments,
+   but the preview shows one comment as it renders with nothing before it on
+   the page (see splitComment), and renders it again on every keystroke. Without a reset, every
    labelled equation turns into "Label multiply defined" after the first
    keystroke, and a deleted macro definition keeps working in the preview. */
 var mathtoolsDefaults = typeof WeakMap === 'function' ? new WeakMap() : { get: function () { return null; }, set: function () {} };

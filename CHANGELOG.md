@@ -19,6 +19,11 @@
   so while *All drafts* is on. The box is not stored: a reload turns it off.
 
 ### Fixed
+- Split's warnings about a macro or label used across parts gave the wrong reason. OpenReview's
+  forum does not typeset each comment on its own: MathJax keeps definitions and labels from the
+  comments typeset before on the page, so whether a part sees another part's definition depends
+  on the order the forum shows them in. The advice stays (repeat the definition, write the
+  number out); the reason now says so.
 - The smoke test that runs the released 3.12 page beside the current one read it from a commit
   the shallow CI checkout lacked; it now reads the `v3.12.0` tag, and CI checks out the whole
   history. The 3.13.0 release was not affected.

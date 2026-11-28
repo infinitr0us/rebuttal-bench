@@ -512,8 +512,13 @@ blocks, and inside a block too long for one part between table rows (header and 
 repeated), list items (each piece starts with its own item, so an ordered list keeps its numbers)
 or sentences (never at a position inside a formula, code, a link or inline HTML). It never drops
 or reorders content (`tests/split.test.js` checks the text round-trips), appends each link
-reference definition to the parts that use it, and reports macros and labels used across parts,
-because OpenReview typesets each comment from a fresh TeX state.
+reference definition to the parts that use it, and reports macros and labels used across parts.
+Each part must stand alone: OpenReview's forum never resets MathJax's TeX state (openreview-web
+has no `texReset`), so a comment sees the definitions and labels of the comments typeset before
+it on the page, an order set by how the forum sorts and loads replies, and the same `\label` in
+two comments is an error in the later one (modelled in
+`reviews/2026-11-28/shared-tex.cjs`). The preview resets the state for each render, which
+models a comment typeset with nothing before it, the case an author must write for.
 
 ## Sections, wording and editing aids
 
