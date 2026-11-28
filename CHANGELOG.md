@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.12.0 (unreleased)
+## 3.12.0 (2026-11-28)
 
 ### Checked on real author responses
 - A field audit ran the analyzer on 1,300 public author responses (ICLR, NeurIPS, ICML, TMLR,
