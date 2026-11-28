@@ -381,6 +381,80 @@ window.MathJax = {
   }
   .pane-head .hint { font-size: 11.5px; color: var(--dim); }
 
+  /* papers: a quieter segmented row above the draft tabs, shown once a paper exists */
+  .paperbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 18px;
+    background: var(--head-bg);
+    border-top: 1px solid var(--line);
+  }
+  .ptabs {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    min-width: 0;
+  }
+  .ptab {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--sans);
+    font-size: 11.5px;
+    line-height: 1.35;
+    padding: 2px 8px;
+    border-radius: 5px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--dim);
+    white-space: nowrap;
+  }
+  .ptab .pname { max-width: 18ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ptab .pcount { flex: none; font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+  .ptab .pover { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--err); }
+  .ptab.over .pcount { color: var(--err); }
+  .ptab[aria-selected="true"] {
+    background: var(--panel);
+    border-color: var(--line);
+    color: var(--text);
+    font-weight: 500;
+  }
+  .ptab:hover { color: var(--text); background: var(--btn-hover); }
+  .ptab[aria-selected="true"]:hover { background: var(--panel); }
+  .ptab:focus-visible, .padd:focus-visible, .pselect:focus-visible, .dmove:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .padd {
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.35;
+    padding: 2px 8px;
+    border-radius: 6px;
+    border: 1px dashed var(--line);
+    background: var(--btn-bg);
+    color: var(--dim);
+    white-space: nowrap;
+  }
+  .padd:hover { background: var(--btn-hover); color: var(--text); }
+  .pselect {
+    display: none;
+    max-width: 220px;
+    background: var(--btn-bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 3px 6px;
+    font-family: var(--sans);
+    font-size: 12px;
+  }
+  .pnote { font-size: 11px; color: var(--title-warn); margin-left: auto; }
+  .dmove { max-width: 160px; cursor: pointer; padding: 2px 6px; }
+
   /* drafts */
   .drafts {
     display: flex;
@@ -1050,6 +1124,8 @@ window.MathJax = {
     main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(45vh, 1fr) 1px minmax(45vh, 1fr); }
     #mjStatus { margin-left: 0; }
     .lint { max-height: 34%; }
+    .paperbar .ptabs { display: none; }
+    .paperbar .pselect { display: block; }
   }
 </style>
 </head>
@@ -1101,6 +1177,7 @@ window.MathJax = {
   <section class="pane" aria-label="Source editor">
     <div class="pane-head"><h2>Source</h2><span class="hint">exactly what you'll paste into OpenReview, or its compact form</span>
       <span class="pane-tools"><button type="button" id="findBtn" title="Find and replace in the source (Ctrl+F in the editor)">Find</button><label title="Underline misspelled words in the editor, with the browser’s spellchecker"><input type="checkbox" id="spellBox"> Spellcheck</label></span></div>
+    <div class="paperbar" id="paperBar" hidden><div class="ptabs" id="paperTabs" role="tablist" aria-label="Papers"></div><select class="pselect" id="paperSelect" aria-label="Paper"></select><button type="button" class="padd" id="paperAddBtn" title="Create a new paper with its first draft">+ Paper</button><span class="pnote" id="paperNote" hidden></span></div>
     <div class="drafts" id="draftBar"><div class="dtabs" id="draftTabs" role="tablist" aria-label="Drafts"></div><div class="dtools" id="draftTools"></div></div>
     <div id="tableOffer" hidden>
       <span id="pasteQuestion">Convert the pasted table to Markdown?</span>
@@ -7788,37 +7865,41 @@ function applyPrefs() {
    links, for the open draft's paper (openVenue, openLimit). A limit being
    typed is left as it is while it says the same number. */
 function applyVenueLimit() {
-  var limit = openLimit();
+  var limit = openLimit(), pid = openPaper(), pName = pid ? paperName(papers, pid) : null;
   if (document.activeElement !== limitInput || (parseInt(limitInput.value, 10) || 0) !== limit) limitInput.value = limit;
   var venue = venueById(openVenue());
   venueSelect.value = venue ? venue.id : '';
   venueSelect.title = venue
-    ? venue.name + ': ' + venue.rule + '. Source: ' + venue.source + (venue.also ? '; also ' + venue.also.join(', ') : '') +
+    ? (pName ? 'Applies to ' + pName + '. ' : '') + venue.name + ': ' + venue.rule + '. Source: ' + venue.source + (venue.also ? '; also ' + venue.also.join(', ') : '') +
       ' (checked ' + VENUES_CHECKED + '; rules change every year)'
-    : 'Choose a venue to set its character limit and check links against its rebuttal rules';
+    : pName
+      ? 'Choose a venue for ' + pName + ' to set its character limit and check links against its rebuttal rules'
+      : 'Choose a venue to set its character limit and check links against its rebuttal rules';
   renderVenueStat();
   renderReportLinks();
 }
 
 function renderVenueStat() {
-  var venue = venueById(openVenue());
+  var venue = venueById(openVenue()), pid = openPaper(), pName = pid ? paperName(papers, pid) : null;
   venueStat.hidden = !venue;
   if (!venue) {
     venueStat.textContent = '';
     venueStat.removeAttribute('href');
-    limitInput.title = 'Your own character limit';
+    limitInput.title = pName ? 'Your own character limit for ' + pName : 'Your own character limit';
     return;
   }
   var own = !venue.limit || openLimit() !== venue.limit;
   var parts = [venue.label,
     own ? 'your limit (' + (venue.limit ? 'rule: ' + fmt(venue.limit) + ' ' + venue.unit : 'none stated') + ')' : venue.unit];
   if (venue.linksBrief) parts.push(venue.linksBrief);
+  if (pName) parts.push('for ' + pName);
   venueStat.textContent = parts.join(' · ');
   venueStat.href = venue.source;
-  venueStat.title = venue.name + ': ' + venue.rule + '. Source: ' + venue.source +
+  venueStat.title = (pName ? 'Applies to ' + pName + '. ' : '') + venue.name + ': ' + venue.rule + '. Source: ' + venue.source +
     (venue.also ? '; also ' + venue.also.join(', ') : '') +
     ' (checked ' + VENUES_CHECKED + '; rules change every year). Click to open the first.';
-  limitInput.title = own ? 'Your own character limit' : 'The character limit of ' + venue.label + ' (' + venue.unit + ')';
+  limitInput.title = (own ? 'Your own character limit' : 'The character limit of ' + venue.label + ' (' + venue.unit + ')') +
+    (pName ? ' for ' + pName : '');
 }
 
 /* The footer's version and report links, set as plain hrefs so a middle
@@ -7896,6 +7977,12 @@ var draftTimer = null;
 var PAPERS_KEY = 'rebuttal-bench-papers';
 var papers = parsePapers(storedValue(PAPERS_KEY));
 var papersStored = true;   /* false: this window's last write to localStorage was refused */
+var lastDraftInPaper = Object.create(null); /* pid -> draft id last opened in this window; never stored in prefs */
+var paperBar = document.getElementById('paperBar');
+var paperTabs = document.getElementById('paperTabs');
+var paperSelect = document.getElementById('paperSelect');
+var paperAddBtn = document.getElementById('paperAddBtn');
+var paperNote = document.getElementById('paperNote');
 
 function writePapersLocal() {
   if (papers.newer || !canLocalRead) return;
@@ -7981,14 +8068,22 @@ function openVenue() {
 function openLimit() {
   return paperLimit(papers, openPaper(), prefs.limit, prefs.ownLimit);
 }
+/* A private merge of memory and the stored record, for Export, Print and
+   reusing existing paper names without adopting or writing anything. */
+function papersForOutput() {
+  return mergePapers(papers, parsePapers(storedValue(PAPERS_KEY)));
+}
 /* Everything the open draft's paper decides: the venue and limit shown, the
-   cards (check 15, the counters, reviewer cards) and the tabs. */
+   cards (check 15, the counters, reviewer cards), an open Split dialog and
+   the paper and draft tabs. */
 function papersChanged() {
+  if (draftReady) lastDraftInPaper[openPaper()] = draftMeta.active;
   applyVenueLimit();
   if (!draftReady) return;
   renderDraftTabs();
   updateAll();
   refreshReviewerCards();
+  if (splitDialog && !splitDialog.hidden) renderSplit();
 }
 
 function keyOfDraft(id) { return id === 'd1' ? DRAFT_KEY : DRAFT_KEY + '-' + id; }
@@ -8819,7 +8914,9 @@ function saveDraftMeta() {
    staying hidden; so does an answer written by an older version under the
    first draft's key after that draft was deleted. Only localStorage can be
    listed, and only exactly keyed, nonempty bodies count. */
+var recoveredDraftIds = [];
 function recoverDraftBodies() {
+  recoveredDraftIds = [];
   if (!canLocalRead) return false;
   var listed = {}, found = false, ids = [];
   draftMeta.list.forEach(function (d) { listed[d.id] = true; });
@@ -8837,23 +8934,170 @@ function recoverDraftBodies() {
     draftMeta.list.push({ id: id, name: 'Recovered draft', at: Date.now() });
     delete draftMeta.gone[id];
     listed[id] = true;
+    recoveredDraftIds.push(id);
     found = true;
   });
   return found;
 }
 
+function draftsInPaper(pid) {
+  return draftMeta.list.filter(function (d) { return paperOfDraft(d.id) === pid; });
+}
+
+/* The quieter row of paper tabs above the draft tabs, shown once at least one
+   paper exists. Below 920 px the tabs give way to a select. Every paper shows
+   its draft count and a mark when any of its drafts exceeds that paper's own
+   limit; No paper is always shown while it holds drafts so nothing is hidden. */
+function renderPaperRow(view) {
+  view = view || papersView(draftMeta.list, papers);
+  if (!view.papers.length) {
+    paperBar.hidden = true;
+    paperTabs.innerHTML = '';
+    paperSelect.textContent = '';
+    paperNote.hidden = true;
+    return;
+  }
+  paperBar.hidden = false;
+  var focused = document.activeElement && document.activeElement.closest && document.activeElement.closest('#paperTabs .ptab');
+  var focusPid = focused ? focused.getAttribute('data-paper') : null;
+  var activePid = openPaper(), html = '';
+  paperSelect.textContent = '';
+  function addTab(pid, label, draftIds) {
+    var selected = pid === activePid;
+    var pLimit = paperLimit(papers, pid, prefs.limit, prefs.ownLimit);
+    var over = pLimit > 0 && draftIds.some(function (id) { return draftText(id).trim().length > pLimit; });
+    var tip = label + ' (' + draftIds.length + ' draft' + (draftIds.length === 1 ? '' : 's') + (over ? ', over limit' : '') + ')' +
+      (pid ? (selected ? ' (F2 or double-click to rename)' : ' (F2 to rename)') : '');
+    html += '<button type="button" role="tab" class="ptab' + (over ? ' over' : '') + '" data-paper="' + escAttr(pid) +
+      '" aria-selected="' + selected + '" tabindex="' + (selected ? 0 : -1) + '" title="' + escAttr(tip) + '">' +
+      '<span class="pname">' + escHtml(label) + '</span>' +
+      '<span class="pcount">' + draftIds.length + '</span>' +
+      (over ? '<span class="pover" aria-label="Over limit" title="At least one draft is over the limit"></span>' : '') +
+      '</button>';
+    var opt = new Option(label + ' (' + draftIds.length + (over ? ', over' : '') + ')', pid);
+    opt.selected = selected;
+    paperSelect.appendChild(opt);
+  }
+  view.papers.forEach(function (p) { addTab(p.id, p.name, p.drafts); });
+  if (view.none.length) addTab('', 'No paper', view.none);
+  paperTabs.innerHTML = html;
+  paperSelect.value = activePid;
+  paperAddBtn.disabled = papers.newer;
+  if (papers.newer) {
+    paperNote.textContent = 'Papers from a newer version (read-only)';
+    paperNote.hidden = false;
+  } else if (!papersStored) {
+    paperNote.textContent = 'Paper grouping in memory only (storage is full)';
+    paperNote.hidden = false;
+  } else {
+    paperNote.textContent = '';
+    paperNote.hidden = true;
+  }
+  if (focusPid !== null) {
+    var again = paperTabs.querySelector('.ptab[data-paper="' + focusPid + '"]') ||
+      paperTabs.querySelector('.ptab[aria-selected="true"]');
+    if (again) again.focus();
+  }
+}
+
+/* Open the draft this window opened last in paper `pid` ('' for No paper),
+   else its first draft, through switchDraft. */
+function selectPaper(pid) {
+  if (!draftReady || pid === openPaper()) return;
+  var view = papersView(draftMeta.list, papers), group = null;
+  if (!pid) group = view.none;
+  else {
+    for (var i = 0; i < view.papers.length; i++) if (view.papers[i].id === pid) { group = view.papers[i].drafts; break; }
+  }
+  if (!group || !group.length) return;
+  var remembered = lastDraftInPaper[pid];
+  var target = remembered && group.indexOf(remembered) >= 0 ? remembered : group[0];
+  switchDraft(target);
+}
+
+/* Create a paper (or reuse an existing one of the same name, even if hidden)
+   together with its first draft, named over that paper's drafts, and open it. */
+function createPaper() {
+  if (!draftReady) return;
+  if (papers.newer) { showToast('Papers were written by a newer version of Rebuttal Bench.'); return; }
+  var name = window.prompt('Name this paper (e.g. "ICML #1234", "Paper 2"):', '');
+  if (name === null) return;
+  name = cleanDraftName(name);
+  if (!name) return;
+  var latest = papersForOutput(), existing = paperNamed(latest, name), pid = existing || newPaperId();
+  var view = papersView(draftMeta.list, latest), paperDrafts = [];
+  if (existing) {
+    for (var i = 0; i < view.papers.length; i++) {
+      if (view.papers[i].id === existing) {
+        paperDrafts = view.papers[i].drafts.map(draftById).filter(Boolean);
+        break;
+      }
+    }
+  }
+  var id = createDraft(newDraftName(paperDrafts), '');
+  changePapers(function (rec, now) {
+    var use = paperNamed(rec, name) || pid;
+    if (!paperName(rec, use)) rec = setPaperEntry(rec, 'name', use, name, now);
+    return setPaperEntry(rec, 'member', id, use, now);
+  });
+  switchDraft(id);
+  ta.focus();
+}
+
+function renamePaper(pid) {
+  if (!draftReady || !pid) return;
+  if (papers.newer) { showToast('Papers were written by a newer version of Rebuttal Bench.'); return; }
+  var cur = paperName(papers, pid);
+  if (!cur) return;
+  var name = window.prompt('Rename this paper:', cur);
+  if (name === null) return;
+  name = cleanDraftName(name);
+  if (!name) return;
+  changePapers(function (rec, now) { return setPaperEntry(rec, 'name', pid, name, now); });
+}
+
+function moveOpenDraftTo(val) {
+  if (!draftReady || val === '__move__') return;
+  if (papers.newer) { showToast('Papers were written by a newer version of Rebuttal Bench.'); renderDraftTabs(); return; }
+  var id = draftMeta.active, d = draftById(id);
+  if (!d) return;
+  if (val === '__new__') {
+    var name = window.prompt('Name the new paper to move “' + d.name + '” into:', '');
+    if (name === null) { renderDraftTabs(); return; }
+    name = cleanDraftName(name);
+    if (!name) { renderDraftTabs(); return; }
+    changePapers(function (rec, now) {
+      var use = paperNamed(rec, name) || newPaperId();
+      if (!paperName(rec, use)) rec = setPaperEntry(rec, 'name', use, name, now);
+      return setPaperEntry(rec, 'member', id, use, now);
+    });
+    return;
+  }
+  changePapers(function (rec, now) { return setPaperEntry(rec, 'member', id, val, now); });
+}
+
 /* Tabs carry their length as OpenReview counts it, red when over the limit,
-   so four answers can be balanced at a glance. Keyboard: the tabs form one
-   stop (arrows move, Enter opens, F2 renames the focused one); Rename, Delete
-   and + Draft sit beside them. */
+   so four answers can be balanced at a glance. With papers, only the open
+   paper's drafts (or No paper's) are listed here. Keyboard: the tabs form one
+   stop (arrows move, Enter opens, F2 renames the focused one); Rename, Delete,
+   Move to paper and + Draft sit beside them. */
 function renderDraftTabs() {
   if (!draftReady) return;
+  var view = papersView(draftMeta.list, papers);
+  renderPaperRow(view);
+  var hasPapers = view.papers.length > 0, pid = openPaper();
+  var shownIds = !hasPapers ? null : !pid ? view.none : null;
+  if (hasPapers && pid) {
+    for (var i = 0; i < view.papers.length; i++) if (view.papers[i].id === pid) { shownIds = view.papers[i].drafts; break; }
+  }
+  var shown = shownIds ? shownIds.map(draftById).filter(Boolean) : draftMeta.list;
+  draftTabs.setAttribute('aria-label', !hasPapers ? 'Drafts' : pid ? 'Drafts of ' + paperName(papers, pid) : 'Drafts (No paper)');
   var limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
   var focusedTab = document.activeElement && document.activeElement.closest && document.activeElement.closest('#draftTabs .dtab');
   var focusedTool = document.activeElement && document.activeElement.closest && document.activeElement.closest('#draftTools .dtool');
   var focusId = focusedTab ? focusedTab.getAttribute('data-id') : null;
   var focusAct = focusedTool ? focusedTool.getAttribute('data-act') : null, html = '';
-  draftMeta.list.forEach(function (d) {
+  shown.forEach(function (d) {
     var active = d.id === draftMeta.active, n = draftText(d.id).trim().length;
     html += '<button type="button" role="tab" class="dtab" id="dtab-' + d.id + '" data-id="' + d.id + '" aria-controls="draftPanel"' +
       ' aria-selected="' + active + '" tabindex="' + (active ? 0 : -1) + '" title="' +
@@ -8861,10 +9105,19 @@ function renderDraftTabs() {
       escHtml(d.name) + '</span><span class="dcount' + (limit > 0 && n > limit ? ' over' : '') + '">' + fmt(n) + '</span></button>';
   });
   draftTabs.innerHTML = html;
+  var moveHtml = '';
+  if (hasPapers && !papers.newer) {
+    moveHtml = '<select class="dtool dmove" data-act="move" aria-label="Move this draft to a paper" title="Move the open draft to another paper">' +
+      '<option value="__move__" disabled selected hidden>Move to…</option>';
+    view.papers.forEach(function (p) { moveHtml += '<option value="' + escAttr(p.id) + '">' + escHtml(p.name) + '</option>'; });
+    moveHtml += '<option value="">No paper</option><option value="__new__">New paper…</option></select>';
+  }
   draftTools.innerHTML = '<button type="button" class="dtool" data-act="rename" title="Rename the open draft (F2)">Rename</button>' +
     (draftMeta.list.length > 1 ? '<button type="button" class="dtool dclose" data-act="delete" title="Delete the open draft">Delete</button>' : '') +
+    moveHtml +
     '<button type="button" class="dtool" data-act="history" title="Earlier versions of the open draft, and backups of your drafts as files">History</button>' +
-    '<button type="button" class="dtool dadd" data-act="add" title="A new draft: one per reviewer, a general response, a follow-up">+ Draft</button>';
+    '<button type="button" class="dtool dadd" data-act="add" title="A new draft: one per reviewer, a general response, a follow-up">+ Draft</button>' +
+    (!hasPapers && !papers.newer ? '<button type="button" class="dtool" data-act="new-paper" title="Create a new paper with its first draft">New paper</button>' : '');
   draftPanel.setAttribute('aria-labelledby', 'dtab-' + draftMeta.active);
   var again = focusId ? draftTabs.querySelector('.dtab[data-id="' + focusId + '"]')
     : focusAct ? draftTools.querySelector('.dtool[data-act="' + focusAct + '"]') : null;
@@ -8891,6 +9144,7 @@ function openDraft(id) {
   var text = typeof local === 'string' ? local : (draftTexts[id] || '');
   var state = bodyState[id] || 'ready';
   draftMeta.active = id;
+  lastDraftInPaper[paperOfDraft(id)] = id;
   draftKey = keyOfDraft(id);
   delete draftTexts[id];
   savedText = text;
@@ -8975,7 +9229,11 @@ function newDraft(name, text, mustFit) {
 
 function addDraft() {
   if (!draftReady) return;
-  switchDraft(createDraft(newDraftName(draftMeta.list), ''));
+  var pid = openPaper();
+  var scopeDrafts = pid ? draftsInPaper(pid) : (papersView(draftMeta.list, papers).papers.length ? draftsInPaper('') : draftMeta.list);
+  var id = createDraft(newDraftName(scopeDrafts), '');
+  if (pid) changePapers(function (rec, now) { return setPaperEntry(rec, 'member', id, pid, now); });
+  switchDraft(id);
   ta.focus();
 }
 
@@ -9036,6 +9294,43 @@ function deleteDraft(id) {
   refreshReviewerCards(); /* the reviewer cards read the other tabs */
 }
 
+paperTabs.addEventListener('click', function (e) {
+  var tab = e.target.closest('.ptab');
+  if (!tab) return;
+  selectPaper(tab.getAttribute('data-paper'));
+  var now = paperTabs.querySelector('.ptab[aria-selected="true"]');
+  if (now) now.focus();
+});
+paperTabs.addEventListener('dblclick', function (e) {
+  var tab = e.target.closest('.ptab');
+  if (!tab) return;
+  var pid = tab.getAttribute('data-paper');
+  if (pid && pid === openPaper()) renamePaper(pid);
+});
+paperTabs.addEventListener('keydown', function (e) {
+  var tab = e.target.closest('.ptab');
+  if (!tab) return;
+  if (e.key === 'F2') {
+    e.preventDefault();
+    var pid = tab.getAttribute('data-paper');
+    if (pid) renamePaper(pid);
+    return;
+  }
+  var tabs = Array.prototype.slice.call(paperTabs.querySelectorAll('.ptab')), i = tabs.indexOf(tab), to = -1;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') to = (i + 1) % tabs.length;
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') to = (i - 1 + tabs.length) % tabs.length;
+  else if (e.key === 'Home') to = 0;
+  else if (e.key === 'End') to = tabs.length - 1;
+  if (to < 0) return;
+  e.preventDefault();
+  var targetPid = tabs[to].getAttribute('data-paper');
+  selectPaper(targetPid);
+  var nextTab = paperTabs.querySelector('.ptab[data-paper="' + targetPid + '"]');
+  if (nextTab) nextTab.focus();
+});
+paperSelect.addEventListener('change', function () { selectPaper(paperSelect.value); });
+paperAddBtn.addEventListener('click', createPaper);
+
 draftTabs.addEventListener('click', function (e) {
   var tab = e.target.closest('.dtab');
   if (!tab) return;
@@ -9062,13 +9357,17 @@ draftTabs.addEventListener('keydown', function (e) {
   tabs[to].focus();
 });
 draftTools.addEventListener('click', function (e) {
-  var b = e.target.closest('.dtool');
+  var b = e.target.closest('button.dtool');
   if (!b) return;
   var act = b.getAttribute('data-act');
   if (act === 'add') addDraft();
   else if (act === 'rename') renameDraft(draftMeta.active);
   else if (act === 'delete') deleteDraft(draftMeta.active);
   else if (act === 'history') openHistory();
+  else if (act === 'new-paper') createPaper();
+});
+draftTools.addEventListener('change', function (e) {
+  if (e.target && e.target.classList.contains('dmove')) moveOpenDraftTo(e.target.value);
 });
 
 /* Another window of this browser changed the list: show its drafts here too.
@@ -9180,11 +9479,18 @@ document.addEventListener('keydown', function (e) {
 });
 splitDraftsBtn.addEventListener('click', function () {
   if (!splitResult || splitResult.parts.length < 2 || !draftReady) return;
-  var base = draftById(draftMeta.active).name.slice(0, 30), n = splitResult.parts.length, first = null;
+  var base = draftById(draftMeta.active).name.slice(0, 30), n = splitResult.parts.length, first = null, pid = openPaper(), ids = [];
   splitResult.parts.forEach(function (p, i) {
     var id = createDraft(base + ' (' + (i + 1) + '/' + n + ')', p.text);
+    ids.push(id);
     if (!first) first = id;
   });
+  if (pid) {
+    changePapers(function (rec, now) {
+      ids.forEach(function (id) { rec = setPaperEntry(rec, 'member', id, pid, now); });
+      return rec;
+    });
+  }
   closeSplit();
   switchDraft(first);
   showToast(n + ' new drafts, one per part; the draft you split is unchanged.');
@@ -11197,12 +11503,19 @@ function finishBoot(draft, note) {
   }
   if (metaChanged) saveDraftMeta();
   pruneHistory();
+  lastDraftInPaper[openPaper()] = draftMeta.active;
   renderDraftTabs();
   loadReviewBox(draftMeta.active);
   applyVenueLimit(); /* the open draft's paper is known now */
   bootPapers();
   updateAll();
   renderPreview();
+  if (recoveredDraftIds.length && papersView(draftMeta.list, papers).papers.length) {
+    var where = formatSameIn(recoveredDraftIds.map(paperOfDraft), function (pid) {
+      return pid ? paperName(papers, pid) || 'No paper' : 'No paper';
+    });
+    showToast('Recovered ' + recoveredDraftIds.length + ' draft' + (recoveredDraftIds.length === 1 ? '' : 's') + where + '.');
+  }
 }
 </script>
 </body>
