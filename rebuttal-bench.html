@@ -1160,7 +1160,7 @@ window.MathJax = {
     <details class="compact" id="anonBox">
       <summary>Anonymity <span id="anonSum" class="compact-sum zero"></span></summary>
       <div class="compact-body">
-        <p class="compact-note">Words that would name you, one per line: your names, e-mail addresses, institution, lab, project and GitHub names. Each one found in a draft gets a card. Prefer full names: a surname alone also matches other people’s citations. Kept with this browser’s preferences, never in a draft, an export or a copy.</p>
+        <p class="compact-note">Words that would name you, one per line: your names, e-mail addresses, institution, lab, project and GitHub names. Each one found in a draft gets a card. Prefer full names: a surname alone also matches other people’s citations. Kept with your preferences, never in a draft, an export or a copy.</p>
         <div id="anonSlot"></div>
         <template id="anonEditor">
           <style>
@@ -3138,7 +3138,11 @@ function analyzeText(src, opts) {
       var w0 = WORD_CHAR.test(term.charAt(0));
       var w1 = WORD_CHAR.test(term.charAt(term.length - 1));
       var needle = sameLen ? term.toLowerCase() : term;
-      var pat = needle.split(' ').map(escRe).join('(?:[ \\t]*(?:\\r\\n?|[\\n\\u2028\\u2029])[ \\t]*|[ \\t]+)');
+      /* A space in a term is any run of blanks with at most one line break
+         (a wrapped name), never a blank line. No-break spaces count as
+         blanks: a name copied from a PDF or Word often has one. */
+      var pat = needle.split(' ').map(escRe)
+        .join('(?:[ \\t\\u00a0\\u202f]*(?:\\r\\n?|[\\n\\u2028\\u2029])[ \\t\\u00a0\\u202f]*|[ \\t\\u00a0\\u202f]+)');
       var idRe = new RegExp(pat, sameLen ? 'g' : 'gi'), im;
       while ((im = idRe.exec(hay))) {
         var ms = im.index, me = ms + im[0].length;

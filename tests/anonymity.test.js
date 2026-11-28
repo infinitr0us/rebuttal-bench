@@ -48,6 +48,8 @@ test('case-insensitive matching and line-wrap handling (one line break yes, blan
   assert.deepEqual(hits('Paragraph ends with Jane.\n\nDoe starts the next.', terms), []);
   assert.deepEqual(hits('Line one Jane\n\nDoe line three.', terms), []);
   assert.deepEqual(hits('Line one Jane \n \n Doe line three.', terms), []);
+  // No-break spaces, as a copy from a PDF or Word brings them, count as spaces.
+  assert.deepEqual(hits('By Jane Doe and Jane \nDoe.', terms), ['Jane Doe', 'Jane \nDoe']);
 });
 
 test('word boundaries: Li does not match inside other words or digits, but matches beside punctuation and edges', () => {
