@@ -19,6 +19,15 @@
   warning.
 - A bare `%` after a number in a formula (`$78.1%$`) gets a card and a fix: MathJax reads it as a
   TeX comment and drops the sign. A `% \vspace{-1mm}` line in a display stays a comment.
+- Math commands typed without delimiters in prose (`We use \alpha=10`, `c_\phi`, `\arg\max_i`)
+  and `\footnote{…}` get a card: OpenReview shows them as typed. Adjacent commands of one
+  expression share a card; paths and a macro quoted by name are left alone. On the two real
+  corpora it found 35 such places, all genuine. Built by Gemini 4 Neon.
+- Fewer cards on what renders as meant (87 on the two corpora, each read): a heading that is
+  already bold, made-up tokens such as `<think>` (not HTML), approximations and ranges with a
+  tilde (`(~2GB)`, `0.55~0.65`), an indented example with prices, `feasible??` at the end of a
+  question, `TBD-based`, and a placeholder quoted with its correction (`"Figure ??" to "Figure
+  2"`). Built by Gemini 4 Neon.
 - `npm run corpus` replays the analyzer on a corpus of texts and compares its cards with an
   earlier run, so a change to any check can be measured on real text before review.
 

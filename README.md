@@ -180,9 +180,11 @@ reports when any of those sources change.
    `\\` row breaks, emphasis eating `_` or `*`, currency dollars pairing up, and more; and for
    `\ref`/`\eqref` copied from the paper, which OpenReview shows as `(???)`.
 6. Other checks look for what OpenReview shows as typed: raw HTML (`<br>` in a table cell,
-   `<sub>`), HTML comments (a hidden note to a co-author is published), images not under
-   `/images/`, footnotes, and LaTeX pasted from the paper outside math (`\textbf{}`, `\cite{}`,
-   ` ``quotes'' `, ties like `Table~1`, two of which can even pair into strikethrough).
+   `<sub>`; made-up tokens such as `<think>` are meant to show and stay quiet), HTML comments
+   (a hidden note to a co-author is published), images not under `/images/`, footnotes, LaTeX
+   pasted from the paper outside math (`\textbf{}`, `\cite{}`, `\footnote{}`, ` ``quotes'' `,
+   ties like `Table~1`, two of which can even pair into strikethrough), and math commands typed
+   without delimiters (`We use \alpha=10`).
 7. The last checks look at the draft as a whole: placeholders, invisible characters and
    ligatures. All checks read the comment as posted, which OpenReview trims; a card says when
    the trim changes how the start reads.
@@ -245,6 +247,7 @@ index.html                 redirects the GitHub Pages site root to the app
 tests/
   regression.test.js       hazard + Fix-all cases, broken and correct input
   field-fixall.test.js     Fix all on what real authors write: left alone, or still repaired
+  field-audit.test.js      quiet on what renders as meant; math commands outside math
   compact.test.js          compaction: what each trick saves, what it must leave alone
   table-import.test.js     imported tables, rendered cells, warnings and MathJax input
   compact-math.test.js     formula compaction against independently typeset MathML

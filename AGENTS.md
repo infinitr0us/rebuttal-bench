@@ -84,7 +84,15 @@ text, discard the grid and use the regular text importer.
   (the text they expect), so stale fixes are refused; `math` marks checks 1–7, the ones about
   Markdown damaging TeX. Check 4 also marks formulas inline Markdown cuts apart (`sp.cut`).
   Checks 9–14 report what OpenReview shows as typed (raw HTML, HTML comments, external images,
-  footnotes, h4–h6, LaTeX outside math); check 15 reports links under `opts.venue`'s rule (an
+  footnotes, h4–h6, LaTeX outside math). Since the field audit: check 9 only for real HTML
+  element names (`<think>` is meant to show), check 13 not for a heading already all bold
+  (`headingIsBold`), check 14's tie only between a word and its label (`Table~1`, not `(~2GB)`)
+  and, besides text commands and `\footnote`, math-only commands outside math (`MATH_CMD_LIST`;
+  paths and quoted names skipped, adjacent commands grouped, nothing inside a span check 2
+  reports or one whose `$` a cut or currency span took). That last part reads the earlier cards
+  by title, so keep those titles. Check 7 does not take two prices on a line for TeX, and check
+  17 skips `feasible??`, `TBD-based` and a placeholder quoted on its line (`inLineQuotes`).
+  Their cases are in `tests/field-audit.test.js`. Check 15 reports links under `opts.venue`'s rule (an
   id from `VENUES`; only the page passes it, so Fix all and compaction never see venue hazards).
   Check 17 reports placeholders in visible text only (not in code, link destinations and
   definitions, image syntax, dropped cells or HTML comments), each pattern limited to where it
