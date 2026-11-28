@@ -971,6 +971,7 @@ window.MathJax = {
     background: var(--bg);
   }
   footer a { color: var(--accent-ink); }
+  footer .foot-meta { display: block; margin-top: 3px; }
 
   .toast {
     position: fixed;
@@ -1205,6 +1206,7 @@ window.MathJax = {
 
 <footer>
   Pipeline mirror: Marked 15.0.6 in GFM mode with OpenReview’s HTML/image/checkbox renderers → DOMPurify 3.4.17 with OpenReview’s tag allowlist → MathJax 3.2.2 <code>tex-chtml-full</code> with <code>ui/safe</code>. Preview styling mirrors <code>.note-content .markdown-rendered</code> from the live openreview.net stylesheet — Noto Sans 12px/18px, 8px block gaps, rule-only tables — so at 100% zoom it is 1:1 with the site. Line <em>wrapping</em> still depends on the reader’s window width and reply depth, which no previewer can pin down. This follows the current <a href="https://github.com/openreview/openreview-web" target="_blank" rel="noopener">openreview-web implementation</a>; the live service can change, so give the posted comment one last glance. Drafts autosave only on this device. Rebuttal Bench is an independent tool, not affiliated with or endorsed by OpenReview.
+  <span class="foot-meta">Rebuttal Bench <span id="appVersion"></span> · <a id="reportLink" href="https://github.com/infinitr0us/rebuttal-bench/issues/new?template=problem.yml" target="_blank" rel="noopener" title="Opens a GitHub issue form with this page's version, your browser and the venue filled in. Issues are public: paste only a small example, rewritten so it says nothing about your paper.">Report a problem</a> · <a id="ideaLink" href="https://github.com/infinitr0us/rebuttal-bench/issues/new?template=idea.yml" target="_blank" rel="noopener">Suggest an idea</a></span>
 </footer>
 
 <div class="modal" id="splitDialog" hidden>
@@ -2040,6 +2042,48 @@ var VENUES = [
 function venueById(id) {
   for (var i = 0; i < VENUES.length; i++) if (VENUES[i].id === id) return VENUES[i];
   return null;
+}
+
+/* ---- problem reports ---- */
+/* The page's version, shown in the footer and filled into a report, so a
+   report says which page it is about (a cached or downloaded copy can be
+   old). tests/page.test.js keeps it equal to package.json's version. */
+var APP_VERSION = '3.11.0';
+var REPO_URL = 'https://github.com/infinitr0us/rebuttal-bench';
+
+/* "Chrome 142 on Windows", from a user agent string. Edge and Opera also
+   name Chrome, Chrome also names Safari, iOS names Mac OS X and Android and
+   ChromeOS name Linux, so the order of the tests matters. */
+function browserLabel(ua) {
+  ua = typeof ua === 'string' ? ua : '';
+  var m, name = '';
+  if ((m = /\bEdg(?:e|A|iOS)?\/(\d+)/.exec(ua))) name = 'Edge ' + m[1];
+  else if ((m = /\bOPR\/(\d+)/.exec(ua))) name = 'Opera ' + m[1];
+  else if ((m = /\b(?:Firefox|FxiOS)\/(\d+)/.exec(ua))) name = 'Firefox ' + m[1];
+  else if ((m = /(?:Chrome|CriOS)\/(\d+)/.exec(ua))) name = 'Chrome ' + m[1];
+  else if (/\bSafari\//.test(ua) && (m = /\bVersion\/(\d+)/.exec(ua))) name = 'Safari ' + m[1];
+  var os = /Windows/.test(ua) ? 'Windows' : /iPhone|iPad|iPod/.test(ua) ? 'iOS'
+    : /Macintosh|Mac OS X/.test(ua) ? 'macOS' : /Android/.test(ua) ? 'Android'
+    : /CrOS/.test(ua) ? 'ChromeOS' : /Linux/.test(ua) ? 'Linux' : '';
+  return name && os ? name + ' on ' + os : name || os;
+}
+
+/* A new GitHub issue whose form (.github/ISSUE_TEMPLATE) is filled in with
+   what helps to reproduce a problem, by the fields' ids. Nothing of the
+   drafts goes in: issues are public, so the form asks for a small example
+   the author rewrites. Empty fields are left out. */
+function reportUrl(template, fields) {
+  var q = ['template=' + encodeURIComponent(template)];
+  Object.keys(fields || {}).forEach(function (k) {
+    if (fields[k]) q.push(encodeURIComponent(k) + '=' + encodeURIComponent(fields[k]));
+  });
+  return REPO_URL + '/issues/new?' + q.join('&');
+}
+
+/* A venue as a report names it: the longer of its label and its name, so
+   "NeurIPS 2026" keeps its year and "OpenReview default rebuttal" its form. */
+function reportVenue(venue) {
+  return !venue ? '' : venue.label.length >= venue.name.length ? venue.label : venue.name;
 }
 
 var LINK_SHORTENERS = /^(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|is\.gd|buff\.ly|rebrand\.ly|cutt\.ly|shorturl\.at|tiny\.cc|rb\.gy|s\.id)$/;
@@ -6871,6 +6915,9 @@ function freshEditor(value) {
 }
 var venueSelect = document.getElementById('venue');
 var venueStat = document.getElementById('venueStat');
+var appVersion = document.getElementById('appVersion');
+var reportLink = document.getElementById('reportLink');
+var ideaLink = document.getElementById('ideaLink');
 VENUES.forEach(function (v) {
   var opt = document.createElement('option');
   opt.value = v.id;
@@ -6988,6 +7035,7 @@ function applyPrefs() {
     box.checked = !!prefs.compact[box.getAttribute('data-trick')];
   });
   renderVenueStat();
+  renderReportLinks();
   skeletonQuote.checked = !!prefs.skeletonQuotes;
   applyView();
   themeReviewBox();
@@ -7016,6 +7064,17 @@ function renderVenueStat() {
     (venue.also ? '; also ' + venue.also.join(', ') : '') +
     ' (checked ' + VENUES_CHECKED + '; rules change every year). Click to open the first.';
   limitInput.title = own ? 'Your own character limit' : 'The character limit of ' + venue.label + ' (' + venue.unit + ')';
+}
+
+/* The footer's version and report links, set as plain hrefs so a middle
+   click or a copied link works too. The venue goes into a report (its rules
+   decide some cards); no draft text does. */
+function renderReportLinks() {
+  appVersion.textContent = APP_VERSION;
+  reportLink.href = reportUrl('problem.yml', {
+    version: APP_VERSION, browser: browserLabel(navigator.userAgent), venue: reportVenue(venueById(prefs.venue))
+  });
+  ideaLink.href = reportUrl('idea.yml', { version: APP_VERSION });
 }
 
 var prefsTimer = null;

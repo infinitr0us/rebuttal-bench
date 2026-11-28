@@ -321,6 +321,17 @@ try {
     return aaai && iclr && typed && custom && prefs.ownLimit === 5000 ||
       { aaai, iclr, typed, custom, stat: venueStat.textContent, limit: limitInput.value, toast: toast.textContent };`);
 
+  await check('the footer names the version, and its report link follows the venue but carries no draft text', `
+    setSourceText('Secret result 0.917 for Method Zed.', 0); updateAll();
+    venueSelect.value = 'icml'; venueSelect.dispatchEvent(new Event('change')); await wait(50);
+    const shown = appVersion.textContent, href = decodeURIComponent(reportLink.href);
+    venueSelect.value = ''; venueSelect.dispatchEvent(new Event('change'));
+    limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
+    const after = decodeURIComponent(reportLink.href);
+    return shown === APP_VERSION && href.indexOf('/issues/new?template=problem.yml&version=' + APP_VERSION + '&') > 0 &&
+      /&browser=Chrome \\d+ on /.test(href) && /&venue=ICML 2027$/.test(href) && !/Secret|0\\.917|Zed/.test(href) &&
+      !/venue=/.test(after) && /template=idea\\.yml&version=/.test(ideaLink.href) || { shown, href, after };`);
+
   /* Preferences stored before 3.8 have no ownLimit: a venue's own limit is
      not taken for the author's. */
   await inPage(`localStorage.setItem('rebuttal-bench-prefs',
