@@ -23,17 +23,17 @@
   puts every draft of a file in a new paper named after it, for instance the export of a
   downloaded copy used for another paper. A paper cannot be renamed to another paper's name, so
   a backup never merges two papers. Built by Gemini 4 Neon on the storage core below.
-- A paper owns no text: it is a label on drafts, in a record of its own that 3.12 never reads.
-  Windows, devices and the back/forward cache merge their copies of it, never replace them, and
-  a window writes the merge back whenever the stored copy lacks something it knows, so a
-  grouping change survives the window that made it; losing the record would only regroup
-  drafts. A paper's venue and limit never touch the preferences (with papers, the venue and
-  limit controls wait until the drafts are restored), and deleting a paper's open draft opens
-  another draft of the same paper (the confirm names the paper). With an asynchronous store,
-  the editor waits for the papers record at start (up to the usual 8 s). Designed with a review
-  by Claude Fable 5.2 before any code was written; a Codex review then found six problems with
-  windows writing at once, a full storage, a slow store and backups, each fixed and rechecked
-  with its own probe.
+- A paper owns no text: it is a label on drafts, in a record of its own that 3.12 never reads,
+  kept in this browser like reviews and the word list (Export and Import carry it to another).
+  Windows and the back/forward cache merge their copies of it, never replace them, and a window
+  writes the merge back whenever the stored copy lacks something it knows, so a grouping change
+  survives the window that made it; losing the record would only regroup drafts. A paper's
+  venue and limit never touch the preferences (with papers, the venue and limit controls wait
+  until the drafts are restored), and deleting a paper's open draft opens another draft of the
+  same paper (the confirm names the paper). Designed with a review by Claude Fable 5.2 before
+  any code was written; two Codex review rounds then found problems with windows writing at
+  once, a full storage, backups and syncing papers through a slow store, each fixed or, for the
+  store, designed away.
 
 ## 3.12.0 (2026-11-28)
 

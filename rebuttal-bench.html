@@ -8009,15 +8009,20 @@ var draftTimer = null;
    The pure part (parsePapers, mergePapers, papersView, paperVenue, …) says
    why the record can only regroup drafts, never lose one. `papers` is this
    window's merge of every copy it has seen. A change is merged with the copy
-   this browser stores now, then written whole: straight to localStorage,
-   never through fallbackSet, whose memory copy and retries would write an old
-   record back over another window's newer one; and through remoteWrite,
-   which merges with the store's copy just before writing. Another window's
-   write arrives as a storage event; every copy is merged, none replaces
-   another. A record written by a later version is read, never written. No
-   papers state lives in `prefs`, which every window writes whole (3.12's word
-   list was clobbered that way). The open paper is the open draft's: nothing
-   else to store. */
+   this browser stores now, then written whole, straight to localStorage
+   (never through fallbackSet, whose memory copy and retries would write an
+   old record back over another window's newer one). Another window's write
+   arrives as a storage event; every copy is merged, none replaces another. A
+   record written by a later version is read, never written. No papers state
+   lives in `prefs`, which every window writes whole (3.12's word list was
+   clobbered that way). The open paper is the open draft's: nothing else to
+   store.
+   The record stays in this browser, like reviews and the word list: never in
+   the asynchronous store. Grouping is a label, and keeping it off the store
+   keeps it out of the store's start-up: with it there, a fresh device either
+   scoped by paper before its papers arrived or had to hold the drafts' start
+   for them, and the second replayed stale draft text (codex-recheck-313).
+   Export and Import carry papers between browsers. */
 var PAPERS_KEY = 'rebuttal-bench-papers';
 var papers = parsePapers(storedValue(PAPERS_KEY));
 var papersStored = true;   /* false: this window's last write to localStorage was refused */
@@ -8028,8 +8033,16 @@ var paperSelect = document.getElementById('paperSelect');
 var paperAddBtn = document.getElementById('paperAddBtn');
 var paperNote = document.getElementById('paperNote');
 
+/* Write this window's merge with what is on disk now, and only when the disk
+   lacks something: every write is the union of all copies this window knows,
+   so it never takes back another window's change, and nothing is written over
+   a record from a later version (merging it marks the result `newer`). A write
+   refused for space leaves the disk as it was. */
 function writePapersLocal() {
-  if (papers.newer || !canLocalRead) return;
+  if (!canLocalRead) return;
+  var disk = storedValue(PAPERS_KEY);
+  papers = mergePapers(papers, parsePapers(disk));
+  if (papers.newer || disk === serializePapers(papers)) { papersStored = true; return; }
   try {
     localStorage.setItem(PAPERS_KEY, serializePapers(papers));
     papersStored = true;
@@ -8037,30 +8050,19 @@ function writePapersLocal() {
     papersStored = false; /* kept in memory; the next change or event tries again */
   }
 }
-/* The store's merge: never over a record from a later version. */
-function papersMergeJSON(mine, stored) {
-  var theirs = parsePapers(stored);
-  return theirs.newer ? stored : serializePapers(mergePapers(parsePapers(mine), theirs));
-}
-function sendPapers() {
-  if (!canArtifactStore || papers.newer) return;
-  remoteWrite(PAPERS_KEY, serializePapers(papers), papersMergeJSON).then(function (r) {
-    /* The merge may bring another device's changes: take them in. */
-    if (r.ok && typeof r.value === 'string' && takeInPapers(parsePapers(r.value))) writePapersLocal();
-  });
-}
-/* Another copy (another window's, the store's, the one stored now): merged,
-   so this window's own changes stay. True when it changed something here.
-   The merge is then written back whenever the stored copy lacks something
-   this window knows: localStorage has no compare-and-set, so another window's
-   write can overtake ours between its read and its write, and a write refused
-   for space leaves an older copy there. Without this, the record would depend
-   on this window staying open (codex-review-313). Each such write only adds to
-   the stored record, so windows stop writing once it holds the union. */
+/* Another window's copy (a storage event, or the copy stored now after the
+   back/forward cache): merged, so this window's own changes stay; then written
+   back when the disk lacks something this window knows. localStorage has no
+   compare-and-set, so another window's write can overtake ours between its
+   read and its write, and a write refused for space leaves an older copy:
+   without the write-back the record would depend on a window staying open
+   (codex-review-313). Each write only adds to the record on disk, so windows
+   stop writing once it holds the union. True when it changed something here. */
 function takeInPapers(rec) {
-  var merged = mergePapers(papers, rec), changed = serializePapers(merged) !== serializePapers(papers);
-  papers = merged;
-  if (!papers.newer && storedValue(PAPERS_KEY) !== serializePapers(papers)) writePapersLocal();
+  var before = serializePapers(papers);
+  papers = mergePapers(papers, rec);
+  writePapersLocal();
+  var changed = serializePapers(papers) !== before;
   if (changed) papersChanged();
   return changed;
 }
@@ -8068,33 +8070,13 @@ function takeInPapers(rec) {
    returns the same record for no change). Only with the drafts restored, and
    never on a record from a later version. */
 function changePapers(change) {
-  if (!draftReady || papers.newer) return false;
-  var stored = storedValue(PAPERS_KEY);
-  papers = mergePapers(papers, parsePapers(stored));
-  var next = change(papers, Date.now()), changed = next !== papers;
-  papers = next;
-  /* Also when only the merge differs from the stored copy, so this browser's
-     copy holds everything this window knows. */
-  if (changed || stored !== serializePapers(papers)) writePapersLocal();
-  if (changed) sendPapers();
+  if (!draftReady) return false;
+  papers = mergePapers(papers, parsePapers(storedValue(PAPERS_KEY)));
+  if (papers.newer) { papersChanged(); return false; }
+  papers = change(papers, Date.now());
+  writePapersLocal();
   papersChanged();
   return true;
-}
-/* At start the store's copy is read beside the drafts, and the editor opens
-   only once it is merged in (or the store is given up, after 8 s), so nothing
-   is scoped by paper before its paper is known: a fresh device would print,
-   copy and check against every paper at once (codex-review-313). The merge is
-   then written to whichever side lacks it (idempotent, no marks), so that a
-   grouping whose write to the store failed still gets there. */
-var papersBootRead = canArtifactStore ? remoteRead(PAPERS_KEY) : Promise.resolve(null);
-/* Merged whenever it arrives, also after the watchdog opened the editor. */
-var papersBootDone = papersBootRead.then(function (r) { bootPapers(r); });
-function bootPapers(r) {
-  if (!r || !r.ok) return;
-  var remote = parsePapers(r.value);
-  takeInPapers(remote);
-  if (papers.newer || remote.newer) return;
-  if (r.value === null || serializePapers(remote) !== serializePapers(papers)) sendPapers();
 }
 /* Before the drafts are restored the open draft's paper is not known. When
    this browser already holds papers with drafts, the venue and limit controls
@@ -9498,23 +9480,13 @@ function buildGroupRows() {
 function openGroupDialog() {
   if (!draftReady) return;
   if (papers.newer) { showToast('Papers were written by a newer version of Rebuttal Bench.'); return; }
-  var token = ++groupSeq;
+  ++groupSeq;
   groupDialog.hidden = false;
   setModal(groupDialog, true);
   groupDialog.querySelector('.modal-x').focus();
-  if (canArtifactStore) {
-    /* Read the store before proposing so a stale device sees another device's grouping. */
-    groupApplyBtn.disabled = true;
-    groupList.innerHTML = '<p class="modal-note">Checking storage…</p>';
-    remoteRead(PAPERS_KEY).then(function (r) {
-      if (token !== groupSeq || groupDialog.hidden) return;
-      if (r.ok && r.value !== null) takeInPapers(parsePapers(r.value));
-      buildGroupRows();
-    });
-  } else {
-    takeInPapers(parsePapers(storedValue(PAPERS_KEY)));
-    buildGroupRows();
-  }
+  /* The papers record lives in this browser only: its copy as stored now. */
+  takeInPapers(parsePapers(storedValue(PAPERS_KEY)));
+  buildGroupRows();
 }
 
 function closeGroupDialog() {
@@ -9573,17 +9545,7 @@ function applyGroupDialog() {
     closeGroupDialog();
     if (moved) showToast('Grouped ' + moved + ' draft' + (moved === 1 ? '' : 's') + ' into papers.');
   }
-  if (canArtifactStore) {
-    var token = groupSeq;
-    groupApplyBtn.disabled = true;
-    remoteRead(PAPERS_KEY).then(function (r) {
-      if (token !== groupSeq || groupDialog.hidden) return;
-      if (r.ok && r.value !== null) takeInPapers(parsePapers(r.value));
-      commit();
-    });
-  } else {
-    commit();
-  }
+  commit(); /* changePapers merges the copy stored now before it applies */
 }
 
 groupDialog.addEventListener('click', function (e) {
@@ -11801,22 +11763,13 @@ storeGet(PREFS_KEY).then(function (v) {
   draftMeta.list.forEach(function (d) { startBodyLoad(d.id); });
   return bodyLoads[draftMeta.active];
 }).then(function (draft) {
-  /* The papers the store holds, merged in before anything is scoped by paper
-     (a store that never answers is given up by the watchdog below). */
-  bootDraft = draft;
-  return papersBootDone.then(function () { return draft; });
-}).then(function (draft) {
   if (draft && !draftReady) finishBoot(draft, '');
 });
-var bootDraft = null; /* the open draft as the store gave it, while the papers read is still on its way */
 
 /* Storage that never answers must not leave the editor locked: after a while,
    start from this browser's own copies. */
 setTimeout(function () {
   if (draftReady) return;
-  /* The drafts came from the store and only the papers read is late: open
-     them; the papers are merged when they arrive (papersBootDone). */
-  if (bootDraft) { finishBoot(bootDraft, ''); return; }
   draftMeta = parseDraftMeta(fallbackGet(DRAFTS_KEY));
   draftKey = keyOfDraft(draftMeta.active);
   /* Known: this browser's copies; a draft without one stays unknown. */

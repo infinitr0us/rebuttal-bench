@@ -104,7 +104,8 @@ leave the browser: they autosave on this device only.
   *Export* keeps each draft's paper; *Import* puts drafts back in their papers (or the open one),
   and *New paper from a file* makes a paper of a file, such as the export of a downloaded copy you
   used for another paper. A paper is only a label: removing drafts from a paper never deletes
-  them, and no action deletes more than one draft.
+  them, and no action deletes more than one draft. The grouping is kept in this browser; Export
+  and Import carry it to another.
 - **Review.** Switch the right pane between *Preview* and *Review* with a click or the arrow
   keys. Paste the forum review your draft answers. A rich paste keeps its fields, paragraphs
   and lists. Plain text works too. Each weakness, question, limitation or comment gets a label

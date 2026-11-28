@@ -447,23 +447,28 @@ Drafts are grouped into papers (3.13; design note and Fable's review in
   order (`PAPERS_KEPT`), which commutes with the merge. One value per entry, so a stale venue
   change cannot undo a rename; `setPaperEntry` stamps `max(now, old.at + 1)`. Values, entry
   fields and maps this version does not know are kept verbatim; a record with a higher
-  `version` is read and never written (`newer`), also inside the store's merge
-  (`papersMergeJSON`). Text the author types (3.15's paper context) goes under keys of its own.
+  `version` is read and never written (`newer`). Text the author types (3.15's paper context)
+  goes under keys of its own.
+- **In this browser only**, like reviews and the word list: never the asynchronous store, and
+  Export and Import carry papers to another browser. A first version synced the record through
+  the store; its start-up either scoped by paper before a fresh device had its papers or held
+  the drafts' start for them, and holding it replayed stale draft text and hid a new tab
+  (`reviews/2026-11-28/codex-review-313`, `codex-recheck-313`). **Keep the record out of the
+  drafts' start-up**: the boot sequence and its watchdog are unchanged from 3.12.
 - **Reads and writes** (DOM, after `var draftReady`): `papers` is this window's merge of every
-  copy it has seen. `changePapers(fn)` is the only writer: it merges the stored copy
-  (`storedValue`), applies `fn`, writes whole with its own `localStorage.setItem` (never
-  `fallbackSet`, whose `memNewer` copy and `retryLocalWrites` would write an old record back over
-  a newer one) and sends through `remoteWrite` with the merge, taking in what the store's merge
-  returns. Storage events and `pageshow` (persisted) merge in, and `takeInPapers` then writes
-  the merge back whenever the stored copy lacks what this window knows: localStorage has no
-  compare-and-set, so another window's write can overtake ours between read and write, and a
-  write refused for space leaves an older copy (`reviews/2026-11-28/codex-review-313`). Each such
-  write only adds to the stored record, so the windows stop once it holds the union. At start
-  the store's copy is read beside the drafts (`papersBootRead`) and the editor opens only once
-  it is merged, so nothing is scoped by paper before its paper is known; after the 8 s give-up
-  the editor opens with the store's drafts (`bootDraft`) and the papers merge when they arrive.
-  With papers in this browser, the venue and limit controls wait for the drafts
-  (`papersBeforeBoot`); without papers they work before as in 3.12.
+  copy it has seen. `changePapers(fn)` is the only writer: it merges the copy stored now
+  (`storedValue`) and applies `fn`. `writePapersLocal` writes with its own
+  `localStorage.setItem` (never `fallbackSet`, whose `memNewer` copy and `retryLocalWrites` would
+  write an old record back over a newer one), and every write is the merge of this window's
+  record **with the disk's at that moment**, made only when the disk lacks something, so a write
+  never takes back another window's change or one from a later version, and a write refused for
+  space leaves the disk as it was. Storage events and `pageshow` (persisted) merge in through
+  `takeInPapers`, which then writes back the same way: localStorage has no compare-and-set, so
+  another window's write can overtake ours between read and write, and the write-back keeps the
+  record from depending on a window staying open. Each write only adds to the record on disk,
+  so the windows stop once it holds the union (one write each, measured). With papers in this
+  browser, the venue and limit controls wait for the drafts (`papersBeforeBoot`); without papers
+  they work before as in 3.12.
 - **The open paper is the open draft's** (`openPaper`): nothing else is stored. **No papers state
   lives in `prefs`**, which every window writes whole. Every reader of the venue and limit goes
   through `openVenue()` and `openLimit()` (`paperVenue`, `paperLimit`: a paper's own entries, else
@@ -490,15 +495,14 @@ Drafts are grouped into papers (3.13; design note and Fable's review in
   on both sides (names unique per paper, texts compared across papers) and its `sameIn` says
   where present drafts live; *New paper from a file* puts every draft in the one new paper.
   **Group by name** (`#groupDialog`, modal) proposes from `prefixGroups` over the *No paper*
-  drafts, reads the store before proposing and before applying, writes only rows set to a paper
-  in one `changePapers`, skips a draft that got a paper meanwhile (a move made while the dialog
-  was open is newer than the proposal), and renames nothing.
-- Known limits, accepted: a 3.12 window's new drafts appear under *No paper*; two windows moving
-  one draft, renaming one paper or creating papers of one name at the same moment (the later
-  write wins, or two papers of one name); two devices writing through the store at the same
-  moment (one write lost until either's next write or start); an asynchronous store that answers
-  the drafts but not the papers record within 8 s (the editor opens ungrouped, and regroups when
-  the record arrives).
+  drafts, writes only rows set to a paper in one `changePapers`, skips a draft that got a paper
+  meanwhile (a move made while the dialog was open is newer than the proposal), and renames
+  nothing.
+- Known limits, accepted: grouping is per browser (where the page runs with an asynchronous
+  store, another device shows the drafts under *No paper* until grouped there or imported); a
+  3.12 window's new drafts appear under *No paper*; two windows moving one draft, renaming one
+  paper or creating papers of one name at the same moment (the later write wins, or two papers
+  of one name).
 
 ## Splitting
 

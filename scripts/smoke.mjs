@@ -2165,28 +2165,18 @@ try {
     setSourceText('Old $x$.', 0); ta.dispatchEvent(new Event('input')); await wait(1200);
     return localStorage.getItem('stub:rebuttal-bench-draft') === 'Old $x$.' || localStorage.getItem('stub:rebuttal-bench-draft');`);
 
-  /* codex-review-313: on a fresh device, the papers come from the store; the
-     editor waits for them (up to the 8 s give-up), so nothing is printed,
-     copied or checked against every paper at once. */
-  await inPage(`
+  /* codex-recheck-313: the papers record stays in this browser, like reviews
+     and the word list, so the store's start-up never waits for it, and a
+     papers action writes nothing to the store. */
+  await check('with an asynchronous store, papers stay in this browser and the store never sees them', `
     const id = draftMeta.active, pid = newPaperId();
-    let rec = setPaperEntry(parsePapers('{}'), 'name', pid, 'Stalled paper', Date.now());
-    rec = setPaperEntry(rec, 'member', id, pid, Date.now());
-    localStorage.setItem('stub:' + PAPERS_KEY, serializePapers(rec)); /* on the store only */
-    localStorage.removeItem(PAPERS_KEY);
-    localStorage.setItem('stub:delay:' + PAPERS_KEY, '2500');
-    localStorage.setItem('smoke:stalledPaper', pid);
-    return true;`);
-  await send('Page.navigate', { url: PAGE }, sessionId);
-  await new Promise((r) => setTimeout(r, 1200));
-  await check('with an asynchronous store, the editor waits for the papers record before it opens', `
-    const early = draftReady === false;
-    for (let i = 0; i < 80 && !draftReady; i++) await wait(100);
-    const pid = localStorage.getItem('smoke:stalledPaper'), open = openPaper();
-    localStorage.removeItem('stub:delay:' + PAPERS_KEY);
-    localStorage.removeItem('smoke:stalledPaper');
-    changePapers((rec, now) => setPaperEntry(rec, 'member', draftMeta.active, '', now)); /* back to No paper */
-    return early && open === pid || { early, ready: draftReady, open, pid };`);
+    changePapers((rec, now) => setPaperEntry(setPaperEntry(rec, 'name', pid, 'Local paper', now), 'member', id, pid, now));
+    await wait(400);
+    const local = paperOfDraft(id) === pid && parsePapers(localStorage.getItem(PAPERS_KEY)).maps.member[id].v === pid;
+    const remote = localStorage.getItem('stub:' + PAPERS_KEY);
+    changePapers((rec, now) => setPaperEntry(rec, 'member', id, '', now)); /* back to No paper */
+    await wait(400);
+    return local && remote === null && localStorage.getItem('stub:' + PAPERS_KEY) === null || { local, remote };`);
   await load();
   await inPage(`setSourceText('New $y$.', 0); ta.dispatchEvent(new Event('input')); return true;`);
   await load(); /* reload before the 700 ms autosave can reach the store */
