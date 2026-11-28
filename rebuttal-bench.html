@@ -9160,6 +9160,8 @@ function renderDraftTabs() {
     (!hasPapers && !papers.newer ? '<button type="button" class="dtool" data-act="new-paper" title="Create a new paper with its first draft">New paper</button>' : '') +
     (canGroup ? '<button type="button" class="dtool" data-act="group" title="Group ungrouped drafts into papers by their shared name prefixes">Group by name</button>' : '');
   draftPanel.setAttribute('aria-labelledby', 'dtab-' + draftMeta.active);
+  var moveSel = draftTools.querySelector('.dmove');
+  if (moveSel) moveSel.addEventListener('change', function () { moveOpenDraftTo(moveSel.value); });
   var again = focusId ? draftTabs.querySelector('.dtab[data-id="' + focusId + '"]')
     : focusAct ? draftTools.querySelector('.dtool[data-act="' + focusAct + '"]') : null;
   if (again) again.focus();
@@ -9407,9 +9409,6 @@ draftTools.addEventListener('click', function (e) {
   else if (act === 'history') openHistory();
   else if (act === 'new-paper') createPaper();
   else if (act === 'group') openGroupDialog();
-});
-draftTools.addEventListener('change', function (e) {
-  if (e.target && e.target.classList.contains('dmove')) moveOpenDraftTo(e.target.value);
 });
 
 /* ---- Group by name: migrate ungrouped drafts into papers in one write ---- */
