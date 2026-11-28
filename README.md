@@ -129,10 +129,25 @@ leave the browser: they autosave on this device only.
   preview, every formula it cannot typeset gets a card with its error message, and every macro
   it does not know (`\bm`, `\argmax`, `\R`) gets one card for all the formulas that use it,
   with a replacement MathJax has (`\boldsymbol`) where there is one.
+- **Anonymity.** List the words that would name you in the *Anonymity* panel, one per line: your
+  names, e-mail addresses, institution, lab, project and GitHub names. Every occurrence in the
+  open draft gets a card, wherever it is, since OpenReview posts the comment as typed and
+  e-mails its source: link destinations, code, math and HTML comments count too. Matching is
+  exact apart from capitals and a name wrapped across a line, so prefer full names (a surname
+  alone also matches other people's citations). The list is kept with your preferences, never
+  in a draft, an export or a copy.
 - **Status bar.** Characters counted the way OpenReview's own counter does (trimmed length),
   the length of the selection, the number of formulas MathJax will typeset, hazards, and
   MathJax problems (TeX errors *and* undefined macros).
 - **Escape cheat sheet.** Under the compaction panel.
+
+## Reporting a problem
+
+*Report a problem* in the page's footer opens a GitHub issue form with the page's version, your
+browser and the chosen venue filled in; *Suggest an idea* opens one for ideas and changed venue
+rules. Issues are public and your rebuttal is not: paste only a small example that shows the
+problem, rewritten so it says nothing about your paper. When the preview and the posted comment
+differ, screenshots of both are the most useful report there is.
 
 ## How faithful is the preview?
 
@@ -218,6 +233,9 @@ npm run check-upstream            # did openreview-web change anything the page 
                                   #   exit 1: something changed; 2: the check itself failed
 ```
 
+GitHub also runs the upstream check every Monday (`.github/workflows/upstream.yml`) and opens an
+issue labelled `upstream-drift` when something changed.
+
 ```
 rebuttal-bench.html        the app (single self-contained file, no build step)
 index.html                 redirects the GitHub Pages site root to the app
@@ -231,6 +249,8 @@ tests/
   split.test.js            splitting a draft into comments: where it cuts, what it keeps
   reviewers.test.js        reviewer IDs across drafts: greetings and IDs in other capitals
   leftovers.test.js        LaTeX comment lines and chat-assistant leftovers, caught and quiet
+  anonymity.test.js        the anonymity word list: parsing, exact matches everywhere, offsets
+  report.test.js           the footer's report links: version, browser, issue-form fields
   review.test.js           a review's points and how a draft covers them
   paste.test.js            formatted prose from Docs, Word and web pages as Markdown
   promises.test.js         promises to change the paper, found and left alone
@@ -247,6 +267,8 @@ scripts/smoke.mjs          browser smoke test over the DevTools protocol
 scripts/check-upstream.mjs compares openreview-web against upstream/openreview-web.json
 AGENTS.md                  engineering notes for contributors and coding agents
 .github/workflows/test.yml CI: npm test and the browser smoke test on every push and pull request
+.github/workflows/upstream.yml   weekly check-upstream, opening an issue on drift
+.github/ISSUE_TEMPLATE/    the issue forms the page's report links open
 ```
 
 When adding or changing a check or fix, add regression cases for the broken input it repairs

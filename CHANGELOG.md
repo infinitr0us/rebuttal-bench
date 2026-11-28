@@ -1,5 +1,28 @@
 # Changelog
 
+## 3.12.0 (unreleased)
+
+### Anonymity
+- The *Anonymity* panel keeps a private list of the words that would name you (your names,
+  e-mail addresses, institution, lab, project and GitHub names, one per line). Each occurrence in
+  the open draft gets a card, wherever it is: prose, code, math, link destinations, image text
+  and HTML comments all count, because OpenReview posts the comment as typed and e-mails its
+  source. Matches are exact (any capitals, a name wrapped across a line), so they cannot fire on
+  words you did not list. The list is kept with your preferences, never in a draft, an export or
+  a copy, and it has its own undo history. Built by Gemini 4 Neon.
+
+### Reporting a problem
+- The footer names the page's version and links to *Report a problem* and *Suggest an idea*,
+  GitHub issue forms that come with the version, the browser and the chosen venue filled in.
+  No draft text goes in: issues are public, so the form asks for a small example rewritten to
+  say nothing about the paper.
+
+### Maintenance
+- A weekly GitHub workflow runs `check-upstream` and opens an issue when openreview-web changes
+  anything the page mirrors, so the preview cannot drift from OpenReview unnoticed between
+  rebuttal seasons.
+- The page's visible text and the README no longer use em-dashes.
+
 ## 3.11.0 (2026-11-27)
 
 ### Paste from Google Docs or Word

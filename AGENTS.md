@@ -102,6 +102,16 @@ text, discard the grid and use the regular text importer.
   `% of runs`, "I hope this helps", "Sure! Here are the results:", `[Authors]` signatures.
   `tests/leftovers.test.js` holds those shapes; widen a pattern only with such a near-miss case
   and a rerun of that corpus.
+- Check 21 matches the author's anonymity word list (`identityTerms` parses the preference;
+  `opts.identity`, passed only by the page through `pageAnalyzeOptions()` beside `opts.venue`, so
+  Fix all, compaction and `splitComment` never see it) across the **whole** posted text, code,
+  math, link syntax and HTML comments included: OpenReview e-mails the source as typed. It is
+  precise by construction (the author's own words, case-insensitive, `WORD_CHAR` boundaries
+  where a term starts or ends with a letter or digit, a space matching blanks with at most one
+  line break, no-break spaces included); keep it free of guesses about what a name is. The
+  longer of two overlapping matches wins, a draft shows at most 30 cards (`identityCount` has
+  them all), and there is no fix. The list's textarea lives in a same-origin `srcdoc` iframe,
+  like the review box, so its typing never enters the editor's undo history.
 - `texProblemIssues(src, spans, reports, issues, {stale, analyze})` turns what MathJax reported
   after the last typeset (`texProblems()` in the DOM section: `{tex, undef, errors}` per formula,
   in document order) into cards. Formulas cut apart by inline Markdown are skipped (MathJax never
@@ -515,6 +525,20 @@ review is taken in only when this box holds no edit of its own (last save wins o
 `devDependencies` together, run `npm test`, then `npm run check-upstream -- --update`.
 Exit codes: 0 nothing changed, 1 something changed, 2 the check itself failed (network, rate
 limit, a moved file or marker, an unreadable snapshot; it never overwrites one without `--update`).
+`.github/workflows/upstream.yml` runs it every Monday: exit 1 opens an issue labelled
+`upstream-drift` (or refreshes the open one's body, without a comment that would notify
+everyone weekly), exit 2 fails the run. GitHub turns scheduled workflows off after 60 days
+without a commit; turn it back on in the Actions tab.
+
+## Releases and reports
+
+`APP_VERSION` in the pure section is the page's version, shown in the footer and filled into
+problem reports; bump it with `package.json` and `package-lock.json` in the release commit
+(`tests/report.test.js` checks it). The footer's report links (`renderReportLinks`) fill the
+issue forms in `.github/ISSUE_TEMPLATE` by field id with the version, the browser
+(`browserLabel`) and the venue (`reportVenue`), **never draft text**: issues are public. A test
+checks that every field the page fills exists in its form. Do not release while a venue the
+users target is in its author response window; Pages serves `main` at once.
 
 ## Browser behavior
 
@@ -541,7 +565,9 @@ long soft-wrapped line, refusing a stale one-click fix, draft persistence across
 with a stubbed asynchronous `window.storage`: keystrokes before a reload, a draft saved elsewhere,
 leaving before the restore), `/images/` attributes, the theme toggle, the Sections and Wording
 panels, find and replace (with its boxes and one undo), a double-click from the preview to the
-source, the spellcheck switch across a draft switch, and that no page errors were thrown. Add a
+source, the spellcheck switch across a draft switch, the Anonymity panel (cards, its own undo,
+across a reload), the footer's report links (no draft text in them), and that no page errors
+were thrown. Add a
 check there for any new browser-only behavior.
 
 Still by eye: zoom and editor-size controls, dark-mode colors, the layout below 920 px width, the
