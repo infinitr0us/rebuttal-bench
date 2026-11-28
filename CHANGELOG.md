@@ -1,5 +1,34 @@
 # Changelog
 
+## 3.13.0 (unreleased)
+
+### Papers
+- Drafts can be grouped by paper, for authors with several submissions under review in one
+  season. *New paper* names a paper and opens its first draft; a row of papers then sits above
+  the draft tabs (a menu below 920 px), each paper with its number of drafts and a mark when one
+  is over its limit, and the draft tabs show the open paper's drafts. *No paper* shows whenever
+  it holds drafts. Rename a paper with F2 or a double-click on its tab; *Move to…* puts the open
+  draft in another paper; choosing a paper opens the draft last opened there.
+- *Group by name* proposes papers from tab names that share a first word (`P2 R1`, `ICML-R1`,
+  `[ARR] General`, never a reviewer's ID) in a dialog where every row can be changed, and
+  writes only what you apply. No draft is renamed.
+- Each paper can have its own venue and limit; until you choose one it uses the page's, so
+  grouping changes no card. The reviewer-ID cards and the pointer check compare drafts of the
+  same paper only (two papers each with an `R1` no longer meet), and *Promises*, *Copy as
+  checklist*, *Print all drafts* and new drafts (also Split's parts) follow the open paper.
+  *Compare* lists the paper's other drafts first and the rest under *Other papers*.
+- *Export* keeps each draft's paper and that paper's venue, in a file 3.12 still imports
+  (ungrouped). *Import* puts each draft in the paper its file names (or the open paper) with
+  names unique per paper, and says where drafts already present are; *New paper from a file*
+  makes a paper named after the file, for instance from the export of a downloaded copy used
+  for another paper. Built by Gemini 4 Neon on the storage core below.
+- A paper owns no text: it is a label on drafts, in a record of its own that 3.12 never reads.
+  Windows, devices and the back/forward cache merge their copies of it, never replace them, so
+  no window and no order of saves can lose a grouping change for good, and losing the record
+  would only regroup drafts. A paper's venue and limit never touch the preferences, and
+  deleting a paper's open draft opens another draft of the same paper (the confirm names the
+  paper). Designed with a review by Claude Fable 5.2 before any code was written.
+
 ## 3.12.0 (2026-11-28)
 
 ### Checked on real author responses

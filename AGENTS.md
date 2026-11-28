@@ -464,6 +464,23 @@ Drafts are grouped into papers (3.13; design note and Fable's review in
   paper's typed limit to `null`). Before `draftReady` they write `prefs`, as in 3.12.
 - After a delete, `neighbourInPaper` opens a draft of the same paper, and the confirm names the
   paper: drafts of several papers share names.
+- **The interface** (`renderPaperRow`, `renderDraftTabs`): the paper row shows only once a paper
+  exists, *No paper* whenever it holds drafts (a draft another window adds, or one
+  `recoverDraftBodies` gives back, must never be out of sight), every paper's draft count and
+  over-limit mark. The draft last opened in each paper is remembered in memory only
+  (`lastDraftInPaper`). *New paper*, *Group by name* and Import reuse a paper of the same name
+  (`paperNamed`); a draft is created before its membership is written, so a failed papers write
+  leaves it visible under *No paper*.
+- **Scoped to the open paper**: `reviewerCards` (and so the pointer check), `renderPromises`,
+  `printDrafts(true)`, Compare's first group, new drafts and Split's parts. **Global**: Export
+  (the backup; each draft with `paper` and its paper's own `venue`, from `papersForOutput`, a
+  private merge), the anonymity word list, `prefs`.
+- **Import** captures its target when the file is chosen; a file's paper name picks or creates a
+  paper and never renames one or changes an existing paper's venue; `importPlan` gets `scope`
+  on both sides (names unique per paper, texts compared across papers) and its `sameIn` says
+  where present drafts live. **Group by name** (`#groupDialog`, modal) proposes from
+  `prefixGroups` over the *No paper* drafts, reads the store before proposing and before
+  applying, writes only rows set to a paper in one `changePapers`, and renames nothing.
 
 ## Splitting
 
@@ -652,7 +669,12 @@ with a stubbed asynchronous `window.storage`: keystrokes before a reload, a draf
 leaving before the restore), `/images/` attributes, the theme toggle, the Sections and Wording
 panels, find and replace (with its boxes and one undo), a double-click from the preview to the
 source, the spellcheck switch across a draft switch, the Anonymity panel (cards, its own undo,
-across a reload), the footer's report links (no draft text in them), and that no page errors
+across a reload), the footer's report links (no draft text in them), papers (the storage layer:
+a paper's venue and limit with `prefs` byte for byte, a delete staying in its paper, another
+window's change merged; the interface: the row, *New paper*, moving, renaming, scoped cards,
+Promises, Print and Compare, *Group by name*, Export and Import, a reload, the draft list byte
+for byte after every papers action; and the released 3.12 page in a second tab on the same
+storage, which shares localStorage across `file:` pages in Chrome), and that no page errors
 were thrown. Add a
 check there for any new browser-only behavior.
 
