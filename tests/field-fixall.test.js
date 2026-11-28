@@ -63,13 +63,15 @@ test('a lone escaped dollar shows as typed: a warning, and a fix that renders th
   rendersAsPosted(src);
 });
 
-test('bars composed into a double bar keep their escapes; a single \\| still becomes the norm', () => {
+test('bars composed into a double bar keep their escapes; other bars get a card', () => {
   for (const src of [raw`$\|\|h\|\|_2$`, raw`$|\|\theta\|\|$`, raw`$\||x\||$`]) {
     assert.deepEqual(titled(src, /\\\| is consumed/), [], src);
   }
   const norm = raw`the norm $\|x\|_2$ is small`;
-  assert.equal(titled(norm, /\\\| is consumed/).length, 2);
-  assert.equal(fixAll(norm), raw`the norm $\\|x\\|_2$ is small`);
+  const found = titled(norm, /\\\| is consumed/);
+  assert.equal(found.length, 2);
+  // The card's fix gives the norm when clicked.
+  assert.equal(A.applyEditsToText(norm, found[0].fix.edits.concat(found[1].fix.edits)), raw`the norm $\\|x\\|_2$ is small`);
 });
 
 test('grouping braces typed as \\{ \\} keep their escapes; set braces get the fix', () => {
@@ -113,16 +115,19 @@ test('emphasis inside \\text{} is reported with a manual fix that names \\textbf
 });
 
 test('a bare % after a number is a TeX comment that eats the sign; comment lines are left alone', () => {
-  const src = raw`Our accuracy was $78.1%$, and $50% \pm 2$ of runs, and $\text{top 10%}$.`;
+  const src = raw`Our accuracy was $78.1%$ (and $(50%)$), and $\text{top 10%}$.`;
   const found = titled(src, /bare % starts a TeX comment/);
   assert.equal(found.length, 3);
-  assert.equal(fixAll(src), raw`Our accuracy was $78.1\\%$, and $50\\% \pm 2$ of runs, and $\text{top 10\\%}$.`);
+  assert.equal(fixAll(src), raw`Our accuracy was $78.1\\%$ (and $(50\\%)$), and $\text{top 10\\%}$.`);
   assert.match(shown(fixAll(src)), /%/);
-  // Comments their authors meant (codex-review-312): a comment line in a
-  // display, words after the sign, a spaced sign, \verb.
+  // Comments their authors meant (codex-review-312, codex-recheck-312): a
+  // comment line in a display, words or an addend switched off after the
+  // sign, a spaced sign, \verb.
   for (const meant of [
     '$$\\begin{aligned} y &= x\\\\\\\\\n % \\vspace{-1mm}\n z &= 1 \\end{aligned}$$',
     '$$\nx=1 % baseline fixed in all runs\n+y\n$$',
+    '$$\nx=1%\\quad + 2\n+y\n$$',
+    '$$\nx=1% t=0\n+y\n$$',
     raw`About $50 %$ of runs.`,
     raw`The label is $\verb|95%|$.`,
   ]) {
@@ -136,37 +141,48 @@ test('a bare % after a number is a TeX comment that eats the sign; comment lines
 
 /* The release review (reviews/2026-11-27/codex-review-312) found more input
    that rendered as meant and that Fix all changed. */
-test('escaped signs around any formula stay a formula; only prices are currency', () => {
-  for (const src of [raw`We set \$n=16\$ for all runs.`, raw`Each sample \$x\$ has unit norm.`, raw`We set \$n_0=16\$.`]) {
+test('escaped signs around any formula stay a formula; prices with prose or separators are currency', () => {
+  for (const src of [raw`We set \$n=16\$ for all runs.`, raw`Each sample \$x\$ has unit norm.`, raw`We set \$n_0=16\$.`,
+    raw`We fix the number of layers at \$16\$.`, raw`Note that \$2 - 1\$ is one.`]) {
     assert.deepEqual(titled(src, /protect/), [], src);
     rendersAsPosted(src);
   }
   assert.equal(fixAll(raw`It costs \$5, \$10 or \$20.`), raw`It costs \\$5, \\$10 or \\$20.`);
+  assert.equal(fixAll(raw`The rates are \$5/hour and \$8/hour.`), raw`The rates are \\$5/hour and \\$8/hour.`);
 });
 
-test('braces that group an argument keep their escapes; sets beside them are fixed', () => {
-  for (const src of [raw`The bound is $\sqrt\{n+1\}$.`, raw`The bound is $\sqrt\{n+1}$.`,
-    raw`The fraction is $\frac\{a+b\}\{c+d\}$.`, raw`$\sqrt[3]\{x\}$`, raw`$\mathbf\{v\}$`]) {
+test('a consumed brace is fixed unattended only as a set; elsewhere the author decides', () => {
+  // Grouping: no card at all.
+  for (const src of [raw`The bound is $\sqrt\{n+1\}$.`, raw`The bound is $\sqrt\{n+1}$.`, raw`$\mathbf\{v\}$`,
+    raw`$$x=2\tag{1}\label\{eq:x\}$$ See $\eqref{eq:x}$.`, raw`$a \equiv b \pmod\{n+1\}$`]) {
     assert.deepEqual(titled(src, /\\[{}] is consumed/), [], src);
     rendersAsPosted(src);
   }
+  // Not surely a set: a card with a manual fix, the formula left as posted.
+  for (const src of [raw`The fraction is $\frac\{a+b\}\{c+d\}$.`, raw`$\sqrt[3]\{x\}$`,
+    raw`The support is $S=\bigcup_{i=1}^{n}\{x_i\}$.`]) {
+    assert.ok(titled(src, /\\[{}] is consumed/).every((i) => i.fix && i.fix.manual), src);
+    rendersAsPosted(src);
+  }
+  // Surely a set, or a lone brace (broken TeX bare): the fix applies.
   assert.equal(fixAll(raw`We take $\sqrt\{n+1\}$ for $n\in \{1,2\}$.`), raw`We take $\sqrt\{n+1\}$ for $n\in \\{1,2\\}$.`);
   assert.equal(fixAll(raw`$x\in\{0,1\}$`), raw`$x\in\\{0,1\\}$`);
+  assert.equal(fixAll(raw`$\{x_i\}_{i=1}^{N}$ and $f = \left\{ a \right.$`), raw`$\\{x_i\\}_{i=1}^{N}$ and $f = \left\\{ a \right.$`);
 });
 
-test('a single \\| or an unscripted pair is the author\'s call; a scripted pair is the norm', () => {
-  // A conditioning bar or a KL separator, |x| as absolute value or norm: a
-  // card with a manual fix, and Fix all leaves the formula as posted.
+test('a \\| always waits for the author: no context makes the norm certain', () => {
+  // A conditioning or evaluation bar, a KL separator, |x| as absolute value
+  // or norm, a scalar's square: a card with a manual fix, and Fix all leaves
+  // the formula as posted.
   for (const src of [raw`The conditional probability is $P(A \| B)$.`, raw`$\text{KL}[q\|p]$`,
-    raw`For a scalar, its absolute value is $\|x\|$.`, raw`$\|\frac{a}{b}-1\|\leq\epsilon$`]) {
+    raw`For a scalar, its absolute value is $\|x\|$.`, raw`$\|\frac{a}{b}-1\|\leq\epsilon$`,
+    raw`By Bayes' rule, $P(A \big\| B)P(B)=P(B \big\| A)P(A)$.`, raw`$\left\| x \right\|$`,
+    raw`The endpoint change is $F(t)\big\|\_{t=b}-F(t)\big\|\_{t=a}$.`,
+    raw`For a scalar residual we report its square $r^2=\|r\|^2$.`, raw`$\|v\|_2$`]) {
     const found = titled(src, /\\\| is consumed/);
     assert.ok(found.length && found.every((i) => i.fix && i.fix.manual), src);
     assert.equal(fixAll(src), src);
   }
-  // A scripted or sized pair is the norm, spaced or not, and both sides change.
-  assert.equal(fixAll(raw`$\|v\|_2$ and $\|x\|\_2$`), raw`$\\|v\\|_2$ and $\\|x\\|\_2$`);
-  assert.equal(fixAll(raw`$\left\| x \right\|$`), raw`$\left\\| x \right\\|$`);
-  assert.equal(fixAll(raw`$\frac{1}{2} \| \nabla s(x) \|^{2}$`), raw`$\frac{1}{2} \\| \nabla s(x) \\|^{2}$`);
 });
 
 test('bold prices are no formula, whatever the prose between them; emphasis inside one is', () => {
@@ -175,6 +191,7 @@ test('bold prices are no formula, whatever the prose between them; emphasis insi
     assert.deepEqual(titled(src, /splits this formula/), [], src);
     rendersAsPosted(src);
   }
+  rendersAsPosted(raw`Each run costs **$5** for $n$ samples, or **$6** for $(n+1)$.`);
   assert.equal(fixAll(raw`We evaluate $2 + a*b*c$.`), raw`We evaluate $2 + a\*b\*c$.`);
   assert.equal(fixAll('We evaluate $α*β*γ$.'), 'We evaluate $α\\*β\\*γ$.');
   assert.equal(titled(raw`a **$5$-fold** gain and $x$ too`, /splits this formula/).length, 0);

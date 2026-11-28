@@ -2353,18 +2353,22 @@ function analyzeText(src, opts) {
     var inner = src.slice(sp.innerStart, sp.innerEnd);
     if (sp.delimiter === 'dollar') {
       /* The signs of two prices: an amount after the first, and after the
-         second the next amount or a formula's backslash ("__$5__ versus
-         __$8__", "**$484**) vs. B ($\approx$"). A formula's closing sign is
-         followed by a space, punctuation or a word ("$2 + a*b*c$.",
-         "$5$-fold"). Tested first: the prose between prices can hold an
+         second whatever it opens, the next amount or a formula ("__$5__
+         versus __$8__", "**$484**) vs. B ($\approx$", "**$5** for $n$"). A
+         formula's closing sign is followed by a space or punctuation
+         ("$2 + a*b*c$."). Tested first: the prose between prices can hold an
          underscore ("GPU_hour") that looks like TeX. */
       if (afterDollar(src.slice(sp.openAt + 1, sp.openAt + 4)) === 'amount' &&
-          (afterDollar(src.slice(sp.closeAt + 1, sp.closeAt + 4)) === 'amount' || src[sp.closeAt + 1] === '\\')) return false;
+          afterDollar(src.slice(sp.closeAt + 1, sp.closeAt + 4)) !== 'closes') return false;
       if (slashedDollar(sp.openAt) || slashedDollar(sp.closeAt)) return TEXISH.test(inner);
     }
     /* "__$5__": underscores that make bold are no subscripts */
     if ((strip === '_' ? /\\[A-Za-z]|[\^{}]/ : TEXISH).test(inner)) return true;
-    return WORD_CHAR.test(strip ? inner.split(strip).join('') : inner);
+    var bare = strip ? inner.split(strip).join('') : inner;
+    /* Prose, no TeX: a pairing shifted by a price ("**$5** for $n$
+       samples, or **$6**" pairs "$ samples, or **$"). */
+    if (/[A-Za-z]{2,}[\s,;]+[A-Za-z]{2,}/.test(bare)) return false;
+    return WORD_CHAR.test(bare);
   }
   /* The braces MathJax takes as group braces in a formula's source (typed bare,
      or with one backslash that Markdown consumes; "\\{" reaches MathJax as a
@@ -2381,26 +2385,36 @@ function analyzeText(src, opts) {
   }
   /* Control words whose next group is their argument ("\sqrt\{n+1\}"), unlike
      relations, operators and delimiter sizes ("\in \{0,1\}", "\left\{"). */
-  var ARG_CMD = /^(?:sqrt|[dtc]?frac|[dt]?binom|math(?:bf|rm|cal|bb|it|sf|tt|frak|scr|op|rel|bin|ord)|boldsymbol|bm|pmb|text(?:bf|it|rm|tt|sf|up|normal)?|mbox|hbox|fbox|boxed|hat|widehat|tilde|widetilde|bar|overline|underline|vec|dot|ddot|acute|grave|breve|check|overrightarrow|overleftarrow|overbrace|underbrace|overset|underset|stackrel|operatorname|substack|color|textcolor|phantom|hphantom|vphantom|cancel|xrightarrow|xleftarrow)$/;
-  /* A { that opens a group rather than a set: right after ^ or _, after the
-     closing } or ] of a previous argument ("\frac{a}\{b\}", "\sqrt[3]\{x\}"),
-     or after a command that takes an argument. Spaces and the brace's own
-     backslash aside. */
-  function opensGroup(sp, at) {
+  var ARG_CMD = /^(?:sqrt|[dtc]?frac|[dt]?binom|math(?:bf|rm|cal|bb|it|sf|tt|frak|scr|op|rel|bin|ord)|boldsymbol|bm|pmb|text(?:bf|it|rm|tt|sf|up|normal)?|mbox|hbox|fbox|boxed|hat|widehat|tilde|widetilde|bar|overline|underline|vec|dot|ddot|acute|grave|breve|check|overrightarrow|overleftarrow|overbrace|underbrace|overset|underset|stackrel|operatorname|substack|color|textcolor|phantom|hphantom|vphantom|cancel|xrightarrow|xleftarrow|label|tag|ref|eqref|pmod|pod|bmod)$/;
+  /* What precedes the brace at `at` in its formula, spaces and the brace's own
+     backslash aside: the character, and the control word ending there. */
+  function beforeBrace(sp, at) {
     var k = at - 1;
     while (k >= sp.innerStart && src[k] === '\\') k--;
     while (k >= sp.innerStart && /\s/.test(src[k])) k--;
-    if (src[k] === '^' || src[k] === '_' || src[k] === '}' || src[k] === ']') return true;
-    var cw = /\\([A-Za-z]+)\*?$/.exec(src.slice(sp.innerStart, k + 1));
-    return !!cw && ARG_CMD.test(cw[1]);
+    var cw = k >= sp.innerStart ? /\\([A-Za-z]+)\*?$/.exec(src.slice(sp.innerStart, k + 1)) : null;
+    return { ch: k >= sp.innerStart ? src[k] : '', word: cw ? cw[1] : null };
   }
-  /* Bars typed \| in a formula, which Markdown turns into |. */
-  function consumedBars(sp) {
-    var n = 0;
-    for (var k = sp.innerStart; k < sp.innerEnd; k++) {
-      if (src[k] === '|' && countBackslashesBefore(src, k) % 4 === 1) n++;
-    }
-    return n;
+  /* A { that surely opens a group: right after ^ or _, or after a command
+     that takes an argument. Such a brace gets no card. */
+  function opensGroup(sp, at) {
+    var b = beforeBrace(sp, at);
+    return b.ch === '^' || b.ch === '_' || (!!b.word && ARG_CMD.test(b.word));
+  }
+  /* Relations, operators and delimiter sizes a set follows: "x \in \{0,1\}",
+     "A \cup \{x\}", "\left\{". */
+  var SET_PREV = /^(?:in|notin|ni|subset|subseteq|subsetneq|supset|supseteq|supsetneq|cup|cap|setminus|times|left|[bB]igg?l?|mid|colon|equiv|neq|ne|le|leq|ge|geq|to|mapsto|cdot|sim|approx)$/;
+  /* A consumed brace whose fix leaves no doubt: one of a pair typed "\{ … \}"
+     that opens where only a set can, at the start of the formula, after
+     = ( , : | < > +, or after a relation or a delimiter size. Elsewhere
+     ("\bigcup_{i=1}^{n}\{x_i\}", "\label\{eq:x\}") the author decides. */
+  function setBraces(sp, j) {
+    var partner = braceGroups(sp)[j];
+    /* Unmatched, the bare brace is broken TeX: the author meant a literal one. */
+    if (partner === undefined) return true;
+    if (countBackslashesBefore(src, partner) % 4 !== 1) return false;
+    var b = beforeBrace(sp, src[j] === '{' ? j : partner);
+    return b.ch === '' || /[=(,:|<>+]/.test(b.ch) || (!!b.word && SET_PREV.test(b.word));
   }
   /* A consumed "\X" (at i, the character at j) that already gives MathJax what
      the author meant, so the TeX control symbol \X would change a formula
@@ -2467,12 +2481,17 @@ function analyzeText(src, opts) {
     /* MathJax never pairs the signs of a recovered span (they sit in different
        blocks), so each one shows as typed for now, like a lone sign. */
     if (sp.recovered) { slashed.forEach(unprotectedLone); return; }
-    /* Both signs escaped around anything but prices, "(\$\tilde{P}\$)" or
-       "\$n=16\$": the author escaped the delimiters for Markdown, and MathJax
-       typesets the formula they meant. Prices ("\$5 and \$10") are currency. */
-    var pairInner = src.slice(sp.innerStart, sp.innerEnd);
-    if (slashed.length === 2 && !looksLikeCurrencyPair(pairInner, src.slice(sp.end, sp.end + 3)) &&
-        !looksLikePrice(pairInner)) return;
+    /* Both signs escaped: currency only with prose between them and no TeX
+       ("\$5 and \$10", "\$5/hour and \$8/hour"), or an amount and a separator
+       ("\$5, \$10"). Around anything else, "(\$\tilde{P}\$)", "\$n=16\$",
+       "\$16\$", "\$2 - 1\$", the author may have escaped the delimiters for
+       Markdown, and MathJax typesets that formula. */
+    var pairInner = src.slice(sp.innerStart, sp.innerEnd), pairAfter = src.slice(sp.end, sp.end + 3);
+    /* The second sign must lead into the next amount: "\$16 GB\$ of memory"
+       is a quantity in a formula. */
+    var prices = afterDollar(pairAfter) === 'amount' && !TEXISH.test(pairInner) &&
+      (/[A-Za-z]{2,}/.test(pairInner) || /^\s*[-+−]?\d[\d,.]*[kKmMbB]?[\s,;\/–-]+$/.test(pairInner));
+    if (slashed.length === 2 && !prices && !looksLikeCurrencyPair(pairInner, pairAfter)) return;
     slashed.forEach(function (at) {
       var slashRun = countBackslashesBefore(src, at);
       var autofix = fix('\\\\$', [literalDollar(at)]);
@@ -2598,16 +2617,19 @@ function analyzeText(src, opts) {
              (shieldMeant). */
         } else {
           var symFix = fix('\\\\' + next, [edit(i, j, bs(2))]);
-          /* "\|x\|" reaches MathJax as |x|, which is also an absolute value,
-             and a single "\|" is a KL divergence's separator ("D(p \| q)") as
-             often as a conditioning bar ("P(A \| B)"). Only pairs with a
-             script or a size ("\|v\|_2", "\left\|") are surely the norm the fix
-             makes of them; the decision covers the whole formula, so that a
-             pair is never fixed on one side only. */
-          if (symFix && next === '|' && (consumedBars(sp) % 2 === 1 ||
-              !/\\\|\s*\\?[_^]|\\(?:left|right|[bB]igg?[lr]?)\s*\\\|/.test(src.slice(sp.innerStart, sp.innerEnd)))) {
-            symFix.manual = true;
-          }
+          /* Fix all repairs a consumed escape where the bare character cannot
+             be what the author meant: a visible comma or semicolon instead of
+             a space, # or a stray & (TeX errors), % (a comment). A bare {, }
+             or | is valid TeX with another meaning. "\|" may be an absolute
+             value ("\|r\|^2" of a scalar), a conditioning or evaluation bar
+             ("P(A \big\| B)", "F(t)\big\|\_{t=b}") or a KL separator
+             ("[q\|p]"): no context makes its fix certain, so it always waits
+             for the author's click. "\{" may shield a grouping brace
+             ("\label\{eq:x\}"): it is repaired unattended only where only a
+             set can open (setBraces). (codex-recheck-312: rules that guessed
+             had holes.) */
+          if (symFix && next === '|') symFix.manual = true;
+          if (symFix && (next === '{' || next === '}') && !setBraces(sp, j)) symFix.manual = true;
           push('warn', '\\' + next + ' is consumed by Markdown',
             'A single backslash before ASCII punctuation is removed before MathJax runs, so MathJax receives <code>' + escHtml(next) + '</code>. If you intended the TeX control symbol <code>\\' + escHtml(next) + '</code>, type <code>\\\\' + escHtml(next) + '</code>.',
             i, j + 1, symFix);
@@ -2617,11 +2639,12 @@ function analyzeText(src, opts) {
     }
 
     /* A bare % is a TeX comment: MathJax drops it and the rest of its line of
-       the formula, with no error ("$78.1%$" shows 78.1). Only a percentage is
-       reported: right after a digit, with no words after it on its line. A
-       "% \vspace{-1mm}" line, or "x=1 % fixed in all runs" in a display copied
-       from the paper, is a comment its author meant, as in LaTeX; inside
-       \verb the sign is shown as typed. */
+       the formula, with no error ("$78.1%$" shows 78.1). Only an unmistakable
+       percentage is reported: right after a digit, and right before the end
+       of the formula or a closing bracket or separator ("$78.1%$",
+       "\text{top 10%}"). Anything after it may be a comment its author meant,
+       as in LaTeX: "% \vspace{-1mm}", "x=1%\quad + 2" (an addend switched
+       off), "x=1 % fixed in all runs". Inside \verb the sign shows as typed. */
     var verbs = [], vm, verbRe = /\\verb\*?([^A-Za-z\s*])/g, innerText = src.slice(sp.innerStart, sp.innerEnd);
     while ((vm = verbRe.exec(innerText))) {
       var vEnd = innerText.indexOf(vm[1], verbRe.lastIndex);
@@ -2634,8 +2657,11 @@ function analyzeText(src, opts) {
       if (!/\d$/.test(src.slice(sp.innerStart, pc))) continue;
       if (verbs.some(function (v) { return pc >= v.start && pc < v.end; })) continue;
       var lineEnd = src.indexOf('\n', pc);
-      var lost = src.slice(pc + 1, lineEnd < 0 || lineEnd > sp.innerEnd ? sp.innerEnd : lineEnd);
-      if (/[A-Za-z]{2,}/.test(lost.replace(/\\[A-Za-z]+/g, ' '))) continue;
+      var lastLine = lineEnd < 0 || lineEnd >= sp.innerEnd || !/\S/.test(src.slice(lineEnd, sp.innerEnd));
+      var lost = src.slice(pc + 1, lastLine ? sp.innerEnd : lineEnd);
+      /* At the end of a line with more lines after it, "%" joins the lines,
+         as LaTeX authors write it ("x=1%" then "+y"). */
+      if (!/^\s*[)\]},;]/.test(lost) && !(lastLine && /^\s*$/.test(lost))) continue;
       push('err', 'A bare % starts a TeX comment',
         'MathJax reads <code>%</code> as the start of a TeX comment, so the percent sign' +
         (/\S/.test(lost) ? ' and the rest of its line (<code>' + escHtml(lost.trim().slice(0, 40)) + '</code>)' : '') +
@@ -2931,7 +2957,7 @@ function analyzeText(src, opts) {
            plain words (input, output, label, title, data, option, source,
            select...) are left out: in a rebuttal "<input>" and "<output>" are
            far more often a prompt's tokens than markup (codex-review-312). */
-        var htmlTags = /^(?:a|abbr|acronym|address|article|aside|audio|b|bdi|bdo|big|blink|blockquote|br|canvas|caption|center|cite|code|col|colgroup|dd|del|details|dfn|dir|div|dl|dt|em|figcaption|figure|font|footer|h[1-6]|header|hgroup|hr|i|iframe|img|ins|kbd|li|mark|marquee|math|nav|nobr|ol|p|picture|pre|q|rp|rt|ruby|s|samp|section|small|span|strike|strong|sub|summary|sup|svg|table|tbody|td|tfoot|th|thead|tr|tt|u|ul|var|video|wbr)$/;
+        var htmlTags = /^(?:a|abbr|acronym|address|article|aside|audio|b|bdi|bdo|big|blink|blockquote|br|canvas|caption|center|cite|code|col|colgroup|dd|del|details|dfn|dir|div|dl|dt|em|figcaption|figure|font|footer|h[1-6]|header|hgroup|hr|i|iframe|img|ins|kbd|li|main|mark|marquee|math|nav|nobr|ol|p|picture|pre|q|rp|rt|ruby|s|samp|section|small|span|strike|strong|sub|summary|sup|svg|table|tbody|td|tfoot|th|thead|tr|tt|u|ul|var|video|wbr)$/;
         var tagRe = /<!--(?:-?>|[\s\S]*?(?:-->|$))|<\/?([A-Za-z][\w:-]*)(?=[\s/>])(?:[^<>"']|"[^"]*"|'[^']*')*>|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<![A-Za-z]+\s[^>]*>/g;
         var raw = src.slice(r.start, r.end), m;
         while ((m = tagRe.exec(raw))) {
@@ -3147,10 +3173,11 @@ function analyzeText(src, opts) {
           while (tokE < raw.length && !/[\s"'`()[\]{},;]/.test(raw[tokE])) tokE++;
           var token = raw.slice(tokS, tokE);
           if (/^[A-Za-z]:\\|^\\\\/.test(token) || /^[\w.-]+(?:\\[\w.-]+)+\.[A-Za-z0-9]{1,5}$/.test(token)) continue;
-          /* Right after a word (not a control word), it is a path's segment,
-             "results\min"; after one letter it is TeX, "T\geq". A quote of the
-             review keeps the reviewer's words as they were typed. */
-          if (/(?:^|[^\\A-Za-z])[A-Za-z]{2,}$/.test(raw.slice(0, m.index)) || quoteMask[mAt]) continue;
+          /* Right after a word with a small letter (not a control word), it is
+             a path's segment, "results\min"; after one letter or an acronym
+             it is TeX, "T\geq", "RMSE\leq". A quote of the review keeps the
+             reviewer's words as they were typed. */
+          if (/(?:^|[^\\A-Za-z])(?=[A-Za-z]*[a-z])[A-Za-z]{2,}$/.test(raw.slice(0, m.index)) || quoteMask[mAt]) continue;
           var nextCmd = raw[mEnd] === '\\' ? /^\\([A-Za-z]+)(?![A-Za-z])/.exec(raw.slice(mEnd)) : null;
           if (raw[mEnd] === '\\' && !(nextCmd && mathCmdExact.test(nextCmd[1])) && /^\\[A-Za-z0-9._-]+/.test(raw.slice(mEnd))) continue;
           var prevSeg = raw[m.index - 1] !== '_' ? /\\([A-Za-z0-9._-]+)$/.exec(raw.slice(tokS, m.index)) : null;
@@ -7820,7 +7847,7 @@ var EXAMPLE = [
   '',
   'The bound below was moved to App. B:',
   '',
-  '\\[ \\mathbb{E}\\left[ \\| \\hat{y} - y \\|_2^2 \\right] \\le C \\sigma_x^2 \\Delta^2 \\]',
+  '\\[ \\mathbb{E}\\left[ \\\\| \\hat{y} - y \\\\|_2^2 \\right] \\le C \\sigma_x^2 \\Delta^2 \\]',
   '',
   '---',
   '',
