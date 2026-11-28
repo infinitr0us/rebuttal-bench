@@ -436,7 +436,7 @@ pipeline).
   Fix all), fuzz atoms for references, character references and HTML blocks, and ten new
   smoke checks.
 
-## 3.0.0 — 2026-09-22
+## 3.0.0 (2026-09-22)
 
 A full review of v2, checked against openreview-web@45c27aa and against the real Marked 15.0.6 /
 DOMPurify 3.4.13 / MathJax 3.2.2 pipeline, with an independent second review by Codex.

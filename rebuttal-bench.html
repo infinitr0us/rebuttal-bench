@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rebuttal Bench — OpenReview markdown + MathJax previewer</title>
+<title>Rebuttal Bench: OpenReview Markdown and MathJax previewer</title>
 
 <!-- OpenReview currently parses Markdown with Marked (GFM), sanitizes the
      generated HTML, and only then asks MathJax to typeset it. -->
@@ -1048,7 +1048,7 @@ window.MathJax = {
 <header>
   <div class="brand">
     <h1>Rebuttal Bench<span class="dot">.</span></h1>
-    <p class="tag">Renders your comment the way OpenReview does — CommonMark markdown first, then MathJax on the result — so the breakage shows up here instead of under your reviewers' noses.</p>
+    <p class="tag">Renders your comment the way OpenReview does (Markdown first, then MathJax on the result), so the breakage shows up here instead of under your reviewers' noses.</p>
   </div>
   <div class="controls">
     <div class="fs-ctl" title="Editor font size">
@@ -1057,7 +1057,7 @@ window.MathJax = {
       <span class="fs-val" id="fsEditorVal">13</span>
       <button type="button" data-fs="fsEditor" data-dir="1" aria-label="Larger editor text">+</button>
     </div>
-    <div class="fs-ctl" title="Preview zoom — 100% is exactly OpenReview's size (12px Noto Sans)">
+    <div class="fs-ctl" title="Preview zoom: 100% is exactly OpenReview's size (12px Noto Sans)">
       <span class="fs-label">Preview</span>
       <button type="button" data-fs="zoomPreview" data-dir="-1" aria-label="Zoom preview out">−</button>
       <span class="fs-val" id="fsPreviewVal">100%</span>
@@ -1205,7 +1205,7 @@ window.MathJax = {
 </main>
 
 <footer>
-  Pipeline mirror: Marked 15.0.6 in GFM mode with OpenReview’s HTML/image/checkbox renderers → DOMPurify 3.4.17 with OpenReview’s tag allowlist → MathJax 3.2.2 <code>tex-chtml-full</code> with <code>ui/safe</code>. Preview styling mirrors <code>.note-content .markdown-rendered</code> from the live openreview.net stylesheet — Noto Sans 12px/18px, 8px block gaps, rule-only tables — so at 100% zoom it is 1:1 with the site. Line <em>wrapping</em> still depends on the reader’s window width and reply depth, which no previewer can pin down. This follows the current <a href="https://github.com/openreview/openreview-web" target="_blank" rel="noopener">openreview-web implementation</a>; the live service can change, so give the posted comment one last glance. Drafts autosave only on this device. Rebuttal Bench is an independent tool, not affiliated with or endorsed by OpenReview.
+  Pipeline mirror: Marked 15.0.6 in GFM mode with OpenReview’s HTML/image/checkbox renderers → DOMPurify 3.4.17 with OpenReview’s tag allowlist → MathJax 3.2.2 <code>tex-chtml-full</code> with <code>ui/safe</code>. Preview styling mirrors <code>.note-content .markdown-rendered</code> from the live openreview.net stylesheet (Noto Sans 12px/18px, 8px block gaps, rule-only tables), so at 100% zoom it is 1:1 with the site. Line <em>wrapping</em> still depends on the reader’s window width and reply depth, which no previewer can pin down. This follows the current <a href="https://github.com/openreview/openreview-web" target="_blank" rel="noopener">openreview-web implementation</a>; the live service can change, so give the posted comment one last glance. Drafts autosave only on this device. Rebuttal Bench is an independent tool, not affiliated with or endorsed by OpenReview.
   <span class="foot-meta">Rebuttal Bench <span id="appVersion"></span> · <a id="reportLink" href="https://github.com/infinitr0us/rebuttal-bench/issues/new?template=problem.yml" target="_blank" rel="noopener" title="Opens a GitHub issue form with this page's version, your browser and the venue filled in. Issues are public: paste only a small example, rewritten so it says nothing about your paper.">Report a problem</a> · <a id="ideaLink" href="https://github.com/infinitr0us/rebuttal-bench/issues/new?template=idea.yml" target="_blank" rel="noopener">Suggest an idea</a></span>
 </footer>
 
@@ -2301,7 +2301,7 @@ function analyzeText(src, opts) {
     } else {
       var currency = u.kind === '$' && !u.literal && /^[-+−]?\d/.test(src.slice(u.at + 1, u.at + 3));
       push('warn', u.kind === '$$' ? 'Unpaired $$' : 'Unpaired $',
-        'MathJax finds no partner for this delimiter in its paragraph, so for now it shows as literal text — but any later <code>' + u.kind + '</code> in the same paragraph would pair with it and turn the prose in between into math. ' +
+        'MathJax finds no partner for this delimiter in its paragraph, so for now it shows as literal text, but any later <code>' + u.kind + '</code> in the same paragraph would pair with it and turn the prose in between into math. ' +
         (currency ? 'For a literal dollar sign type <code>\\\\$</code>.' : 'Add the missing closing delimiter, or type <code>\\\\$</code> for a literal dollar sign.'),
         u.start, u.end,
         currency ? fix('\\\\$', [literalDollar(u.at)]) : null);
@@ -7326,13 +7326,13 @@ var lastAnalysis = null; /* analyze(analyzedText) */
 var userEdited = false;  /* typed before the saved draft finished loading */
 
 var EXAMPLE = [
-  '**Response to Reviewer aBcD — Part 1/2**',
+  '**Response to Reviewer aBcD (part 1 of 2)**',
   '',
   'We thank the reviewer for the careful reading and constructive comments. We address each point below and will fold all clarifications into the revision.',
   '',
   '**Q1. "The update rule for the weights is unclear."**',
   '',
-  'The parameters $\\mathbf{W}_{t}$ and the momentum buffer $\\mathbf{m}_{t}$ are updated jointly, so the per-step cost is $O(d)$ — identical to SGD:',
+  'The parameters $\\mathbf{W}_{t}$ and the momentum buffer $\\mathbf{m}_{t}$ are updated jointly, so the per-step cost is $O(d)$, identical to SGD:',
   '',
   '$$',
   '\\begin{aligned}',
@@ -7358,7 +7358,7 @@ var EXAMPLE = [
   '',
   '---',
   '',
-  '*Every hazard flagged below is deliberate — click one to jump to it, then apply the fix from the cheat sheet and watch the preview heal.*'
+  '*Every hazard flagged below is deliberate: click one to jump to it, then apply the fix from the cheat sheet and watch the preview heal.*'
 ].join('\n');
 
 /* ---- rendering ---- */
@@ -9723,7 +9723,7 @@ function applyIssueFix(iss) {
   /* Matching bytes are not enough: the same "\{" may now sit inside code. */
   if (text !== analyzedText || !editsStillValid(text, iss.fix.edits)) {
     updateAll();
-    showToast('The draft moved on — hazards refreshed, try again');
+    showToast('The draft moved on, so the hazards were refreshed: try again');
     return;
   }
   /* A TeX fix is checked now, against the whole comment compiled by MathJax. */
@@ -9736,7 +9736,7 @@ function applyIssueFix(iss) {
   setSourceText(applyEditsToText(text, edits), first.start, first.start + first.text.length);
   revealOffset(first.start);
   afterSourceChange();
-  showToast('Fixed — ' + UNDO_HINT + ' undoes it');
+  showToast('Fixed. ' + UNDO_HINT + ' undoes it');
 }
 
 function applyAllFixes() {
@@ -9759,9 +9759,9 @@ function applyAllFixes() {
   var nowOver = limit > 0 && text.trim().length > limit && startText.trim().length <= limit;
   showToast('Applied ' + applied + ' fix' + (applied === 1 ? '' : 'es') +
     (grew ? ' (' + (grew > 0 ? '+' : '−') + fmt(Math.abs(grew)) + ' character' + (Math.abs(grew) === 1 ? '' : 's') + ')' : '') +
-    (left ? ' — ' + left + ' hazard' + (left === 1 ? '' : 's') + ' still need you'
-      : !window.MJ_READY ? ' — MathJax has not loaded yet, so the formulas are not checked'
-      : texCardsStale ? ' — MathJax is checking the formulas again' : ' — no hazards left') +
+    (left ? '; ' + left + ' hazard' + (left === 1 ? '' : 's') + ' still need you'
+      : !window.MJ_READY ? '; MathJax has not loaded yet, so the formulas are not checked'
+      : texCardsStale ? '; MathJax is checking the formulas again' : '; no hazards left') +
     '. ' + (nowOver ? 'The draft is now ' + fmt(text.trim().length - limit) + ' over the limit. ' : '') +
     UNDO_HINT + ' undoes the pass.');
 }
@@ -9781,7 +9781,7 @@ document.addEventListener('selectionchange', function () { if (document.activeEl
 function jumpToIssue(iss) {
   if (ta.value !== analyzedText) {
     updateAll();
-    showToast('The draft moved on — hazards refreshed, try again');
+    showToast('The draft moved on, so the hazards were refreshed: try again');
     return;
   }
   ta.focus();
@@ -9896,7 +9896,7 @@ onEditor('scroll', function () {
 });
 
 copyBtn.addEventListener('click', function () {
-  copyText(ta.value, 'Copied — paste it straight into OpenReview');
+  copyText(ta.value, 'Copied: paste it straight into OpenReview');
 });
 /* `from`: the button in a dialog that asked for the copy, which keeps the
    focus; the editor behind the dialog is never selected then. */
@@ -9929,7 +9929,7 @@ function fallbackCopy(txt, ok, from) {
   if (box !== ta) { box.parentNode.removeChild(box); (from || ta).focus(); }
   /* execCommand reports failure by returning false, not by throwing. */
   if (copied) ok();
-  else showToast(box === ta ? 'Copy failed — select and copy manually'
+  else showToast(box === ta ? 'Copy failed: select and copy manually'
     : from ? 'Copy failed: select the text shown and copy it.'
     : 'Copy failed. Use Apply to source, copy from the editor, then undo to get your text back.');
 }

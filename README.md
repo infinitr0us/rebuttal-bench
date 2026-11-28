@@ -1,7 +1,7 @@
 # Rebuttal Bench
 
 A single-file previewer for OpenReview comments. Paste a rebuttal and see it rendered the way
-openreview.net renders it — Marked (GFM) → DOMPurify → MathJax — next to a list of *hazards*:
+openreview.net renders it (Marked with GFM, then DOMPurify, then MathJax), next to a list of *hazards*:
 places where Markdown mangles your TeX before MathJax ever sees it, most with a one-click fix.
 
 Rebuttal Bench is an independent tool. It is not affiliated with or endorsed by OpenReview.

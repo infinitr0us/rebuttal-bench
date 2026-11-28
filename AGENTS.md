@@ -19,16 +19,16 @@ User-facing documentation is in `README.md`; history of changes in `CHANGELOG.md
 
 ## Anatomy of `rebuttal-bench.html`
 
-1. `<head>` script — the MathJax configuration, mirroring openreview-web's `lib/mathjax-config.js`.
-2. `<style>` — light tokens on `:root`, dark overrides on `html[data-theme="dark"]`; the
+1. `<head>` script: the MathJax configuration, mirroring openreview-web's `lib/mathjax-config.js`.
+2. `<style>`: light tokens on `:root`, dark overrides on `html[data-theme="dark"]`; the
    `.paper` rules mirror OpenReview's note styles value for value.
-3. Markup — header controls, stats bar, editor + hazards + cheat sheet, preview, footer.
+3. Markup: header controls, stats bar, editor + hazards + cheat sheet, preview, footer.
 4. Main `<script>`, split by two banner comments that the tests rely on (keep them verbatim):
-   - `/* ================= pure analysis ================= */` — everything the analyzer needs,
+   - `/* ================= pure analysis ================= */`: everything the analyzer needs,
      plus the pure Fix-all engine (`fixAllText`), the compaction engine (`compactText`) and the
      venue presets (`VENUES`). **Must stay DOM-free**: the tests run this section in a Node VM
      with only `window.marked` available.
-   - `/* ================= dom wiring ================= */` — rendering, persistence, UI events.
+   - `/* ================= dom wiring ================= */`: rendering, persistence, UI events.
 
 ## Table import
 
@@ -60,17 +60,17 @@ text, discard the grid and use the regular text importer.
   pipe first) and records *leaf blocks*, including GFM table cells split the way Marked splits
   them. It also records link syntax that is not text (brackets, destinations), which is masked
   like code. A code span it cannot locate masks its whole container.
-- `buildRegions` — the strings MathJax searches: leaf blocks minus code, split at blank lines
+- `buildRegions`: the strings MathJax searches: leaf blocks minus code, split at blank lines
   (except HTML blocks, which OpenReview shows as one run of text).
-- `mathJaxView` — the text MathJax receives from a region after Markdown's escape handling and
+- `mathJaxView`: the text MathJax receives from a region after Markdown's escape handling and
   the browser's decoding of character references (an HTML block: as typed), with a source
   position for every character.
-- `mjFind` / `mjFindEnd` — a **faithful port of MathJax 3.2.2 FindTeX** (`$$` before `$` at the
+- `mjFind` / `mjFindEnd`: a **faithful port of MathJax 3.2.2 FindTeX** (`$$` before `$` at the
   same position, closers only at brace depth 0, `\X` skipped as a unit, processEscapes,
   processEnvironments, processRefs). Do not "improve" it; it must behave exactly like MathJax.
   Diagnostics (stray closers, stray `\end`) must not change where the scan resumes.
   `npm run fuzz` must report 0 mismatches after any change here or in the view.
-- `scanMath` — real spans (what MathJax typesets) plus *recovered* spans: leftover delimiters
+- `scanMath`: real spans (what MathJax typesets) plus *recovered* spans: leftover delimiters
   paired across a boundary purely to explain breakage (`why`: blank, block, table, code,
   braces). Recovered spans are never counted as math.
 - `analyze(src, opts)` reads the comment **as posted**: OpenReview trims a textarea before it
@@ -79,7 +79,7 @@ text, discard the grid and use the regular text importer.
   spans) back into the editor's text. The preview renders `ta.value.trim()`, and the reference
   `renderLikeOpenReview` trims too. Check 16 (in `analyze`) reports leading whitespace whose
   removal changes the rendered comment (`postedStartChanges`, compared with `visibleHtml`).
-- `analyzeText(src, opts)` — the checks, numbered in the source. Each returns hazards
+- `analyzeText(src, opts)`: the checks, numbered in the source. Each returns hazards
   `{sev, title, detail(HTML), start, end, fix, math}`; a fix is a list of edits carrying `was`
   (the text they expect), so stale fixes are refused; `math` marks checks 1–7, the ones about
   Markdown damaging TeX. Check 4 also marks formulas inline Markdown cuts apart (`sp.cut`).
