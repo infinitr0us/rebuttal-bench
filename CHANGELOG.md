@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.13.0 (unreleased)
+## 3.13.0 (2026-11-28)
 
 ### Papers
 - Drafts can be grouped by paper, for authors with several submissions under review in one
