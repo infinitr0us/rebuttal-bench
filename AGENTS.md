@@ -487,6 +487,7 @@ Drafts are grouped into papers (3.13; design note and Fable's review in
   created before its membership is written, so a failed papers write leaves it visible under *No
   paper*.
 - **Scoped to the open paper**: `reviewerCards` (and so the pointer check), `renderPromises`,
+  `renderReady`, Find across drafts (all three through `openPaperDrafts()`),
   `printDrafts(true)`, Compare's first group, new drafts and Split's parts. **Global**: Export
   (the backup; each draft with `paper` and its paper's own `venue`, from `papersForOutput`, a
   private merge), the anonymity word list, `prefs`.
@@ -557,6 +558,26 @@ because OpenReview typesets each comment from a fresh TeX state.
   trigger only with a synthetic positive, a near miss and a rerun of that corpus. The panel reads
   every tab through `knownDraftText` and reuses detections while a text is unchanged; a row of
   another draft goes through `switchDraft` and selects the sentence once that draft is loaded.
+  That selection (`openDraftSelection`, `applyDraftSelection`, `pendingSelection`, applied by
+  `unlockDraft` when the text it read is the one listed) is shared with Find across drafts.
+
+- `draftReadiness(text, opts)` (pure, `tests/ready.test.js`) sums up one draft as posted
+  (`text.trim()`): length against `opts.limit`, the analyzer's cards by severity, check 17's
+  placeholders and check 21's identity matches (counted under their own names only, never also
+  as a severity), coverage of `opts.review` (`reviewPoints`, `reviewCoverage`, as the review
+  view counts it), `promisesIn` by kind, and `ready`. MathJax's own errors are not in it (they
+  need a typeset). The *Ready to post* panel (`#readyBox`, `renderReady`) is **read-only**: it
+  lists `openPaperDrafts()` (the open paper's drafts in tab order, shared with Promises and Find
+  across drafts), reads texts through `knownDraftText` and reviews through `draftReviewText`
+  (the open review box, else `storedReview`), writes nothing but `prefs.readyOpen`, caches by
+  draft, text, review, venue, word list and limit (`readyByDraft`, reusing `lastAnalysis` for
+  the open draft), and renders only while open.
+- `findInText(text, query, caseSensitive)` (pure, `tests/editing.test.js`) is the literal,
+  non-overlapping match behind the find bar and Find across drafts. *All drafts* (`#findAll`,
+  never stored) lists `openPaperDrafts()` with up to three snippets each in `#findResults` (an
+  item of the pane's column with `flex: none` and a capped height; as a shrinking item it lost
+  its room to the editor) and *not loaded* for a draft not read yet. *Replace* and *Replace
+  all* work on the open draft only and their titles say so while *All drafts* is on.
 
 ## Venue presets
 
@@ -695,8 +716,11 @@ across a reload), the footer's report links (no draft text in them), papers (the
 a paper's venue and limit with `prefs` byte for byte, a delete staying in its paper, another
 window's change merged; the interface: the row, *New paper*, moving, renaming, scoped cards,
 Promises, Print and Compare, *Group by name*, Export and Import, a reload, the draft list byte
-for byte after every papers action; and the released 3.12 page in a second tab on the same
-storage, which shares localStorage across `file:` pages in Chrome), and that no page errors
+for byte after every papers action; and the released 3.12 page, read by its tag `v3.12.0`
+(CI checks out the whole history for it), in a second tab on the same storage, which shares
+localStorage across `file:` pages in Chrome), Ready to post and Find across drafts (rows and
+scoping, the panel across a reload, a click selecting in a draft still loading, Replace all in
+the open draft only, the results list in view, storage byte for byte), and that no page errors
 were thrown. Add a
 check there for any new browser-only behavior.
 

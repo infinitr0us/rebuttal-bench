@@ -1,5 +1,28 @@
 # Changelog
 
+## 3.14.0 (unreleased)
+
+### Ready to post
+- A *Ready to post* panel lists every draft of the open paper with its length against the
+  limit, the analyzer's errors and warnings, placeholders, words from the anonymity list, how
+  many of its review's points it answers, and its promises still to do. A draft is ready when it
+  fits the limit and has no error, placeholder or anonymity match left, and answers every point
+  of its review; the summary reads *3 of 4 ready*. A draft not read yet shows *not loaded*.
+  MathJax's own TeX errors need a typeset, so they show only for the open draft. A click on a row
+  opens that draft. The panel only reads: it changes no draft, list, paper or setting other than
+  whether it is open.
+
+### Find across drafts
+- *All drafts* in the find bar lists the matches in every draft of the open paper, up to three
+  per draft with the text around them. A click opens that draft at the match, also when its
+  text is still loading. *Replace* and *Replace all* still change the open draft only, and say
+  so while *All drafts* is on. The box is not stored: a reload turns it off.
+
+### Fixed
+- The smoke test that runs the released 3.12 page beside the current one read it from a commit
+  the shallow CI checkout lacked; it now reads the `v3.12.0` tag, and CI checks out the whole
+  history. The 3.13.0 release was not affected.
+
 ## 3.13.0 (2026-11-28)
 
 ### Papers
