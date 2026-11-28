@@ -819,6 +819,27 @@ window.MathJax = {
     background: var(--snippet-bg);
   }
   .split-warn { margin: 0; padding: 6px 10px; font-size: 12px; color: var(--title-warn); border-bottom: 1px solid var(--line); }
+  .group-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--card-line);
+    font-size: 13px;
+  }
+  .group-row:last-child { border-bottom: none; }
+  .group-draft { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+  .group-select {
+    flex: none;
+    max-width: 240px;
+    padding: 4px 6px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--editor-bg);
+    color: var(--text);
+    font-size: 12.5px;
+  }
 
   /* cheat sheet */
   .cheat {
@@ -1368,6 +1389,21 @@ window.MathJax = {
       <p id="compareSummary" role="status"></p>
       <pre id="compareDiff" aria-label="Changes"></pre>
       <button type="button" id="compareBack">Back to versions</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="groupDialog" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="groupTitle">
+    <div class="modal-head">
+      <h3 id="groupTitle">Group drafts by name</h3>
+      <button type="button" class="modal-x" data-close aria-label="Close">×</button>
+    </div>
+    <p class="modal-note" id="groupNote">Drafts in <em>No paper</em> whose names share a prefix are filled in below. No draft is renamed, and rows left as <em>No paper</em> are not changed.</p>
+    <div id="groupList" class="split-parts"></div>
+    <div class="modal-actions">
+      <button type="button" id="groupApplyBtn" class="primary">Apply</button>
+      <button type="button" data-close>Cancel</button>
     </div>
   </div>
 </div>
@@ -9114,12 +9150,15 @@ function renderDraftTabs() {
     view.papers.forEach(function (p) { moveHtml += '<option value="' + escAttr(p.id) + '">' + escHtml(p.name) + '</option>'; });
     moveHtml += '<option value="">No paper</option><option value="__new__">New paper…</option></select>';
   }
+  var noneDrafts = view.none.map(draftById).filter(Boolean);
+  var canGroup = !papers.newer && prefixGroups(noneDrafts).length > 0;
   draftTools.innerHTML = '<button type="button" class="dtool" data-act="rename" title="Rename the open draft (F2)">Rename</button>' +
     (draftMeta.list.length > 1 ? '<button type="button" class="dtool dclose" data-act="delete" title="Delete the open draft">Delete</button>' : '') +
     moveHtml +
     '<button type="button" class="dtool" data-act="history" title="Earlier versions of the open draft, and backups of your drafts as files">History</button>' +
     '<button type="button" class="dtool dadd" data-act="add" title="A new draft: one per reviewer, a general response, a follow-up">+ Draft</button>' +
-    (!hasPapers && !papers.newer ? '<button type="button" class="dtool" data-act="new-paper" title="Create a new paper with its first draft">New paper</button>' : '');
+    (!hasPapers && !papers.newer ? '<button type="button" class="dtool" data-act="new-paper" title="Create a new paper with its first draft">New paper</button>' : '') +
+    (canGroup ? '<button type="button" class="dtool" data-act="group" title="Group ungrouped drafts into papers by their shared name prefixes">Group by name</button>' : '');
   draftPanel.setAttribute('aria-labelledby', 'dtab-' + draftMeta.active);
   var again = focusId ? draftTabs.querySelector('.dtab[data-id="' + focusId + '"]')
     : focusAct ? draftTools.querySelector('.dtool[data-act="' + focusAct + '"]') : null;
@@ -9367,9 +9406,164 @@ draftTools.addEventListener('click', function (e) {
   else if (act === 'delete') deleteDraft(draftMeta.active);
   else if (act === 'history') openHistory();
   else if (act === 'new-paper') createPaper();
+  else if (act === 'group') openGroupDialog();
 });
 draftTools.addEventListener('change', function (e) {
   if (e.target && e.target.classList.contains('dmove')) moveOpenDraftTo(e.target.value);
+});
+
+/* ---- Group by name: migrate ungrouped drafts into papers in one write ---- */
+var groupDialog = document.getElementById('groupDialog');
+var groupList = document.getElementById('groupList');
+var groupApplyBtn = document.getElementById('groupApplyBtn');
+var groupSeq = 0, groupRows = [];
+
+function buildGroupRows() {
+  if (papers.newer) {
+    groupList.innerHTML = '<p class="modal-note">Papers were written by a newer version of Rebuttal Bench and cannot be edited here.</p>';
+    groupApplyBtn.disabled = true;
+    return;
+  }
+  var view = papersView(draftMeta.list, papers);
+  var noneDrafts = view.none.map(draftById).filter(Boolean);
+  groupRows = [];
+  if (!noneDrafts.length) {
+    groupList.innerHTML = '<p class="modal-note">Every draft is already in a paper.</p>';
+    groupApplyBtn.disabled = true;
+    return;
+  }
+  var groups = prefixGroups(noneDrafts), proposed = Object.create(null);
+  var opts = [], seen = Object.create(null);
+  view.papers.forEach(function (p) {
+    var v = 'id:' + p.id;
+    opts.push({ value: v, label: p.name });
+    seen[v] = true;
+  });
+  groups.forEach(function (g) {
+    var existing = paperNamed(papers, g.name);
+    var v = existing ? 'id:' + existing : 'new:' + g.name;
+    if (!seen[v]) {
+      opts.push({ value: v, label: existing ? paperName(papers, existing) : g.name + ' (new paper)' });
+      seen[v] = true;
+    }
+    g.drafts.forEach(function (id) { proposed[id] = v; });
+  });
+  opts.push({ value: '', label: 'No paper' });
+  groupList.textContent = '';
+  noneDrafts.forEach(function (d) {
+    var initial = proposed[d.id] || '';
+    groupRows.push({ id: d.id, initial: initial });
+    var row = document.createElement('div');
+    row.className = 'group-row';
+    var nameEl = document.createElement('span');
+    nameEl.className = 'group-draft';
+    nameEl.textContent = d.name;
+    nameEl.title = d.name;
+    var sel = document.createElement('select');
+    sel.className = 'group-select';
+    sel.setAttribute('data-draft', d.id);
+    sel.setAttribute('aria-label', 'Paper for ' + d.name);
+    opts.forEach(function (o) { sel.appendChild(new Option(o.label, o.value)); });
+    sel.value = initial;
+    row.appendChild(nameEl);
+    row.appendChild(sel);
+    groupList.appendChild(row);
+  });
+  groupApplyBtn.disabled = false;
+}
+
+function openGroupDialog() {
+  if (!draftReady) return;
+  if (papers.newer) { showToast('Papers were written by a newer version of Rebuttal Bench.'); return; }
+  var token = ++groupSeq;
+  groupDialog.hidden = false;
+  setModal(groupDialog, true);
+  groupDialog.querySelector('.modal-x').focus();
+  if (canArtifactStore) {
+    /* Read the store before proposing so a stale device sees another device's grouping. */
+    groupApplyBtn.disabled = true;
+    groupList.innerHTML = '<p class="modal-note">Checking storage…</p>';
+    remoteRead(PAPERS_KEY).then(function (r) {
+      if (token !== groupSeq || groupDialog.hidden) return;
+      if (r.ok && r.value !== null) takeInPapers(parsePapers(r.value));
+      buildGroupRows();
+    });
+  } else {
+    takeInPapers(parsePapers(storedValue(PAPERS_KEY)));
+    buildGroupRows();
+  }
+}
+
+function closeGroupDialog() {
+  if (groupDialog.hidden) return;
+  groupSeq++;
+  groupDialog.hidden = true;
+  groupRows = [];
+  groupList.textContent = '';
+  setModal(groupDialog, false);
+  var btn = draftTools.querySelector('.dtool[data-act="group"]');
+  (btn || ta).focus();
+}
+
+function applyGroupDialog() {
+  if (groupDialog.hidden || !draftReady || papers.newer) return;
+  var picks = [];
+  groupRows.forEach(function (row) {
+    var sel = groupList.querySelector('select[data-draft="' + row.id + '"]');
+    var val = sel ? sel.value : '';
+    /* Write only rows the author changed or left as proposed and not No paper,
+       so untouched No paper drafts are not restamped over another window's move. */
+    if (val) picks.push({ id: row.id, val: val });
+  });
+  if (!picks.length) { closeGroupDialog(); showToast('No drafts were grouped.'); return; }
+  function commit() {
+    if (!draftReady || papers.newer) { closeGroupDialog(); return; }
+    var moved = 0;
+    changePapers(function (rec, now) {
+      var created = Object.create(null);
+      picks.forEach(function (p) {
+        if (!draftById(p.id)) return;
+        var pid = '';
+        if (p.val.indexOf('id:') === 0) {
+          pid = p.val.slice(3);
+          if (!paperName(rec, pid)) return;
+        } else if (p.val.indexOf('new:') === 0) {
+          var name = cleanDraftName(p.val.slice(4));
+          if (!name) return;
+          var k = name.toLowerCase();
+          pid = created[k] || paperNamed(rec, name) || newPaperId();
+          created[k] = pid;
+          if (!paperName(rec, pid)) rec = setPaperEntry(rec, 'name', pid, name, now);
+        }
+        if (pid) {
+          rec = setPaperEntry(rec, 'member', p.id, pid, now);
+          moved++;
+        }
+      });
+      return rec;
+    });
+    closeGroupDialog();
+    if (moved) showToast('Grouped ' + moved + ' draft' + (moved === 1 ? '' : 's') + ' into papers.');
+  }
+  if (canArtifactStore) {
+    var token = groupSeq;
+    groupApplyBtn.disabled = true;
+    remoteRead(PAPERS_KEY).then(function (r) {
+      if (token !== groupSeq || groupDialog.hidden) return;
+      if (r.ok && r.value !== null) takeInPapers(parsePapers(r.value));
+      commit();
+    });
+  } else {
+    commit();
+  }
+}
+
+groupDialog.addEventListener('click', function (e) {
+  if (e.target === groupDialog || e.target.closest('[data-close]')) closeGroupDialog();
+});
+groupApplyBtn.addEventListener('click', applyGroupDialog);
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && !groupDialog.hidden) closeGroupDialog();
 });
 
 /* Another window of this browser changed the list: show its drafts here too.
