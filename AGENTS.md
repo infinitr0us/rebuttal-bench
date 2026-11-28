@@ -470,9 +470,7 @@ Drafts are grouped into papers (3.13; design note and Fable's review in
   browser, the venue and limit controls wait for the drafts (`papersBeforeBoot`); without papers
   they work before as in 3.12.
 - **The open paper is the open draft's** (`openPaper`): nothing else is stored. **No papers state
-  lives in `prefs`**, which every window writes whole (since 3.14 after taking in, per setting,
-  what another window of this browser saved since: `takeStoredPrefs`, below). Every reader of
-  the venue and limit goes
+  lives in `prefs`**, which every window writes whole. Every reader of the venue and limit goes
   through `openVenue()` and `openLimit()` (`paperVenue`, `paperLimit`: a paper's own entries, else
   inherited from `prefs`, so grouping changes no card); in a paper the venue select and the limit
   input write the paper's entries and leave `prefs` byte for byte (a new venue resets the
@@ -576,24 +574,32 @@ models a comment typeset with nothing before it, the case an author must write f
   need a typeset). The *Ready to post* panel (`#readyBox`, `renderReady`) is **read-only**: it
   lists `openPaperDrafts()` (the open paper's drafts in tab order, shared with Promises and Find
   across drafts), reads texts through `shownDraftText` and reviews through `draftReviewText`
-  (the open review box, else `storedReview`), writes nothing but `prefs.readyOpen`, caches by
+  (the open review box, else `storedReview`), writes nothing but its open state, caches by
   draft, text, review, venue, word list and limit (`readyByDraft`, reusing `lastAnalysis` for
   the open draft), and renders only while open. A review with no points is `{covered: 0,
   total: 0}` (*no points*), no review `null`; `identity` is `analyze`'s `identityCount`, not
   the 30 cards a draft shows.
 - **The panels that describe drafts** (Promises, Ready to post, Find across drafts) read
-  `shownDraftText(id)`: for the open draft the editor, which the hazards, the counter and the
-  find boxes describe, also when another window saved a newer copy since; for the others
-  `knownDraftText` with LF line breaks, as the textarea will give them. `knownDraftText` alone
-  prefers that newer copy for an unchanged editor, as Export must, and Ready approved text the
-  editor did not hold (Codex review of 3.14, `reviews/2026-11-28/codex-review-314`). Their
-  lists are replaced with `setListHtml`, which keeps the focus on the same row.
-- **Preferences** are one object every window writes whole. `savePrefs` first takes in each
-  setting another window of this browser changed in localStorage since this window last saw it
-  (`prefsSeen`) and this window has not changed since its last save (`prefsBase`); the panels'
-  open state and the view are this window's layout and are never taken in. A window of 3.13 or
-  older still writes its whole old copy. Before the stored preferences arrive, `prefsTouched`
-  rules as before (`readStoredPrefs` reads both).
+  `shownDraftText(id)`: each draft as its editor shows it, or null (*not loaded*) whenever
+  `knownDraftText` is null (not read yet, or a read that failed: the empty editor it leaves is
+  no text). For the open draft that is the editor, which the hazards, the counter and the find
+  boxes describe, also when another window saved a newer copy since; for the others what
+  `openDraft` puts in the editor (the stored copy, else the text in memory, the startup example
+  included), with LF line breaks, as the textarea will give them. `knownDraftText` alone prefers
+  that newer copy for an unchanged editor and counts the example as empty, as Export must, and
+  Ready approved text the editor did not hold (`reviews/2026-11-28/codex-review-314`,
+  `codex-recheck-314`). Their lists are replaced with `setListHtml`, which keeps the focus on
+  the same row (same draft, index and text; a Ready row by its draft) and otherwise lets it
+  leave the list.
+- **Ready's open state has its own key** (`READY_OPEN_KEY`, localStorage only), not
+  `prefs.readyOpen`. Preferences are one object every window writes whole, so a toggle stored
+  there wrote this window's old copy of every other setting over another window's newer limit,
+  view or panel state. A merge of the two copies on every save (`takeStoredPrefs`) was tried and
+  reverted after the recheck: with one value per setting and no versions it took in another
+  window's limit beside this window's new venue, and missed saves made during a slow start.
+  **Known limit, as in 3.13**: every other control still writes the whole object, so a change
+  in one window can undo a setting another window saved meanwhile. Fixing that needs a version
+  per setting, like the papers record.
 - `findInText(text, query, caseSensitive)` (pure, `tests/editing.test.js`) is the literal,
   non-overlapping match behind the find bar and Find across drafts. *All drafts* (`#findAll`,
   never stored) lists `openPaperDrafts()` with up to three snippets each in `#findResults` (an

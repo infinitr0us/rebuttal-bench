@@ -2170,7 +2170,7 @@ try {
     const r1Ok = rows[0] && rows[0].getAttribute('data-ready') === '1' && /1 to do/.test(rows[0].textContent);
     const r2Ok = rows[1] && rows[1].getAttribute('data-ready') === '0' && /1 placeholder/.test(rows[1].textContent);
     const scoped = ids.length === 2 && ids[0] === a1 && ids[1] === a2 && !ids.includes(b1);
-    const sumOk = readySum.textContent === '1 of 2 ready' && readyBox.open === true && prefs.readyOpen === true;
+    const sumOk = readySum.textContent === '1 of 2 ready' && readyBox.open === true && localStorage.getItem(READY_OPEN_KEY) === '1';
     const prefsBefore = localStorage.getItem(PREFS_KEY);
     const papersBefore = localStorage.getItem(PAPERS_KEY);
     const bodiesBefore = [a1, a2, b1].map((id) => localStorage.getItem(keyOfDraft(id)));
@@ -2192,7 +2192,7 @@ try {
     const a2 = draftMeta.list.find((d) => d.name === 'Ready R2').id;
     const b1 = draftMeta.list.find((d) => d.name === 'Other R1').id;
     const home = draftMeta.list.find((d) => d.id !== a1 && d.id !== a2 && d.id !== b1).id;
-    const reloadedOpen = readyBox.open === true && prefs.readyOpen === true &&
+    const reloadedOpen = readyBox.open === true && localStorage.getItem(READY_OPEN_KEY) === '1' && !('readyOpen' in prefs) &&
       readySum.textContent === '1 of 2 ready' && readyList.querySelectorAll('[data-draft]').length === 2;
     switchDraft(a1); await wait(50);
     const prefs0 = localStorage.getItem(PREFS_KEY);
@@ -2236,24 +2236,53 @@ try {
     return reloadedOpen && defaultOff && scopedFind && listShown && unchangedBeforeClick && selectedA2 && unchangedAfterClick && replacedOpenOnly ||
       { reloadedOpen, defaultOff, scopedFind, resRows, listShown, unchangedBeforeClick, selectedA2, unchangedAfterClick, replacedOpenOnly };`);
 
-  /* Codex review of 3.14, blocker 1: every window wrote its whole preferences
-     object, so opening a panel here undid a limit another window had saved. */
-  await check('a preference saved here keeps what another window saved meanwhile, and this window’s own change wins', `
-    const lim0 = prefs.limit, own0 = prefs.ownLimit, fs0 = prefs.fsEditor, open0 = readyBox.open;
-    /* Another window saves a limit and a font size. */
-    const theirs = Object.assign(JSON.parse(localStorage.getItem(PREFS_KEY)), { limit: 4321, ownLimit: 4321, fsEditor: 15 });
-    localStorage.setItem(PREFS_KEY, JSON.stringify(theirs));
-    /* Here: a font size of this window's own, then a panel opened. */
-    const mineFs = fs0 === 14 ? 12 : 14;
-    prefs.fsEditor = mineFs; savePrefs();
+  /* Codex review of 3.14, blocker 1: the panel's open state lived in the
+     preferences object, which every window writes whole, so opening it here
+     undid a limit (or a view) another window had saved. It has its own key. */
+  await check('opening and closing Ready to post writes no preference, only its own key', `
+    const open0 = readyBox.open;
+    /* Another window saves a limit, the Review view and an open Promises panel. */
+    const theirs = JSON.stringify(Object.assign(JSON.parse(localStorage.getItem(PREFS_KEY)),
+      { limit: 4321, ownLimit: 4321, view: 'review', promisesOpen: true }));
+    localStorage.setItem(PREFS_KEY, theirs);
     readyBox.querySelector('summary').click(); await wait(50);
-    const s = JSON.parse(localStorage.getItem(PREFS_KEY));
-    const keptTheirs = s.limit === 4321 && s.ownLimit === 4321 && prefs.limit === 4321;
-    const keptMine = s.fsEditor === mineFs && prefs.fsEditor === mineFs && s.readyOpen === !open0;
-    /* Put everything back as this window's own change. */
-    prefs.limit = lim0; prefs.ownLimit = own0; prefs.fsEditor = fs0; savePrefs(); applyPrefs();
-    if (readyBox.open !== open0) { readyBox.querySelector('summary').click(); await wait(30); }
-    return keptTheirs && keptMine || { keptTheirs, keptMine, s };`);
+    const afterOpen = localStorage.getItem(PREFS_KEY) === theirs && localStorage.getItem(READY_OPEN_KEY) === (open0 ? '0' : '1');
+    readyBox.querySelector('summary').click(); await wait(50);
+    const afterClose = localStorage.getItem(PREFS_KEY) === theirs && localStorage.getItem(READY_OPEN_KEY) === (open0 ? '1' : '0');
+    /* Back to this window's own preferences for the checks that follow. */
+    savePrefs();
+    return afterOpen && afterClose || { afterOpen, afterClose, prefsNow: localStorage.getItem(PREFS_KEY) };`);
+
+  /* Recheck of 3.14: an empty editor after a read that failed is no text of
+     the author's, and a closed draft that holds the startup example shows the
+     example, as opening it does. Both were listed as empty and ready. */
+  await check('Ready lists an open draft whose read failed as not loaded, and a closed example as the example', `
+    const home = draftMeta.active, pa = newPaperId();
+    const d1 = createDraft('Unknown R1', 'Text that will be forgotten.');
+    const d2 = createDraft('Example R2', 'Text that will be the example.');
+    saveDraftMeta();
+    changePapers((rec, now) => {
+      rec = setPaperEntry(rec, 'name', pa, 'Unknown paper', now);
+      rec = setPaperEntry(rec, 'member', d1, pa, now);
+      return setPaperEntry(rec, 'member', d2, pa, now);
+    });
+    /* d2: never written, the example in memory, as after switching away from it. */
+    localStorage.removeItem(keyOfDraft(d2)); draftTexts[d2] = EXAMPLE;
+    switchDraft(d1); await wait(50);
+    /* d1, open: its read failed, so its text is unknown and the editor empty. */
+    localStorage.removeItem(keyOfDraft(d1)); delete bodyKnown[d1];
+    ta.value = ''; savedText = '';
+    const wasOpen = readyBox.open;
+    if (!wasOpen) { readyBox.querySelector('summary').click(); await wait(50); }
+    renderReady();
+    const row = (id) => readyList.querySelector('[data-draft="' + id + '"]');
+    const unknownOk = !!row(d1) && /not loaded/.test(row(d1).textContent) && row(d1).getAttribute('data-ready') === '0';
+    const exampleOk = !!row(d2) && row(d2).getAttribute('data-ready') === '0' &&
+      row(d2).textContent.indexOf(fmt(EXAMPLE.trim().length)) >= 0;
+    if (!wasOpen) { readyBox.querySelector('summary').click(); await wait(30); }
+    switchDraft(home); window.confirm = () => true;
+    [d1, d2].forEach(deleteDraft); await wait(50);
+    return unknownOk && exampleOk || { unknownOk, exampleOk, d1: row(d1) && row(d1).textContent, d2: row(d2) && row(d2).textContent };`);
 
   /* Codex review of 3.14, blocker 2: for the open draft the panels read the
      newest stored copy, which another window may have saved, while the editor

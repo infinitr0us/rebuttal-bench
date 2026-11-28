@@ -9,8 +9,9 @@
   fits the limit and has no error, placeholder or anonymity match left, and answers every point
   of its review; the summary reads *3 of 4 ready*. A draft not read yet shows *not loaded*.
   MathJax's own TeX errors need a typeset, so they show only for the open draft. A click on a row
-  opens that draft. The panel only reads: it changes no draft, list, paper or setting other than
-  whether it is open.
+  opens that draft. The panel only reads: it changes no draft, list, paper or setting, and keeps
+  whether it is open apart from the other settings, so opening it never puts back a setting
+  another window changed.
 
 ### Find across drafts
 - *All drafts* in the find bar lists the matches in every draft of the open paper, up to three
@@ -19,10 +20,6 @@
   so while *All drafts* is on. The box is not stored: a reload turns it off.
 
 ### Fixed
-- Changing a setting in one window (opening a panel, the theme, a font size) no longer undoes a
-  setting another window of the same browser saved meanwhile, such as its character limit: each
-  window now takes in what the others changed before it saves. A window of 3.13 or older still
-  writes its own copy of every setting.
 - Promises (and the new panels) describe the open draft as its editor shows it, also when
   another window saved a newer copy of that draft since.
 - Split's warnings about a macro or label used across parts gave the wrong reason. OpenReview's

@@ -7999,7 +7999,7 @@ var FS_STEPS = { fsEditor: 1, zoomPreview: 10 };
    not stay on after switching to another. */
 var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, ownLimit: 5000, sync: true, venue: '',
   compact: compactDefaults(), compactOpen: false, wordingOpen: false, sectionsOpen: false, spellcheck: false,
-  promisesOpen: false, readyOpen: false, anonOpen: false, view: 'preview', skeletonQuotes: true };
+  promisesOpen: false, anonOpen: false, view: 'preview', skeletonQuotes: true };
 
 function applyPrefs() {
   document.documentElement.setAttribute('data-theme', prefs.theme === 'dark' ? 'dark' : 'light');
@@ -8014,7 +8014,6 @@ function applyPrefs() {
   wordingBox.open = !!prefs.wordingOpen;
   sectionsBox.open = !!prefs.sectionsOpen;
   promisesBox.open = !!prefs.promisesOpen;
-  readyBox.open = !!prefs.readyOpen;
   anonBox.open = !!prefs.anonOpen;
   spellBox.checked = !!prefs.spellcheck;
   ta.spellcheck = !!prefs.spellcheck;
@@ -8090,76 +8089,7 @@ var prefsTimer = null;
    take a while), remember what the user changed, so the late answer does not
    undo it: `prefsTouched` holds "key" or "compact.<trick>". */
 var prefsRestored = false, prefsTouched = {}, prefsShadow = JSON.stringify(prefs);
-
-/* Each valid setting of stored preferences `v` (JSON) goes to take(key,
-   value), a compaction switch as "compact.<trick>". Older formats as before:
-   a preview font size in px becomes a zoom; before 3.8 only the limit was
-   stored, the author's own unless it is the stored venue's. */
-function readStoredPrefs(v, take) {
-  var p;
-  try { p = v ? JSON.parse(v) : null; } catch (e) { p = null; }
-  if (!p || typeof p !== 'object') return;
-  if (p.theme === 'dark' || p.theme === 'light') take('theme', p.theme);
-  if (p.fsEditor >= FS_RANGES.fsEditor[0] && p.fsEditor <= FS_RANGES.fsEditor[1]) take('fsEditor', p.fsEditor);
-  /* Older drafts stored a preview font size in px; 12px was OpenReview's
-     own size, so carry the perceived scale over to the zoom control. */
-  var zoom = typeof p.zoomPreview === 'number' ? p.zoomPreview
-    : (typeof p.fsPreview === 'number' ? Math.round(p.fsPreview / 12 * 10) * 10 : null);
-  if (zoom !== null && zoom >= FS_RANGES.zoomPreview[0] && zoom <= FS_RANGES.zoomPreview[1]) take('zoomPreview', zoom);
-  if (typeof p.limit === 'number' && p.limit >= 0) take('limit', p.limit);
-  if (typeof p.ownLimit === 'number' && p.ownLimit >= 0) take('ownLimit', p.ownLimit);
-  else if (typeof p.limit === 'number' && p.limit >= 0) {
-    var storedVenue = typeof p.venue === 'string' ? venueById(p.venue) : null;
-    if (!(storedVenue && storedVenue.limit === p.limit)) take('ownLimit', p.limit);
-  }
-  if (typeof p.sync === 'boolean') take('sync', p.sync);
-  if (typeof p.venue === 'string' && (p.venue === '' || venueById(p.venue))) take('venue', p.venue);
-  /* Only known tricks: one removed in a later version is simply forgotten. */
-  if (p.compact && typeof p.compact === 'object') {
-    Object.keys(prefs.compact).forEach(function (id) {
-      if (typeof p.compact[id] === 'boolean') take('compact.' + id, p.compact[id]);
-    });
-  }
-  ['compactOpen', 'wordingOpen', 'sectionsOpen', 'promisesOpen', 'readyOpen', 'anonOpen', 'spellcheck', 'skeletonQuotes']
-    .forEach(function (k) { if (typeof p[k] === 'boolean') take(k, p[k]); });
-  if (p.view === 'preview' || p.view === 'review') take('view', p.view);
-}
-function prefValue(obj, key) {
-  return key.indexOf('compact.') === 0 ? (obj.compact || {})[key.slice(8)] : obj[key];
-}
-function setPrefValue(key, value) {
-  if (key.indexOf('compact.') === 0) prefs.compact[key.slice(8)] = value;
-  else prefs[key] = value;
-}
-
-/* Every window writes the whole preferences object, so a click here (a panel
-   opened, the theme) wrote this window's old copy of every other setting
-   over what another window saved meanwhile, such as its limit (Codex review
-   of 3.14). Before writing, take in each setting another window of this
-   browser changed since this window last saw the stored copy (`prefsSeen`)
-   and this window has not changed since its last save (`prefsBase`). Only
-   what changed in localStorage counts: a copy older than what the
-   asynchronous store gave at start must not undo it. The panels' open state
-   and the view are this window's layout, never taken from another. */
-var prefsSeen = null, prefsBase = null;
-var PREFS_LAYOUT = { compactOpen: 1, wordingOpen: 1, sectionsOpen: 1, promisesOpen: 1, readyOpen: 1, anonOpen: 1, view: 1 };
-function takeStoredPrefs() {
-  var cur = storedValue(PREFS_KEY);
-  if (prefsBase === null || cur === prefsSeen) return false;
-  var before = Object.create(null), base = JSON.parse(prefsBase), took = false;
-  readStoredPrefs(prefsSeen, function (key, value) { before[key] = value; });
-  readStoredPrefs(cur, function (key, value) {
-    if (PREFS_LAYOUT[key] || JSON.stringify(value) === JSON.stringify(before[key])) return; /* not changed elsewhere */
-    var mine = prefValue(prefs, key);
-    if (JSON.stringify(mine) !== JSON.stringify(prefValue(base, key))) return; /* changed here too: this window's */
-    if (JSON.stringify(value) === JSON.stringify(mine)) return;
-    setPrefValue(key, value);
-    took = true;
-  });
-  return took;
-}
 function savePrefs() {
-  var took = prefsRestored && takeStoredPrefs();
   if (!prefsRestored) {
     var was = JSON.parse(prefsShadow);
     Object.keys(prefs).forEach(function (k) {
@@ -8175,8 +8105,6 @@ function savePrefs() {
   }
   clearTimeout(prefsTimer);
   storeSet(PREFS_KEY, JSON.stringify(prefs));
-  if (prefsRestored) { prefsSeen = storedValue(PREFS_KEY); prefsBase = JSON.stringify(prefs); }
-  if (took) { applyPrefs(); if (draftReady) updateAll(); }
 }
 
 /* ---- draft autosave ---- */
@@ -8935,16 +8863,23 @@ function reviewerCards(text, spans) {
 /* Replace a list of buttons (Promises, Ready to post, Find across drafts),
    keeping the focus on the same row when it is still listed: a background
    read or another window's save rebuilds the list while the author may be
-   on it with the keyboard. */
+   on it with the keyboard. The same row means the same draft, index and
+   text: a row whose sentence or snippet changed is another row, and the
+   focus then leaves the list rather than land on it. A Ready row (a draft,
+   no index) stays the same row when its counts change. */
 function setListHtml(list, html) {
-  var el = document.activeElement, attrs = ['data-draft', 'data-promise', 'data-match'], want = null;
-  if (el && el !== list && list.contains(el)) want = attrs.map(function (a) { return el.getAttribute(a); });
+  var el = document.activeElement, attrs = ['data-draft', 'data-promise', 'data-match'], want = null, label = '';
+  if (el && el !== list && list.contains(el)) {
+    want = attrs.map(function (a) { return el.getAttribute(a); });
+    label = el.textContent;
+  }
   list.innerHTML = html;
   if (!want) return;
   var rows = list.querySelectorAll('button');
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i];
-    if (attrs.every(function (a, k) { return row.getAttribute(a) === want[k]; })) { row.focus(); return; }
+    var sameText = (want[1] === null && want[2] === null) || row.textContent === label;
+    if (sameText && attrs.every(function (a, k) { return row.getAttribute(a) === want[k]; })) { row.focus(); return; }
   }
 }
 
@@ -10171,16 +10106,22 @@ function knownDraftText(id) {
   return draftTexts[id] === undefined || draftTexts[id] === EXAMPLE ? '' : draftTexts[id];
 }
 /* What the panels that describe drafts read (Promises, Ready to post, Find
-   across drafts). For the open draft: the editor, which the hazards, the
-   counter and the find boxes describe and which the author copies from, also
-   when another window saved a newer copy since (knownDraftText prefers that
-   one, as Export must; a panel that did approved text the editor did not
-   hold). For the others: knownDraftText, with line breaks as a textarea gives
-   them, so a length and an offset do not change when the draft is opened. */
+   across drafts): each draft as its editor shows it, or null (not loaded)
+   whenever knownDraftText is null (not read yet, a read that failed: an
+   empty editor then is no text of the author's). For the open draft that is
+   the editor, which the hazards, the counter and the find boxes describe,
+   also when another window saved a newer copy since (knownDraftText prefers
+   that one, as Export must; a panel that did approved text the editor did not
+   hold). For the others, what openDraft puts in the editor: the stored copy,
+   else the text held in memory, the example included (knownDraftText's empty
+   text for it made a closed example "ready"), with line breaks as a textarea
+   gives them, so a length and an offset do not change when it is opened. */
 function shownDraftText(id) {
-  if (id === draftMeta.active && !ta.readOnly) return ta.value;
   var text = knownDraftText(id);
-  return text === null ? null : text.replace(/\r\n?/g, '\n');
+  if (text === null) return null;
+  if (id === draftMeta.active) return ta.readOnly ? text : ta.value;
+  if (typeof fallbackGet(keyOfDraft(id)) !== 'string' && draftTexts[id] === EXAMPLE) text = EXAMPLE;
+  return text.replace(/\r\n?/g, '\n');
 }
 
 function versionTime(at) {
@@ -10904,11 +10845,16 @@ copyPromises.addEventListener('click', function () {
   if (lines.length) copyText(lines.join('\n'), 'Copied the revision checklist', copyPromises);
 });
 
+/* The panel's open state has a key of its own, in this browser only. In the
+   preferences object, which every window writes whole, opening the panel
+   wrote this window's old copy of every other setting over what another
+   window had saved, such as its limit (Codex review of 3.14; a merge of the
+   two copies, tried next, mixed up venues and limits). */
+var READY_OPEN_KEY = 'rebuttal-bench-ready-open';
+readyBox.open = fallbackGet(READY_OPEN_KEY) === '1';
 readyBox.addEventListener('toggle', function () {
-  if (prefs.readyOpen !== readyBox.open) {
-    prefs.readyOpen = readyBox.open;
-    savePrefs();
-  }
+  var open = readyBox.open ? '1' : '0';
+  if (fallbackGet(READY_OPEN_KEY) !== open) fallbackSet(READY_OPEN_KEY, open);
   if (readyBox.open) renderReady();
   else { readySum.textContent = ''; readySum.classList.add('zero'); }
 });
@@ -12113,15 +12059,48 @@ applyPrefs();
 storeGet(PREFS_KEY).then(function (v) {
   /* A stored value applies unless the user has changed that setting since
      the page opened. */
-  readStoredPrefs(v, function (key, value) { if (!prefsTouched[key]) setPrefValue(key, value); });
+  function restore(key, value) { if (!prefsTouched[key]) prefs[key] = value; }
+  if (v) {
+    try {
+      var p = JSON.parse(v);
+      if (p.theme === 'dark' || p.theme === 'light') restore('theme', p.theme);
+      if (p.fsEditor >= FS_RANGES.fsEditor[0] && p.fsEditor <= FS_RANGES.fsEditor[1]) restore('fsEditor', p.fsEditor);
+      /* Older drafts stored a preview font size in px; 12px was OpenReview's
+         own size, so carry the perceived scale over to the zoom control. */
+      var zoom = typeof p.zoomPreview === 'number' ? p.zoomPreview
+        : (typeof p.fsPreview === 'number' ? Math.round(p.fsPreview / 12 * 10) * 10 : null);
+      if (zoom !== null && zoom >= FS_RANGES.zoomPreview[0] && zoom <= FS_RANGES.zoomPreview[1]) restore('zoomPreview', zoom);
+      if (typeof p.limit === 'number' && p.limit >= 0) restore('limit', p.limit);
+      /* Before 3.8 only the limit was stored: it was the author's own unless
+         it is the stored venue's. */
+      if (typeof p.ownLimit === 'number' && p.ownLimit >= 0) restore('ownLimit', p.ownLimit);
+      else if (typeof p.limit === 'number' && p.limit >= 0) {
+        var storedVenue = typeof p.venue === 'string' ? venueById(p.venue) : null;
+        if (!(storedVenue && storedVenue.limit === p.limit)) restore('ownLimit', p.limit);
+      }
+      if (typeof p.sync === 'boolean') restore('sync', p.sync);
+      if (typeof p.venue === 'string' && (p.venue === '' || venueById(p.venue))) restore('venue', p.venue);
+      /* Only known tricks: one removed in a later version is simply forgotten. */
+      if (p.compact && typeof p.compact === 'object') {
+        Object.keys(prefs.compact).forEach(function (id) {
+          if (typeof p.compact[id] === 'boolean' && !prefsTouched['compact.' + id]) prefs.compact[id] = p.compact[id];
+        });
+      }
+      if (typeof p.compactOpen === 'boolean') restore('compactOpen', p.compactOpen);
+      if (typeof p.wordingOpen === 'boolean') restore('wordingOpen', p.wordingOpen);
+      if (typeof p.sectionsOpen === 'boolean') restore('sectionsOpen', p.sectionsOpen);
+      if (typeof p.promisesOpen === 'boolean') restore('promisesOpen', p.promisesOpen);
+      if (typeof p.anonOpen === 'boolean') restore('anonOpen', p.anonOpen);
+      if (typeof p.spellcheck === 'boolean') restore('spellcheck', p.spellcheck);
+      if (p.view === 'preview' || p.view === 'review') restore('view', p.view);
+      if (typeof p.skeletonQuotes === 'boolean') restore('skeletonQuotes', p.skeletonQuotes);
+    } catch (e) {}
+  }
   if (limitAction === 'venue') {
     var chosen = venueById(prefs.venue);
     prefs.limit = chosen && chosen.limit ? chosen.limit : prefs.ownLimit;
   }
   prefsRestored = true;
-  /* From here on, savePrefs takes in what other windows change (takeStoredPrefs). */
-  prefsSeen = storedValue(PREFS_KEY);
-  prefsBase = JSON.stringify(prefs);
   /* What was written while waiting lacked the stored values; write the merge. */
   if (Object.keys(prefsTouched).length) savePrefs();
   applyPrefs();
