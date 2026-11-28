@@ -660,6 +660,16 @@ window.MathJax = {
   .section .bar span { display: block; height: 100%; background: var(--accent); }
   .section .gain { font-family: var(--mono); font-size: 11.5px; color: var(--dim); white-space: nowrap; }
   #promisesList h3 { margin: 8px 0 2px; font-size: inherit; }
+  #anonSum:not(.zero) { color: var(--err); }
+  #anonSlot {
+    height: 6.5em;
+    min-height: 4.5em;
+    resize: vertical;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  #anonSlot iframe { display: block; width: 100%; height: 100%; border: 0; }
 
   /* dialogs */
   .modal {
@@ -1146,6 +1156,26 @@ window.MathJax = {
         <div class="compact-actions"><button type="button" id="copyPromises" disabled>Copy as checklist</button></div>
       </div>
     </details>
+    <details class="compact" id="anonBox">
+      <summary>Anonymity <span id="anonSum" class="compact-sum zero"></span></summary>
+      <div class="compact-body">
+        <p class="compact-note">Words that would name you, one per line: your names, e-mail addresses, institution, lab, project and GitHub names. Each one found in a draft gets a card. Prefer full names: a surname alone also matches other people’s citations. Kept with this browser’s preferences, never in a draft, an export or a copy.</p>
+        <div id="anonSlot"></div>
+        <template id="anonEditor">
+          <style>
+            html, body { height: 100%; margin: 0; }
+            textarea {
+              display: block; box-sizing: border-box; width: 100%; height: 100%; resize: none;
+              padding: 6px 8px; border: 0; background: var(--editor-bg); color: var(--text);
+              font: 12px/1.45 var(--mono);
+            }
+            textarea::placeholder { color: var(--placeholder); }
+            textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+          </style>
+          <textarea id="anonTerms" spellcheck="false" autocomplete="off" rows="4" aria-label="Words that would name the authors, one per line" placeholder="Jane Doe&#10;jane.doe@uni.edu&#10;github.com/janedoe"></textarea>
+        </template>
+      </div>
+    </details>
     <details class="cheat">
       <summary>Escape cheat sheet</summary>
       <table>
@@ -1287,6 +1317,9 @@ var PUNCT = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~';
 function isPunct(c) { return !!c && c.length === 1 && PUNCT.indexOf(c) !== -1; }
 function isAlnum(c) { return /[A-Za-z0-9]/.test(c || ''); }
 function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+/* Letters and digits of the common scripts: a word's boundary. Not "_" (a
+   Markdown emphasis delimiter) or punctuation such as curly quotes. */
+var WORD_CHAR = new RegExp('[0-9A-Za-z\u00aa\u00b5\u00ba\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02af\u0370-\u03ff\u0400-\u052f\u0590-\u06ff\u0900-\u0dff\u0e00-\u0eff\u1e00-\u1fff\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]');
 
 function computeLineStarts(src) {
   var starts = [0];
@@ -2095,7 +2128,28 @@ function visibleHtml(html) {
     .replace(new RegExp('\\s+(<\\/?' + BLOCK_TAG + '\\b[^>]*>)', 'g'), '$1');
 }
 
+/* Parse the author's private anonymity word list: one entry per line,
+   trimmed with inner whitespace collapsed, dropping empty lines, entries
+   shorter than two characters and case-insensitive duplicates (keeping
+   the first spelling), capped at 50 entries of 100 characters each. */
+function identityTerms(text) {
+  if (typeof text !== 'string') return [];
+  var out = [], seen = Object.create(null);
+  var lines = text.split(/\r\n?|[\n\u2028\u2029]/);
+  for (var i = 0; i < lines.length && out.length < 50; i++) {
+    var term = lines[i].trim().replace(/\s+/g, ' ');
+    if (term.length > 100) term = term.slice(0, 100).trim();
+    if (term.length < 2) continue;
+    var key = term.toLowerCase();
+    if (seen[key]) continue;
+    seen[key] = true;
+    out.push(term);
+  }
+  return out;
+}
+
 /* `opts.venue`: the id of a VENUES preset, whose link rule then applies.
+   `opts.identity`: array of terms from the author's anonymity word list.
    OpenReview trims a comment when it posts it (constructEdit in
    client/view-v2.js), so the checks read the comment as posted and every
    offset they report is moved back into the editor's text; edits keep
@@ -3020,11 +3074,73 @@ function analyzeText(src, opts) {
   CHAT_SELF.lastIndex = 0;
   while ((cm = CHAT_SELF.exec(src))) chatCard(cm.index, cm.index + cm[0].length, null);
 
+  /* 21. Author's private anonymity word list. OpenReview posts the comment
+         as typed and e-mails its source text to reviewers and chairs
+         (openreview-py comment_process.py), so every part of the posted text
+         counts: prose, code, math, link destinations and definitions, image
+         syntax and HTML comments. Exact matches on the author's own words
+         only; no fix, because only the author can rewrite it. */
+  var identityCount = 0;
+  if (opts && Array.isArray(opts.identity) && opts.identity.length) {
+    var lowerSrc = src.toLowerCase();
+    var sameLen = lowerSrc.length === src.length;
+    var hay = sameLen ? lowerSrc : src;
+    var idHits = [];
+    for (var ti = 0; ti < opts.identity.length; ti++) {
+      var rawTerm = opts.identity[ti];
+      if (typeof rawTerm !== 'string') continue;
+      var term = rawTerm.trim().replace(/\s+/g, ' ');
+      if (!term) continue;
+      var w0 = WORD_CHAR.test(term.charAt(0));
+      var w1 = WORD_CHAR.test(term.charAt(term.length - 1));
+      var needle = sameLen ? term.toLowerCase() : term;
+      var pat = needle.split(' ').map(escRe).join('(?:[ \\t]*(?:\\r\\n?|[\\n\\u2028\\u2029])[ \\t]*|[ \\t]+)');
+      var idRe = new RegExp(pat, sameLen ? 'g' : 'gi'), im;
+      while ((im = idRe.exec(hay))) {
+        var ms = im.index, me = ms + im[0].length;
+        var before = ms > 0 ? src.charAt(ms - 1) : '';
+        var after = me < src.length ? src.charAt(me) : '';
+        if ((w0 && before && WORD_CHAR.test(before)) || (w1 && after && WORD_CHAR.test(after))) {
+          idRe.lastIndex = ms + 1;
+          continue;
+        }
+        idHits.push({ start: ms, end: me, term: term });
+      }
+    }
+    /* Longer match wins when two terms overlap ("Jane Doe" over "Doe"). */
+    idHits.sort(function (a, b) {
+      return (b.end - b.start) - (a.end - a.start) || a.start - b.start;
+    });
+    var idTaken = new Uint8Array(src.length), idKept = [];
+    for (var hi = 0; hi < idHits.length; hi++) {
+      var h = idHits[hi], overlap = false;
+      for (var k = h.start; k < h.end; k++) {
+        if (idTaken[k]) { overlap = true; break; }
+      }
+      if (overlap) continue;
+      for (var k2 = h.start; k2 < h.end; k2++) idTaken[k2] = 1;
+      idKept.push(h);
+    }
+    idKept.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
+    identityCount = idKept.length;
+    var maxCards = Math.min(idKept.length, 30);
+    for (var ci = 0; ci < maxCards; ci++) {
+      var hit = idKept[ci];
+      var more = ci === 29 && idKept.length > 30
+        ? ' Showing the first 30 matches, and ' + (idKept.length - 30) + ' more in this draft.'
+        : '';
+      push('err', 'Words that name the authors',
+        'Matches “' + escHtml(hit.term) + '” from your anonymity list. Reviews are double-blind, and OpenReview posts and e-mails the comment as typed, so link destinations, code and HTML comments count too.' + more,
+        hit.start, hit.end);
+    }
+  }
+
   issues.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
   return {
     issues: issues,
     spans: spans,
-    mathCount: spans.filter(function (sp) { return !sp.recovered; }).length
+    mathCount: spans.filter(function (sp) { return !sp.recovered; }).length,
+    identityCount: identityCount
   };
 }
 
@@ -6850,6 +6966,10 @@ var promisesBox = document.getElementById('promisesBox');
 var promisesSum = document.getElementById('promisesSum');
 var promisesList = document.getElementById('promisesList');
 var copyPromises = document.getElementById('copyPromises');
+var anonBox = document.getElementById('anonBox');
+var anonSum = document.getElementById('anonSum');
+var anonSlot = document.getElementById('anonSlot');
+var anonTerms = null;
 
 /* Listeners on the editor go through onEditor, so that a fresh textarea (a
    draft switch puts one in, see openDraft) gets every one of them. */
@@ -6960,7 +7080,7 @@ var FS_STEPS = { fsEditor: 1, zoomPreview: 10 };
    not stay on after switching to another. */
 var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, ownLimit: 5000, sync: true, venue: '',
   compact: compactDefaults(), compactOpen: false, wordingOpen: false, sectionsOpen: false, spellcheck: false,
-  promisesOpen: false, view: 'preview', skeletonQuotes: true };
+  promisesOpen: false, identity: '', anonOpen: false, view: 'preview', skeletonQuotes: true };
 
 function applyPrefs() {
   document.documentElement.setAttribute('data-theme', prefs.theme === 'dark' ? 'dark' : 'light');
@@ -6981,6 +7101,8 @@ function applyPrefs() {
   wordingBox.open = !!prefs.wordingOpen;
   sectionsBox.open = !!prefs.sectionsOpen;
   promisesBox.open = !!prefs.promisesOpen;
+  anonBox.open = !!prefs.anonOpen;
+  if (anonTerms && anonTerms.value !== prefs.identity) anonTerms.value = prefs.identity;
   spellBox.checked = !!prefs.spellcheck;
   ta.spellcheck = !!prefs.spellcheck;
   refreshFind(); /* the editor's font size moves the text under find's boxes */
@@ -6991,6 +7113,7 @@ function applyPrefs() {
   skeletonQuote.checked = !!prefs.skeletonQuotes;
   applyView();
   themeReviewBox();
+  themeAnonBox();
 }
 
 /* The venue's rule beside the counter: the year of its rules, what its limit
@@ -7539,12 +7662,19 @@ function characterStat(chars, limit) {
   return (limit > 0 ? fmt(chars) + ' / ' + fmt(limit) : fmt(chars)) + ' characters';
 }
 
+/* Page-only checks (venue link rules and the author's anonymity list): shared
+   by updateAll and texProblemIssues so macro-fix verification sees the same
+   hazards as the cards, while Fix all and compaction stay independent of them. */
+function pageAnalyzeOptions() {
+  return { venue: prefs.venue, identity: identityTerms(prefs.identity) };
+}
+
 function updateAll() {
   var text = ta.value;
   analyzedText = text;
   lineStarts = computeLineStarts(text);
 
-  var res = analyze(text, { venue: prefs.venue });
+  var res = analyze(text, pageAnalyzeOptions());
   lastAnalysis = res;
 
   /* stats — counted like OpenReview's own counter (TextAreaWidget.js):
@@ -7564,6 +7694,7 @@ function updateAll() {
   mathStat.textContent = fmt(res.mathCount) + ' math span' + (res.mathCount === 1 ? '' : 's');
 
   renderIssues();
+  renderAnon(res.identityCount || 0);
   renderWording(text, res.spans);
   renderSections(text, chars);
   renderPromises();
@@ -7571,6 +7702,11 @@ function updateAll() {
   refreshFind(); /* a draft switch puts in another text */
   scheduleCompaction();
   renderDraftTabs();
+}
+
+function renderAnon(count) {
+  anonSum.textContent = count ? fmt(count) + (count === 1 ? ' match' : ' matches') : '';
+  anonSum.classList.toggle('zero', !count);
 }
 
 /* One row per phrase (wordingHints), biggest saving first; a click selects
@@ -7709,7 +7845,7 @@ function renderIssues() {
   if (!res) return;
   texCardsStale = texReportsFor !== text;
   currentIssues = res.issues.concat(texProblemIssues(text, res.spans, texReports, res.issues,
-    { stale: texCardsStale, analyze: { venue: prefs.venue } }), reviewerCards(text, res.spans));
+    { stale: texCardsStale, analyze: pageAnalyzeOptions() }), reviewerCards(text, res.spans));
   currentIssues.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
 
   var n = currentIssues.length;
@@ -9041,6 +9177,40 @@ copyPromises.addEventListener('click', function () {
   if (lines.length) copyText(lines.join('\n'), 'Copied the revision checklist', copyPromises);
 });
 
+anonBox.addEventListener('toggle', function () {
+  prefs.anonOpen = anonBox.open;
+  if (!prefsRestored) prefsTouched.anonOpen = true;
+  savePrefs();
+});
+function themeAnonBox() {
+  if (!anonTerms) return;
+  var root = anonTerms.ownerDocument.documentElement, style = getComputedStyle(anonSlot);
+  ['--editor-bg', '--text', '--placeholder', '--mono', '--accent'].forEach(function (key) {
+    root.style.setProperty(key, style.getPropertyValue(key));
+  });
+  root.style.colorScheme = prefs.theme === 'dark' ? 'dark' : 'light';
+}
+/* Chrome keeps one undo history per document, so the word list lives in its
+   own same-origin srcdoc iframe (like the review box): typing here never
+   enters the source editor's Ctrl+Z stack. */
+(function loadAnonBox() {
+  var frame = document.createElement('iframe');
+  frame.title = 'Words that would name the authors';
+  frame.srcdoc = '<!doctype html><html lang="en"><meta charset="utf-8">' + document.getElementById('anonEditor').innerHTML;
+  frame.addEventListener('load', function () {
+    anonTerms = frame.contentDocument.getElementById('anonTerms');
+    anonTerms.value = prefs.identity;
+    themeAnonBox();
+    anonTerms.addEventListener('input', function () {
+      prefs.identity = anonTerms.value;
+      if (!prefsRestored) prefsTouched.identity = true;
+      savePrefs();
+      updateAll();
+    });
+  });
+  anonSlot.appendChild(frame);
+})();
+
 /* ---- the review each draft answers ----
    The right pane shows the preview or the review of the open draft. A review
    is kept in localStorage only, under its draft's id: never the asynchronous
@@ -9561,9 +9731,6 @@ preview.addEventListener('dblclick', function (e) {
   ta.setSelectionRange(at, to);
   revealOffset(at);
 });
-/* Letters and digits of the common scripts: a word's boundary. Not "_" (a
-   Markdown emphasis delimiter) or punctuation such as curly quotes. */
-var WORD_CHAR = new RegExp('[0-9A-Za-z\u00aa\u00b5\u00ba\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02af\u0370-\u03ff\u0400-\u052f\u0590-\u06ff\u0900-\u0dff\u0e00-\u0eff\u1e00-\u1fff\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]');
 /* Where `word` starts in text[from, to), as a whole word, outside `mask`. */
 function wordUses(text, word, from, to, mask) {
   var out = [], k = from, w0 = WORD_CHAR.test(word.charAt(0)), w1 = WORD_CHAR.test(word.charAt(word.length - 1));
@@ -10103,6 +10270,8 @@ storeGet(PREFS_KEY).then(function (v) {
       if (typeof p.wordingOpen === 'boolean') restore('wordingOpen', p.wordingOpen);
       if (typeof p.sectionsOpen === 'boolean') restore('sectionsOpen', p.sectionsOpen);
       if (typeof p.promisesOpen === 'boolean') restore('promisesOpen', p.promisesOpen);
+      if (typeof p.identity === 'string') restore('identity', p.identity);
+      if (typeof p.anonOpen === 'boolean') restore('anonOpen', p.anonOpen);
       if (typeof p.spellcheck === 'boolean') restore('spellcheck', p.spellcheck);
       if (p.view === 'preview' || p.view === 'review') restore('view', p.view);
       if (typeof p.skeletonQuotes === 'boolean') restore('skeletonQuotes', p.skeletonQuotes);
@@ -10116,6 +10285,7 @@ storeGet(PREFS_KEY).then(function (v) {
   /* What was written while waiting lacked the stored values; write the merge. */
   if (Object.keys(prefsTouched).length) savePrefs();
   applyPrefs();
+  if (draftReady) updateAll();
   localMeta = fallbackGet(DRAFTS_KEY); /* before loading refreshes the local copy */
   return loadDraft(DRAFTS_KEY);
 }).then(function (metaRes) {

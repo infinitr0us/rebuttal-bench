@@ -1359,6 +1359,58 @@ try {
     return shown && switched && current && checklist && copyPromises.disabled ||
       { shown, switched, current, copied, remaining: promisesSum.textContent }; `);
 
+  await check('Anonymity panel flags matching words in the open draft, stays quiet on clean drafts, and leaves Ctrl+F alone', `
+    for (let i = 0; i < 40 && !anonTerms; i++) await wait(25);
+    const origId = draftMeta.active, origText = ta.value;
+    const withName = createDraft('With name', 'We thank Reviewer 1. Jane Doe ran the experiments.');
+    const clean = createDraft('Clean draft', 'No identifying names here.');
+    switchDraft(withName);
+    anonBox.open = true; await wait(50);
+    anonTerms.focus();
+    anonTerms.setSelectionRange(0, anonTerms.value.length);
+    anonTerms.ownerDocument.execCommand('insertText', false, 'Jane Doe');
+    await wait(50);
+    const card = currentIssues.find((i) => i.title === 'Words that name the authors');
+    const matched = !!card && card.sev === 'err' && !card.fix && anonSum.textContent === '1 match' && !anonSum.classList.contains('zero');
+    anonTerms.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }));
+    const findUntouched = findBar.hidden === true;
+    switchDraft(clean); await wait(50);
+    const quiet = !currentIssues.some((i) => i.title === 'Words that name the authors') &&
+      anonSum.textContent === '' && anonSum.classList.contains('zero') && anonTerms.value === 'Jane Doe';
+    switchDraft(withName); await wait(50);
+    const back = currentIssues.some((i) => i.title === 'Words that name the authors') && anonSum.textContent === '1 match';
+    saveDraftNow(); await wait(50);
+    return matched && findUntouched && quiet && back || { matched, findUntouched, quiet, back, sum: anonSum.textContent };`);
+  await load();
+  await check('Anonymity word list survives a reload, does not touch editor undo history, and clearing removes the card', `
+    for (let i = 0; i < 40 && !anonTerms; i++) await wait(25);
+    const persisted = anonBox.open === true && anonTerms.value === 'Jane Doe' &&
+      currentIssues.some((i) => i.title === 'Words that name the authors') && anonSum.textContent === '1 match';
+    setSourceText('First draft text.', 0); updateAll();
+    setSourceText('Second draft text with Jane Doe.', 0); updateAll();
+    anonTerms.focus();
+    anonTerms.setSelectionRange(anonTerms.value.length, anonTerms.value.length);
+    anonTerms.ownerDocument.execCommand('insertText', false, '\\nAcmeLab');
+    await wait(50);
+    const unchanged = ta.value === 'Second draft text with Jane Doe.';
+    ta.focus(); document.execCommand('undo'); await wait(50);
+    const afterUndoTa = ta.value, afterUndoAnon = anonTerms.value;
+    const undoIsolated = afterUndoTa === 'First draft text.' && afterUndoAnon === 'Jane Doe\\nAcmeLab';
+    setSourceText('Second draft text with Jane Doe.', 0); updateAll();
+    const beforeClear = currentIssues.some((i) => i.title === 'Words that name the authors');
+    anonTerms.value = ''; anonTerms.dispatchEvent(new Event('input')); await wait(50);
+    const cleared = !currentIssues.some((i) => i.title === 'Words that name the authors') &&
+      anonSum.textContent === '' && anonSum.classList.contains('zero');
+    anonBox.open = false;
+    window.confirm = () => true;
+    const ids = draftMeta.list.filter((d) => d.name === 'With name' || d.name === 'Clean draft').map((d) => d.id);
+    const keep = draftMeta.list.find((d) => d.name !== 'With name' && d.name !== 'Clean draft');
+    if (keep) switchDraft(keep.id);
+    ids.forEach(deleteDraft);
+    await wait(50);
+    return persisted && unchanged && undoIsolated && beforeClear && cleared ||
+      { persisted, unchanged, undoIsolated, beforeClear, cleared, afterUndoTa, afterUndoAnon, sum: anonSum.textContent };`);
+
   await check('the spellcheck switch reaches the editor and survives a draft switch', `
     const was = ta.spellcheck;
     spellBox.click(); await wait(30);
