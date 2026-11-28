@@ -2324,6 +2324,81 @@ function analyzeText(src, opts) {
     return k === 0 || src[k - 1] === '\n';
   }
 
+  /* What the author meant, where Markdown and TeX read a character
+     differently. The field audit (reviews/2026-11-27/codex-field-audit: 1,300
+     real author responses) found Fix all "repairing" formulas that already
+     showed what their authors meant; these helpers tell those apart. */
+
+  /* A $ typed with one (consumed) backslash: meant as a currency sign. */
+  function slashedDollar(at) { return src[at] === '$' && countBackslashesBefore(src, at) % 4 === 1; }
+  /* TeX in a formula's source: a control word, a script, a brace. */
+  var TEXISH = /\\[A-Za-z]|[\^_{}]/;
+  /* A \$ with no partner MathJax pairs it with. It shows as typed for now, so
+     the fix (which renders the same) only guards against a later $. */
+  function unprotectedLone(at) {
+    var slashRun = countBackslashesBefore(src, at);
+    push('warn', '\\$ is not protected after Markdown',
+      'Markdown consumes the final source backslash, leaving an even number before <code>$</code>, so MathJax still sees a delimiter. It has no partner in its paragraph, so for now it shows as typed, but a later <code>$</code> in the paragraph would pair with it. For a literal currency sign type <code>\\\\$</code>.',
+      at - slashRun, at + 1,
+      fix('\\\\$', [literalDollar(at)]));
+  }
+  /* Whether a formula that Markdown cuts (inline emphasis, a block boundary)
+     was meant as one. Pairing the leftover signs of prices ("**$484**) vs. B
+     ($") or of escaped currency signs ("\$12 each … \$?") explains nothing:
+     MathJax never sees those signs together, and their author never meant
+     them as math, so a "repair" would make a formula of prose. `strip` is the
+     cutting emphasis's delimiter character, left out of the content. */
+  function meantAsFormula(sp, strip) {
+    var inner = src.slice(sp.innerStart, sp.innerEnd);
+    if (TEXISH.test(inner)) return true;
+    var bare = strip ? inner.split(strip).join('') : inner;
+    if (!/[A-Za-z0-9]/.test(bare)) return false;
+    if (sp.delimiter === 'dollar' && (slashedDollar(sp.openAt) || slashedDollar(sp.closeAt))) return false;
+    /* an amount, then prose: "484) vs. B (" */
+    return !(/^\s*[-+−]?\d[\d,.]*[kKmMbB%]?(?![\d.]*[A-Za-z(])/.test(bare) && /[A-Za-z]{2,}/.test(bare));
+  }
+  /* The braces MathJax takes as group braces in a formula's source (typed bare,
+     or with one backslash that Markdown consumes; "\\{" reaches MathJax as a
+     literal \{), matched: partner position by position. */
+  function braceGroups(sp) {
+    if (sp.braceGroups) return sp.braceGroups;
+    var pairOf = Object.create(null), stack = [];
+    for (var k = sp.innerStart; k < sp.innerEnd; k++) {
+      if ((src[k] !== '{' && src[k] !== '}') || codeMask[k] || countBackslashesBefore(src, k) % 4 > 1) continue;
+      if (src[k] === '{') stack.push(k);
+      else if (stack.length) { var o = stack.pop(); pairOf[o] = k; pairOf[k] = o; }
+    }
+    return (sp.braceGroups = pairOf);
+  }
+  /* A { that opens the group of a script: ^ or _ before it, spaces aside. */
+  function opensScript(sp, at) {
+    var k = at - 1;
+    while (k >= sp.innerStart && (src[k] === '\\' || /\s/.test(src[k]))) k--;
+    return src[k] === '^' || src[k] === '_';
+  }
+  /* A consumed "\X" (at i, the character at j) that already gives MathJax what
+     the author meant, so the TeX control symbol \X would change a formula
+     that shows correctly:
+     - bars composed into a double bar, "\|\|h\|\|" or "|\|" ("||h||");
+     - "\&" in an alignment, where & is the column separator;
+     - a brace that groups: "\{" opening a script's group ("R^\{P\}"), or "\}"
+       closing a bare { ("\mathbf{x\}"), which as literal braces would leave
+       the formula unbalanced. Set braces, "\{x_i\}" or "\in \{0,1\}", are
+       matched with each other and still get the fix. */
+  function shieldMeant(sp, i, j, next) {
+    if (next === '|') return src[i - 1] === '|' || src[j + 1] === '|' || (src[j + 1] === '\\' && src[j + 2] === '|');
+    if (next === '&') {
+      var c = texContextAt(src, sp.innerStart, i);
+      return c.row && !c.text;
+    }
+    if (next !== '{' && next !== '}') return false;
+    var partner = braceGroups(sp)[j];
+    if (partner === undefined) return false;
+    var open = next === '{' ? j : partner;
+    if (opensScript(sp, open)) return true;
+    return next === '}' && countBackslashesBefore(src, partner) % 4 === 0;
+  }
+
   /* 1. Delimiters MathJax cannot pair within their own paragraph. */
   scan.lone.forEach(function (u) {
     if (u.kind === '\\)' || u.kind === '\\]') {
@@ -2346,12 +2421,8 @@ function analyzeText(src, opts) {
       return;
     }
     /* In an HTML block shown as text there are no Markdown escapes to fix. */
-    var slashRun = countBackslashesBefore(src, u.at);
-    if (u.kind === '$' && !u.literal && slashRun % 4 === 1) {
-      push('err', '\\$ is not protected after Markdown',
-        'Markdown consumes the final source backslash, leaving an even number before <code>$</code>; MathJax therefore still sees a delimiter. For a literal currency sign type <code>\\\\$</code>.',
-        u.at - slashRun, u.at + 1,
-        fix('\\\\$', [literalDollar(u.at)]));
+    if (u.kind === '$' && !u.literal && slashedDollar(u.at)) {
+      unprotectedLone(u.at);
     } else {
       var currency = u.kind === '$' && !u.literal && /^[-+−]?\d/.test(src.slice(u.at + 1, u.at + 3));
       push('warn', u.kind === '$$' ? 'Unpaired $$' : 'Unpaired $',
@@ -2364,14 +2435,26 @@ function analyzeText(src, opts) {
 
   spans.forEach(function (sp) {
     if (sp.delimiter !== 'dollar' || sp.display || sp.literal) return;
-    [sp.openAt, sp.closeAt].forEach(function (at) {
+    var slashed = [sp.openAt, sp.closeAt].filter(slashedDollar);
+    if (!slashed.length) return;
+    /* MathJax never pairs the signs of a recovered span (they sit in different
+       blocks), so each one shows as typed for now, like a lone sign. */
+    if (sp.recovered) { slashed.forEach(unprotectedLone); return; }
+    /* Both signs escaped around TeX, "(\$\tilde{P}\$)": the author escaped the
+       delimiters for Markdown, and MathJax typesets the formula they meant. */
+    if (slashed.length === 2 && TEXISH.test(src.slice(sp.innerStart, sp.innerEnd))) return;
+    slashed.forEach(function (at) {
       var slashRun = countBackslashesBefore(src, at);
-      if (slashRun % 4 === 1) {
-        push('err', 'Backslash does not protect this $',
-          'Markdown removes the final source backslash, and the remaining slash count is even, so MathJax still treats this <code>$</code> as a delimiter. Type <code>\\\\$</code> for a literal dollar sign.',
-          at - slashRun, at + 1,
-          fix('\\\\$', [literalDollar(at)]));
-      }
+      var autofix = fix('\\\\$', [literalDollar(at)]);
+      /* With one sign escaped, a literal sign frees its partner, which then
+         shows as typed or pairs with a later sign ("$A \approx $ \$ 369.65 $
+         dollars"): only the author can tell. (A price followed by a formula,
+         "costs \$5, and $x$", gets its automatic fix from the currency check
+         below.) */
+      if (autofix && slashed.length === 1) autofix.manual = true;
+      push('err', 'Backslash does not protect this $',
+        'Markdown removes the final source backslash, and the remaining slash count is even, so MathJax still treats this <code>$</code> as a delimiter. Type <code>\\\\$</code> for a literal dollar sign.',
+        at - slashRun, at + 1, autofix);
     });
   });
 
@@ -2479,9 +2562,10 @@ function analyzeText(src, opts) {
           i, Math.min(sp.innerEnd, j + 1),
           fix('\\\\' + next, [edit(i, j, bs(2))]));
       } else if (run === 1 && TEX_CTRL_SYMBOLS.indexOf(next) !== -1) {
-        if ((next === '|' && inTable(i)) || (next === '>' && atLineStart(i))) {
-          /* Correct shields: a GFM table cell separator, or a block quote
-             marker at the start of a line. MathJax receives the bare | or >. */
+        if ((next === '|' && inTable(i)) || (next === '>' && atLineStart(i)) || shieldMeant(sp, i, j, next)) {
+          /* Correct shields: a GFM table cell separator, a block quote marker at
+             the start of a line, or a character MathJax should receive bare
+             (shieldMeant). */
         } else {
           push('warn', '\\' + next + ' is consumed by Markdown',
             'A single backslash before ASCII punctuation is removed before MathJax runs, so MathJax receives <code>' + escHtml(next) + '</code>. If you intended the TeX control symbol <code>\\' + escHtml(next) + '</code>, type <code>\\\\' + escHtml(next) + '</code>.',
@@ -2490,6 +2574,22 @@ function analyzeText(src, opts) {
         }
       }
       i = Math.max(j, i + 1);
+    }
+
+    /* A bare % is a TeX comment: MathJax drops it and the rest of its line of
+       the formula, with no error ("$78.1%$" shows 78.1). Only a percentage,
+       right after a number, is reported: a "% \vspace{-1mm}" line in a display
+       copied from the paper is a comment its author meant, as in LaTeX. */
+    for (var pc = sp.innerStart; !sp.literal && !sp.recovered && pc < sp.innerEnd; pc++) {
+      if (src[pc] !== '%' || codeMask[pc] || countBackslashesBefore(src, pc) % 4 !== 0) continue;
+      if (!/\d[ \t]*$/.test(src.slice(sp.innerStart, pc))) continue;
+      var lineEnd = src.indexOf('\n', pc);
+      var lost = src.slice(pc + 1, lineEnd < 0 || lineEnd > sp.innerEnd ? sp.innerEnd : lineEnd);
+      push('err', 'A bare % starts a TeX comment',
+        'MathJax reads <code>%</code> as the start of a TeX comment, so the percent sign' +
+        (/\S/.test(lost) ? ' and the rest of its line (<code>' + escHtml(lost.trim().slice(0, 40)) + '</code>)' : '') +
+        ' disappear from the formula. Type <code>\\\\%</code>, which reaches MathJax as <code>\\%</code>.',
+        pc, pc + 1, fix('\\\\%', [edit(pc, pc, bs(2))]));
     }
 
     if (sp.why === 'blank') {
@@ -2550,20 +2650,28 @@ function analyzeText(src, opts) {
       var sp = spans[s];
       if (!rangeOverlaps(r, sp) || rangeWraps(r, sp)) continue;
       sp.cut = true; /* MathJax never sees this formula whole (texProblemIssues) */
-      if (reported) continue;
+      var emph = r.type === 'em' || r.type === 'strong' || r.type === 'del';
+      if (reported || !meantAsFormula(sp, emph ? src[r.start] : null)) continue;
       reported = true;
       var raw = src.slice(r.start, r.end);
       var offset = (r.type === 'link' || r.type === 'image') ? Math.max(0, raw.indexOf('[')) : 0;
       var hs = r.start + offset;
       var he = Math.min(r.end, hs + (r.type === 'strong' ? 2 : 1));
-      var autofix = (r.type === 'em' || r.type === 'strong' || r.type === 'del') ? emphasisFix(r) : null;
-      push('err', risky[r.type][0], risky[r.type][1], hs, he, autofix);
+      var autofix = emph ? emphasisFix(r) : null;
+      var detail = risky[r.type][1];
+      /* In \text{…} the escaped delimiters reach MathJax as typed text: the
+         formula comes back, but "**word**" shows its stars instead of bold. */
+      if (autofix && texContextAt(src, sp.innerStart, Math.max(sp.innerStart, Math.min(r.start, sp.innerEnd))).text) {
+        autofix.manual = true;
+        detail += ' Inside <code>\\text{…}</code> the escaped stars then show as typed; for bold or italic words in a formula use <code>\\textbf{…}</code> or <code>\\textit{…}</code>.';
+      }
+      push('err', risky[r.type][0], detail, hs, he, autofix);
     }
   });
 
   var blockTypes = { paragraph: 1, heading: 1, blockquote: 1, list: 1, list_item: 1, table: 1, code: 1, hr: 1, def: 1 };
   spans.forEach(function (sp) {
-    if (sp.why !== 'block') return;
+    if (sp.why !== 'block' || !meantAsFormula(sp, null)) return;
     var cuts = markedRanges.filter(function (r) {
       return !r.inline && blockTypes[r.type] && rangeOverlaps(r, sp) && !rangeWraps(r, sp);
     });
