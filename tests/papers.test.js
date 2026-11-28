@@ -245,3 +245,24 @@ test('import names are unique per paper, texts across papers', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(old.add)), [{ name: 'R1 (2)', text: 'y' }]);
   assert.equal(old.same, 1);
 });
+
+test('paperNameFromFile cleans a file base name and falls back when empty', () => {
+  assert.equal(A.paperNameFromFile('ICML #1234.json'), 'ICML #1234');
+  assert.equal(A.paperNameFromFile('C:\\Users\\a\\rebuttals\\neurips-2026.MD'), 'neurips-2026');
+  assert.equal(A.paperNameFromFile('/tmp/dir/  My   Paper.txt'), 'My Paper');
+  assert.equal(A.paperNameFromFile('notes.markdown'), 'notes');
+  assert.equal(A.paperNameFromFile('.json'), 'Imported');
+  assert.equal(A.paperNameFromFile(''), 'Imported');
+});
+
+test('formatSameIn names where skipped drafts live, deduplicated and bounded', () => {
+  const names = { pa: 'ICML #1234', pb: 'ARR', pc: 'NeurIPS', pd: 'ICLR', '': 'No paper' };
+  const label = (s) => names[s] || '';
+  assert.equal(A.formatSameIn(['pa', 'pa'], label), ', in ICML #1234');
+  assert.equal(A.formatSameIn(['pa', 'pb', 'pa'], label), ', in ICML #1234 and ARR');
+  assert.equal(A.formatSameIn(['pa', 'pb', 'pc'], label), ', in ICML #1234, ARR and 1 other');
+  assert.equal(A.formatSameIn(['pa', 'pb', 'pc', 'pd'], label), ', in ICML #1234, ARR and 2 others');
+  assert.equal(A.formatSameIn([''], label), ', in No paper');
+  assert.equal(A.formatSameIn([''], () => ''), '');
+  assert.equal(A.formatSameIn([], label), '');
+});
