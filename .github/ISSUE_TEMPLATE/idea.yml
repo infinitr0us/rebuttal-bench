@@ -1,0 +1,26 @@
+name: Suggest an idea
+description: Something that would make preparing a rebuttal easier, or a venue rule that has changed.
+labels: [idea]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Issues are public**: describe the idea without text from a rebuttal under review. For a venue rule, a link to the official page that states it is all it takes.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What were you trying to do?
+      description: The situation, and what got in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Rebuttal Bench version
+      description: Shown at the end of the page's footer.

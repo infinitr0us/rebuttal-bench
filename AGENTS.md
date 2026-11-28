@@ -19,16 +19,16 @@ User-facing documentation is in `README.md`; history of changes in `CHANGELOG.md
 
 ## Anatomy of `rebuttal-bench.html`
 
-1. `<head>` script — the MathJax configuration, mirroring openreview-web's `lib/mathjax-config.js`.
-2. `<style>` — light tokens on `:root`, dark overrides on `html[data-theme="dark"]`; the
+1. `<head>` script: the MathJax configuration, mirroring openreview-web's `lib/mathjax-config.js`.
+2. `<style>`: light tokens on `:root`, dark overrides on `html[data-theme="dark"]`; the
    `.paper` rules mirror OpenReview's note styles value for value.
-3. Markup — header controls, stats bar, editor + hazards + cheat sheet, preview, footer.
+3. Markup: header controls, stats bar, editor + hazards + cheat sheet, preview, footer.
 4. Main `<script>`, split by two banner comments that the tests rely on (keep them verbatim):
-   - `/* ================= pure analysis ================= */` — everything the analyzer needs,
+   - `/* ================= pure analysis ================= */`: everything the analyzer needs,
      plus the pure Fix-all engine (`fixAllText`), the compaction engine (`compactText`) and the
      venue presets (`VENUES`). **Must stay DOM-free**: the tests run this section in a Node VM
      with only `window.marked` available.
-   - `/* ================= dom wiring ================= */` — rendering, persistence, UI events.
+   - `/* ================= dom wiring ================= */`: rendering, persistence, UI events.
 
 ## Table import
 
@@ -60,17 +60,17 @@ text, discard the grid and use the regular text importer.
   pipe first) and records *leaf blocks*, including GFM table cells split the way Marked splits
   them. It also records link syntax that is not text (brackets, destinations), which is masked
   like code. A code span it cannot locate masks its whole container.
-- `buildRegions` — the strings MathJax searches: leaf blocks minus code, split at blank lines
+- `buildRegions`: the strings MathJax searches: leaf blocks minus code, split at blank lines
   (except HTML blocks, which OpenReview shows as one run of text).
-- `mathJaxView` — the text MathJax receives from a region after Markdown's escape handling and
+- `mathJaxView`: the text MathJax receives from a region after Markdown's escape handling and
   the browser's decoding of character references (an HTML block: as typed), with a source
   position for every character.
-- `mjFind` / `mjFindEnd` — a **faithful port of MathJax 3.2.2 FindTeX** (`$$` before `$` at the
+- `mjFind` / `mjFindEnd`: a **faithful port of MathJax 3.2.2 FindTeX** (`$$` before `$` at the
   same position, closers only at brace depth 0, `\X` skipped as a unit, processEscapes,
   processEnvironments, processRefs). Do not "improve" it; it must behave exactly like MathJax.
   Diagnostics (stray closers, stray `\end`) must not change where the scan resumes.
   `npm run fuzz` must report 0 mismatches after any change here or in the view.
-- `scanMath` — real spans (what MathJax typesets) plus *recovered* spans: leftover delimiters
+- `scanMath`: real spans (what MathJax typesets) plus *recovered* spans: leftover delimiters
   paired across a boundary purely to explain breakage (`why`: blank, block, table, code,
   braces). Recovered spans are never counted as math.
 - `analyze(src, opts)` reads the comment **as posted**: OpenReview trims a textarea before it
@@ -79,12 +79,25 @@ text, discard the grid and use the regular text importer.
   spans) back into the editor's text. The preview renders `ta.value.trim()`, and the reference
   `renderLikeOpenReview` trims too. Check 16 (in `analyze`) reports leading whitespace whose
   removal changes the rendered comment (`postedStartChanges`, compared with `visibleHtml`).
-- `analyzeText(src, opts)` — the checks, numbered in the source. Each returns hazards
+- `analyzeText(src, opts)`: the checks, numbered in the source. Each returns hazards
   `{sev, title, detail(HTML), start, end, fix, math}`; a fix is a list of edits carrying `was`
   (the text they expect), so stale fixes are refused; `math` marks checks 1–7, the ones about
   Markdown damaging TeX. Check 4 also marks formulas inline Markdown cuts apart (`sp.cut`).
   Checks 9–14 report what OpenReview shows as typed (raw HTML, HTML comments, external images,
-  footnotes, h4–h6, LaTeX outside math); check 15 reports links under `opts.venue`'s rule (an
+  footnotes, h4–h6, LaTeX outside math). Since the field audit: check 9 only for markup and
+  structure elements (`htmlTags`: `<figure>`, `<section>`; not `<think>`, nor form and metadata
+  elements named by plain words, `<input>`, `<output>`, `<label>`, which are prompt tokens far
+  more often), check 13 not for a heading already all bold (`headingIsBold`), check 14's tie only
+  between a word and its label (`Table~1`, not `(~2GB)`) and, besides text commands and
+  `\footnote`, math-only commands outside math (`MATH_CMD_LIST`; paths, a command right after a
+  word with a small letter (`results\min`, unlike `T\geq` or `RMSE\leq`), quoted names and
+  quotes of the review skipped, adjacent
+  commands grouped, nothing inside a span check 2 reports or one whose `$` a cut or currency
+  span took). That last part reads the earlier cards by title, so keep those titles. Check 7
+  does not take two prices on a line for TeX (and scans on from the second price's sign, which
+  may open a formula), and check 17 skips `feasible??`, `TBD-based` and a placeholder quoted on
+  its line (`inLineQuotes`).
+  Their cases are in `tests/field-audit.test.js`. Check 15 reports links under `opts.venue`'s rule (an
   id from `VENUES`; only the page passes it, so Fix all and compaction never see venue hazards).
   Check 17 reports placeholders in visible text only (not in code, link destinations and
   definitions, image syntax, dropped cells or HTML comments), each pattern limited to where it
@@ -102,6 +115,22 @@ text, discard the grid and use the regular text importer.
   `% of runs`, "I hope this helps", "Sure! Here are the results:", `[Authors]` signatures.
   `tests/leftovers.test.js` holds those shapes; widen a pattern only with such a near-miss case
   and a rerun of that corpus.
+- Check 21 matches the author's anonymity word list (`identityTerms` parses the preference;
+  `opts.identity`, passed only by the page through `pageAnalyzeOptions()` beside `opts.venue`, so
+  Fix all, compaction and `splitComment` never see it) across the **whole** posted text, code,
+  math, link syntax and HTML comments included: OpenReview e-mails the source as typed. It is
+  precise by construction (the author's own words, case-insensitive, `WORD_CHAR` boundaries
+  where a term starts or ends with a letter or digit, a space matching blanks with at most one
+  line break, no-break spaces included); keep it free of guesses about what a name is. The
+  longer of two overlapping matches wins, a draft shows at most 30 cards (`identityCount` has
+  them all), and there is no fix. The list's textarea lives in a same-origin `srcdoc` iframe,
+  like the review box, so its typing never enters the editor's undo history. The list is
+  **not a preference**: it is text the author typed, stored whole under `IDENTITY_KEY` in
+  localStorage only (`saveIdentity` through `fallbackSet`, on every edit, so writes cannot land
+  out of order; never the asynchronous store), and taken in from another window on its
+  `storage` event. In the preferences object, another window's save of an unrelated switch
+  wrote its old copy over the list (`reviews/2026-11-27/codex-review-312`). Two windows editing
+  the list at the same moment: the last write wins.
 - `texProblemIssues(src, spans, reports, issues, {stale, analyze})` turns what MathJax reported
   after the last typeset (`texProblems()` in the DOM section: `{tex, undef, errors}` per formula,
   in document order) into cards. Formulas cut apart by inline Markdown are skipped (MathJax never
@@ -134,6 +163,33 @@ text, discard the grid and use the regular text importer.
   be intended) is **manual**: build it with `manual()` in `analyze`. `fixAllText` skips it, the
   Fix all button does not count it, and its card says "Not part of Fix all". Even so, verify
   in a regression case that the fixed text renders as promised.
+- "Correctly" means what the author meant, which the source often shows: a field audit on
+  1,300 real author responses (`reviews/2026-11-27/codex-field-audit`, git-ignored) found Fix
+  all damaging 10 of the 126 it changed, by repairing escapes that already gave MathJax the
+  intended TeX; two review rounds (`reviews/2026-11-27/codex-review-312`, `codex-recheck-312`)
+  found seventeen more, each a hole in a rule that guessed. What ended it is the rule to keep:
+  **an escape Markdown ate is repaired unattended only where the bare character cannot be what
+  the author meant** (`,` `;` `:` `!` show as punctuation, `#` and a stray `&` are TeX errors,
+  `%` is a comment). `{`, `}` and `|` are valid TeX with other meanings: a `\|` fix is always
+  manual (no context made the norm certain), a brace fix is automatic only as a set
+  (`setBraces`: a pair opening at the formula's start, after `= ( , : | < > +` or a relation or
+  size in `SET_PREV`, or a brace without partner). Do not add context rules to make more of them
+  automatic; a manual card costs the author one click. `slashedDollar`, `meantAsFormula`,
+  `shieldMeant` and `opensGroup` hold the rest: both escaped signs are currency only around
+  prices with the second sign leading into the next amount; bars composed into `||`, `\&` in an
+  alignment and grouping braces (matched with a bare brace, after `^` or `_`, or after a command
+  in `ARG_CMD`) get no card; a pair of prices (an amount after the first sign, anything but a
+  close after the second), of escaped signs, or with two prose words and no TeX, is no formula
+  for emphasis to cut. A bare `%` gets a card only after a digit and before the formula's end or
+  a closing bracket, never in `\verb` or at a line end with more lines after it.
+  `tests/field-fixall.test.js` holds each case and its near miss, compared with the independent
+  MathJax oracle.
+- **Measure every change to a check on real text before review**: `npm run corpus --
+  <corpus.jsonl> --baseline <summary.json>` lists the cards that appeared and disappeared per
+  text. Use the audit's corpus with its `summary.json` and the 310 responses of
+  `reviews/2026-11-27/codex-review-310` (id field `note`; make a baseline with `RB_PAGE` set to
+  the page before the change). Read every card that appears or disappears, and replay Fix all
+  with `recheck-fixall.mjs` in the audit's folder.
 
 ## Formatted prose paste
 
@@ -515,6 +571,20 @@ review is taken in only when this box holds no edit of its own (last save wins o
 `devDependencies` together, run `npm test`, then `npm run check-upstream -- --update`.
 Exit codes: 0 nothing changed, 1 something changed, 2 the check itself failed (network, rate
 limit, a moved file or marker, an unreadable snapshot; it never overwrites one without `--update`).
+`.github/workflows/upstream.yml` runs it every Monday: exit 1 opens an issue labelled
+`upstream-drift` (or refreshes the open one's body, without a comment that would notify
+everyone weekly), exit 2 fails the run. GitHub turns scheduled workflows off after 60 days
+without a commit; turn it back on in the Actions tab.
+
+## Releases and reports
+
+`APP_VERSION` in the pure section is the page's version, shown in the footer and filled into
+problem reports; bump it with `package.json` and `package-lock.json` in the release commit
+(`tests/report.test.js` checks it). The footer's report links (`renderReportLinks`) fill the
+issue forms in `.github/ISSUE_TEMPLATE` by field id with the version, the browser
+(`browserLabel`) and the venue (`reportVenue`), **never draft text**: issues are public. A test
+checks that every field the page fills exists in its form. Do not release while a venue the
+users target is in its author response window; Pages serves `main` at once.
 
 ## Browser behavior
 
@@ -541,7 +611,9 @@ long soft-wrapped line, refusing a stale one-click fix, draft persistence across
 with a stubbed asynchronous `window.storage`: keystrokes before a reload, a draft saved elsewhere,
 leaving before the restore), `/images/` attributes, the theme toggle, the Sections and Wording
 panels, find and replace (with its boxes and one undo), a double-click from the preview to the
-source, the spellcheck switch across a draft switch, and that no page errors were thrown. Add a
+source, the spellcheck switch across a draft switch, the Anonymity panel (cards, its own undo,
+across a reload), the footer's report links (no draft text in them), and that no page errors
+were thrown. Add a
 check there for any new browser-only behavior.
 
 Still by eye: zoom and editor-size controls, dark-mode colors, the layout below 920 px width, the

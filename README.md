@@ -1,7 +1,7 @@
 # Rebuttal Bench
 
 A single-file previewer for OpenReview comments. Paste a rebuttal and see it rendered the way
-openreview.net renders it — Marked (GFM) → DOMPurify → MathJax — next to a list of *hazards*:
+openreview.net renders it (Marked with GFM, then DOMPurify, then MathJax), next to a list of *hazards*:
 places where Markdown mangles your TeX before MathJax ever sees it, most with a one-click fix.
 
 Rebuttal Bench is an independent tool. It is not affiliated with or endorsed by OpenReview.
@@ -129,10 +129,25 @@ leave the browser: they autosave on this device only.
   preview, every formula it cannot typeset gets a card with its error message, and every macro
   it does not know (`\bm`, `\argmax`, `\R`) gets one card for all the formulas that use it,
   with a replacement MathJax has (`\boldsymbol`) where there is one.
+- **Anonymity.** List the words that would name you in the *Anonymity* panel, one per line: your
+  names, e-mail addresses, institution, lab, project and GitHub names. Every occurrence in the
+  open draft gets a card, wherever it is, since OpenReview posts the comment as typed and
+  e-mails its source: link destinations, code, math and HTML comments count too. Matching is
+  exact apart from capitals and a name wrapped across a line, so prefer full names (a surname
+  alone also matches other people's citations). The list is kept in this browser only, never
+  in a draft, an export or a copy.
 - **Status bar.** Characters counted the way OpenReview's own counter does (trimmed length),
   the length of the selection, the number of formulas MathJax will typeset, hazards, and
   MathJax problems (TeX errors *and* undefined macros).
 - **Escape cheat sheet.** Under the compaction panel.
+
+## Reporting a problem
+
+*Report a problem* in the page's footer opens a GitHub issue form with the page's version, your
+browser and the chosen venue filled in; *Suggest an idea* opens one for ideas and changed venue
+rules. Issues are public and your rebuttal is not: paste only a small example that shows the
+problem, rewritten so it says nothing about your paper. When the preview and the posted comment
+differ, screenshots of both are the most useful report there is.
 
 ## How faithful is the preview?
 
@@ -165,9 +180,11 @@ reports when any of those sources change.
    `\\` row breaks, emphasis eating `_` or `*`, currency dollars pairing up, and more; and for
    `\ref`/`\eqref` copied from the paper, which OpenReview shows as `(???)`.
 6. Other checks look for what OpenReview shows as typed: raw HTML (`<br>` in a table cell,
-   `<sub>`), HTML comments (a hidden note to a co-author is published), images not under
-   `/images/`, footnotes, and LaTeX pasted from the paper outside math (`\textbf{}`, `\cite{}`,
-   ` ``quotes'' `, ties like `Table~1`, two of which can even pair into strikethrough).
+   `<sub>`; made-up tokens such as `<think>` are meant to show and stay quiet), HTML comments
+   (a hidden note to a co-author is published), images not under `/images/`, footnotes, LaTeX
+   pasted from the paper outside math (`\textbf{}`, `\cite{}`, `\footnote{}`, ` ``quotes'' `,
+   ties like `Table~1`, two of which can even pair into strikethrough), and math commands typed
+   without delimiters (`We use \alpha=10`).
 7. The last checks look at the draft as a whole: placeholders, invisible characters and
    ligatures. All checks read the comment as posted, which OpenReview trims; a card says when
    the trim changes how the start reads.
@@ -214,15 +231,23 @@ npm install
 npm test                          # regression cases, the example, page checks, short fuzz
 npm run fuzz -- 20000 42 blocks   # long fuzz: iterations, seed, alphabet (inline | blocks)
 npm run smoke                     # headless Chrome/Edge: undo, jump, status bar, persistence, copy
+npm run corpus -- texts.jsonl --baseline summary.json
+                                  # the analyzer on real texts ({id, text} per line): cards per
+                                  #   check, and what appeared or disappeared since a run
 npm run check-upstream            # did openreview-web change anything the page mirrors?
                                   #   exit 1: something changed; 2: the check itself failed
 ```
+
+GitHub also runs the upstream check every Monday (`.github/workflows/upstream.yml`) and opens an
+issue labelled `upstream-drift` when something changed.
 
 ```
 rebuttal-bench.html        the app (single self-contained file, no build step)
 index.html                 redirects the GitHub Pages site root to the app
 tests/
   regression.test.js       hazard + Fix-all cases, broken and correct input
+  field-fixall.test.js     Fix all on what real authors write: left alone, or still repaired
+  field-audit.test.js      quiet on what renders as meant; math commands outside math
   compact.test.js          compaction: what each trick saves, what it must leave alone
   table-import.test.js     imported tables, rendered cells, warnings and MathJax input
   compact-math.test.js     formula compaction against independently typeset MathML
@@ -231,6 +256,8 @@ tests/
   split.test.js            splitting a draft into comments: where it cuts, what it keeps
   reviewers.test.js        reviewer IDs across drafts: greetings and IDs in other capitals
   leftovers.test.js        LaTeX comment lines and chat-assistant leftovers, caught and quiet
+  anonymity.test.js        the anonymity word list: parsing, exact matches everywhere, offsets
+  report.test.js           the footer's report links: version, browser, issue-form fields
   review.test.js           a review's points and how a draft covers them
   paste.test.js            formatted prose from Docs, Word and web pages as Markdown
   promises.test.js         promises to change the paper, found and left alone
@@ -245,8 +272,11 @@ tests/
   lib/fuzz.js              differential fuzzer (+ CLI)
 scripts/smoke.mjs          browser smoke test over the DevTools protocol
 scripts/check-upstream.mjs compares openreview-web against upstream/openreview-web.json
+scripts/corpus.mjs         replays the analyzer on a corpus of real texts (npm run corpus)
 AGENTS.md                  engineering notes for contributors and coding agents
 .github/workflows/test.yml CI: npm test and the browser smoke test on every push and pull request
+.github/workflows/upstream.yml   weekly check-upstream, opening an issue on drift
+.github/ISSUE_TEMPLATE/    the issue forms the page's report links open
 ```
 
 When adding or changing a check or fix, add regression cases for the broken input it repairs

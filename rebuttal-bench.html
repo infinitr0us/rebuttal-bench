@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rebuttal Bench — OpenReview markdown + MathJax previewer</title>
+<title>Rebuttal Bench: OpenReview Markdown and MathJax previewer</title>
 
 <!-- OpenReview currently parses Markdown with Marked (GFM), sanitizes the
      generated HTML, and only then asks MathJax to typeset it. -->
@@ -660,6 +660,16 @@ window.MathJax = {
   .section .bar span { display: block; height: 100%; background: var(--accent); }
   .section .gain { font-family: var(--mono); font-size: 11.5px; color: var(--dim); white-space: nowrap; }
   #promisesList h3 { margin: 8px 0 2px; font-size: inherit; }
+  #anonSum:not(.zero) { color: var(--err); }
+  #anonSlot {
+    height: 6.5em;
+    min-height: 4.5em;
+    resize: vertical;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  #anonSlot iframe { display: block; width: 100%; height: 100%; border: 0; }
 
   /* dialogs */
   .modal {
@@ -971,6 +981,7 @@ window.MathJax = {
     background: var(--bg);
   }
   footer a { color: var(--accent-ink); }
+  footer .foot-meta { display: block; margin-top: 3px; }
 
   .toast {
     position: fixed;
@@ -1047,7 +1058,7 @@ window.MathJax = {
 <header>
   <div class="brand">
     <h1>Rebuttal Bench<span class="dot">.</span></h1>
-    <p class="tag">Renders your comment the way OpenReview does — CommonMark markdown first, then MathJax on the result — so the breakage shows up here instead of under your reviewers' noses.</p>
+    <p class="tag">Renders your comment the way OpenReview does (Markdown first, then MathJax on the result), so the breakage shows up here instead of under your reviewers' noses.</p>
   </div>
   <div class="controls">
     <div class="fs-ctl" title="Editor font size">
@@ -1056,7 +1067,7 @@ window.MathJax = {
       <span class="fs-val" id="fsEditorVal">13</span>
       <button type="button" data-fs="fsEditor" data-dir="1" aria-label="Larger editor text">+</button>
     </div>
-    <div class="fs-ctl" title="Preview zoom — 100% is exactly OpenReview's size (12px Noto Sans)">
+    <div class="fs-ctl" title="Preview zoom: 100% is exactly OpenReview's size (12px Noto Sans)">
       <span class="fs-label">Preview</span>
       <button type="button" data-fs="zoomPreview" data-dir="-1" aria-label="Zoom preview out">−</button>
       <span class="fs-val" id="fsPreviewVal">100%</span>
@@ -1146,6 +1157,27 @@ window.MathJax = {
         <div class="compact-actions"><button type="button" id="copyPromises" disabled>Copy as checklist</button></div>
       </div>
     </details>
+    <details class="compact" id="anonBox">
+      <summary>Anonymity <span id="anonSum" class="compact-sum zero"></span></summary>
+      <div class="compact-body">
+        <p class="compact-note">Words that would name you, one per line: your names, e-mail addresses, institution, lab, project and GitHub names. Each one found in a draft gets a card. Prefer full names: a surname alone also matches other people’s citations. Kept in this browser only, never in a draft, an export or a copy.</p>
+        <p class="compact-note" id="anonNote" hidden>This browser cannot store the list, so it lasts until you leave the page.</p>
+        <div id="anonSlot"></div>
+        <template id="anonEditor">
+          <style>
+            html, body { height: 100%; margin: 0; }
+            textarea {
+              display: block; box-sizing: border-box; width: 100%; height: 100%; resize: none;
+              padding: 6px 8px; border: 0; background: var(--editor-bg); color: var(--text);
+              font: 12px/1.45 var(--mono);
+            }
+            textarea::placeholder { color: var(--placeholder); }
+            textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+          </style>
+          <textarea id="anonTerms" spellcheck="false" autocomplete="off" rows="4" aria-label="Words that would name the authors, one per line" placeholder="Jane Doe&#10;jane.doe@uni.edu&#10;github.com/janedoe"></textarea>
+        </template>
+      </div>
+    </details>
     <details class="cheat">
       <summary>Escape cheat sheet</summary>
       <table>
@@ -1204,7 +1236,8 @@ window.MathJax = {
 </main>
 
 <footer>
-  Pipeline mirror: Marked 15.0.6 in GFM mode with OpenReview’s HTML/image/checkbox renderers → DOMPurify 3.4.17 with OpenReview’s tag allowlist → MathJax 3.2.2 <code>tex-chtml-full</code> with <code>ui/safe</code>. Preview styling mirrors <code>.note-content .markdown-rendered</code> from the live openreview.net stylesheet — Noto Sans 12px/18px, 8px block gaps, rule-only tables — so at 100% zoom it is 1:1 with the site. Line <em>wrapping</em> still depends on the reader’s window width and reply depth, which no previewer can pin down. This follows the current <a href="https://github.com/openreview/openreview-web" target="_blank" rel="noopener">openreview-web implementation</a>; the live service can change, so give the posted comment one last glance. Drafts autosave only on this device. Rebuttal Bench is an independent tool, not affiliated with or endorsed by OpenReview.
+  Pipeline mirror: Marked 15.0.6 in GFM mode with OpenReview’s HTML/image/checkbox renderers → DOMPurify 3.4.17 with OpenReview’s tag allowlist → MathJax 3.2.2 <code>tex-chtml-full</code> with <code>ui/safe</code>. Preview styling mirrors <code>.note-content .markdown-rendered</code> from the live openreview.net stylesheet (Noto Sans 12px/18px, 8px block gaps, rule-only tables), so at 100% zoom it is 1:1 with the site. Line <em>wrapping</em> still depends on the reader’s window width and reply depth, which no previewer can pin down. This follows the current <a href="https://github.com/openreview/openreview-web" target="_blank" rel="noopener">openreview-web implementation</a>; the live service can change, so give the posted comment one last glance. Drafts autosave only on this device. Rebuttal Bench is an independent tool, not affiliated with or endorsed by OpenReview.
+  <span class="foot-meta">Rebuttal Bench <span id="appVersion"></span> · <a id="reportLink" href="https://github.com/infinitr0us/rebuttal-bench/issues/new?template=problem.yml" target="_blank" rel="noopener" title="Opens a GitHub issue form with this page's version, your browser and the venue filled in. Issues are public: paste only a small example, rewritten so it says nothing about your paper.">Report a problem</a> · <a id="ideaLink" href="https://github.com/infinitr0us/rebuttal-bench/issues/new?template=idea.yml" target="_blank" rel="noopener">Suggest an idea</a></span>
 </footer>
 
 <div class="modal" id="splitDialog" hidden>
@@ -1287,6 +1320,9 @@ var PUNCT = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~';
 function isPunct(c) { return !!c && c.length === 1 && PUNCT.indexOf(c) !== -1; }
 function isAlnum(c) { return /[A-Za-z0-9]/.test(c || ''); }
 function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+/* Letters and digits of the common scripts: a word's boundary. Not "_" (a
+   Markdown emphasis delimiter) or punctuation such as curly quotes. */
+var WORD_CHAR = new RegExp('[0-9A-Za-z\u00aa\u00b5\u00ba\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02af\u0370-\u03ff\u0400-\u052f\u0590-\u06ff\u0900-\u0dff\u0e00-\u0eff\u1e00-\u1fff\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]');
 
 function computeLineStarts(src) {
   var starts = [0];
@@ -2042,6 +2078,48 @@ function venueById(id) {
   return null;
 }
 
+/* ---- problem reports ---- */
+/* The page's version, shown in the footer and filled into a report, so a
+   report says which page it is about (a cached or downloaded copy can be
+   old). tests/page.test.js keeps it equal to package.json's version. */
+var APP_VERSION = '3.11.0';
+var REPO_URL = 'https://github.com/infinitr0us/rebuttal-bench';
+
+/* "Chrome 142 on Windows", from a user agent string. Edge and Opera also
+   name Chrome, Chrome also names Safari, iOS names Mac OS X and Android and
+   ChromeOS name Linux, so the order of the tests matters. */
+function browserLabel(ua) {
+  ua = typeof ua === 'string' ? ua : '';
+  var m, name = '';
+  if ((m = /\bEdg(?:e|A|iOS)?\/(\d+)/.exec(ua))) name = 'Edge ' + m[1];
+  else if ((m = /\bOPR\/(\d+)/.exec(ua))) name = 'Opera ' + m[1];
+  else if ((m = /\b(?:Firefox|FxiOS)\/(\d+)/.exec(ua))) name = 'Firefox ' + m[1];
+  else if ((m = /(?:Chrome|CriOS)\/(\d+)/.exec(ua))) name = 'Chrome ' + m[1];
+  else if (/\bSafari\//.test(ua) && (m = /\bVersion\/(\d+)/.exec(ua))) name = 'Safari ' + m[1];
+  var os = /Windows/.test(ua) ? 'Windows' : /iPhone|iPad|iPod/.test(ua) ? 'iOS'
+    : /Macintosh|Mac OS X/.test(ua) ? 'macOS' : /Android/.test(ua) ? 'Android'
+    : /CrOS/.test(ua) ? 'ChromeOS' : /Linux/.test(ua) ? 'Linux' : '';
+  return name && os ? name + ' on ' + os : name || os;
+}
+
+/* A new GitHub issue whose form (.github/ISSUE_TEMPLATE) is filled in with
+   what helps to reproduce a problem, by the fields' ids. Nothing of the
+   drafts goes in: issues are public, so the form asks for a small example
+   the author rewrites. Empty fields are left out. */
+function reportUrl(template, fields) {
+  var q = ['template=' + encodeURIComponent(template)];
+  Object.keys(fields || {}).forEach(function (k) {
+    if (fields[k]) q.push(encodeURIComponent(k) + '=' + encodeURIComponent(fields[k]));
+  });
+  return REPO_URL + '/issues/new?' + q.join('&');
+}
+
+/* A venue as a report names it: the longer of its label and its name, so
+   "NeurIPS 2026" keeps its year and "OpenReview default rebuttal" its form. */
+function reportVenue(venue) {
+  return !venue ? '' : venue.label.length >= venue.name.length ? venue.label : venue.name;
+}
+
 var LINK_SHORTENERS = /^(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|is\.gd|buff\.ly|rebrand\.ly|cutt\.ly|shorturl\.at|tiny\.cc|rb\.gy|s\.id)$/;
 
 function linkHost(href) {
@@ -2095,7 +2173,28 @@ function visibleHtml(html) {
     .replace(new RegExp('\\s+(<\\/?' + BLOCK_TAG + '\\b[^>]*>)', 'g'), '$1');
 }
 
+/* Parse the author's private anonymity word list: one entry per line,
+   trimmed with inner whitespace collapsed, dropping empty lines, entries
+   shorter than two characters and case-insensitive duplicates (keeping
+   the first spelling), capped at 50 entries of 100 characters each. */
+function identityTerms(text) {
+  if (typeof text !== 'string') return [];
+  var out = [], seen = Object.create(null);
+  var lines = text.split(/\r\n?|[\n\u2028\u2029]/);
+  for (var i = 0; i < lines.length && out.length < 50; i++) {
+    var term = lines[i].trim().replace(/\s+/g, ' ');
+    if (term.length > 100) term = term.slice(0, 100).trim();
+    if (term.length < 2) continue;
+    var key = term.toLowerCase();
+    if (seen[key]) continue;
+    seen[key] = true;
+    out.push(term);
+  }
+  return out;
+}
+
 /* `opts.venue`: the id of a VENUES preset, whose link rule then applies.
+   `opts.identity`: array of terms from the author's anonymity word list.
    OpenReview trims a comment when it posts it (constructEdit in
    client/view-v2.js), so the checks read the comment as posted and every
    offset they report is moved back into the editor's text; edits keep
@@ -2226,6 +2325,121 @@ function analyzeText(src, opts) {
     return k === 0 || src[k - 1] === '\n';
   }
 
+  /* What the author meant, where Markdown and TeX read a character
+     differently. The field audit (reviews/2026-11-27/codex-field-audit: 1,300
+     real author responses) found Fix all "repairing" formulas that already
+     showed what their authors meant; these helpers tell those apart. */
+
+  /* A $ typed with one (consumed) backslash: meant as a currency sign. */
+  function slashedDollar(at) { return src[at] === '$' && countBackslashesBefore(src, at) % 4 === 1; }
+  /* TeX in a formula's source: a control word, a script, a brace. */
+  var TEXISH = /\\[A-Za-z]|[\^_{}]/;
+  /* A \$ with no partner MathJax pairs it with. It shows as typed for now, so
+     the fix (which renders the same) only guards against a later $. */
+  function unprotectedLone(at) {
+    var slashRun = countBackslashesBefore(src, at);
+    push('warn', '\\$ is not protected after Markdown',
+      'Markdown consumes the final source backslash, leaving an even number before <code>$</code>, so MathJax still sees a delimiter. It has no partner in its paragraph, so for now it shows as typed, but a later <code>$</code> in the paragraph would pair with it. For a literal currency sign type <code>\\\\$</code>.',
+      at - slashRun, at + 1,
+      fix('\\\\$', [literalDollar(at)]));
+  }
+  /* Whether a formula that Markdown cuts (inline emphasis, a block boundary)
+     was meant as one. Pairing the leftover signs of prices ("**$484**) vs. B
+     ($") or of escaped currency signs ("\$12 each … \$?") explains nothing:
+     MathJax never sees those signs together, and their author never meant
+     them as math, so a "repair" would make a formula of prose. `strip` is the
+     cutting emphasis's delimiter character, left out of the content. */
+  function meantAsFormula(sp, strip) {
+    var inner = src.slice(sp.innerStart, sp.innerEnd);
+    if (sp.delimiter === 'dollar') {
+      /* The signs of two prices: an amount after the first, and after the
+         second whatever it opens, the next amount or a formula ("__$5__
+         versus __$8__", "**$484**) vs. B ($\approx$", "**$5** for $n$"). A
+         formula's closing sign is followed by a space or punctuation
+         ("$2 + a*b*c$."). Tested first: the prose between prices can hold an
+         underscore ("GPU_hour") that looks like TeX. */
+      if (afterDollar(src.slice(sp.openAt + 1, sp.openAt + 4)) === 'amount' &&
+          afterDollar(src.slice(sp.closeAt + 1, sp.closeAt + 4)) !== 'closes') return false;
+      if (slashedDollar(sp.openAt) || slashedDollar(sp.closeAt)) return TEXISH.test(inner);
+    }
+    /* "__$5__": underscores that make bold are no subscripts */
+    if ((strip === '_' ? /\\[A-Za-z]|[\^{}]/ : TEXISH).test(inner)) return true;
+    var bare = strip ? inner.split(strip).join('') : inner;
+    /* Prose, no TeX: a pairing shifted by a price ("**$5** for $n$
+       samples, or **$6**" pairs "$ samples, or **$"). */
+    if (/[A-Za-z]{2,}[\s,;]+[A-Za-z]{2,}/.test(bare)) return false;
+    return WORD_CHAR.test(bare);
+  }
+  /* The braces MathJax takes as group braces in a formula's source (typed bare,
+     or with one backslash that Markdown consumes; "\\{" reaches MathJax as a
+     literal \{), matched: partner position by position. */
+  function braceGroups(sp) {
+    if (sp.braceGroups) return sp.braceGroups;
+    var pairOf = Object.create(null), stack = [];
+    for (var k = sp.innerStart; k < sp.innerEnd; k++) {
+      if ((src[k] !== '{' && src[k] !== '}') || codeMask[k] || countBackslashesBefore(src, k) % 4 > 1) continue;
+      if (src[k] === '{') stack.push(k);
+      else if (stack.length) { var o = stack.pop(); pairOf[o] = k; pairOf[k] = o; }
+    }
+    return (sp.braceGroups = pairOf);
+  }
+  /* Control words whose next group is their argument ("\sqrt\{n+1\}"), unlike
+     relations, operators and delimiter sizes ("\in \{0,1\}", "\left\{"). */
+  var ARG_CMD = /^(?:sqrt|[dtc]?frac|[dt]?binom|math(?:bf|rm|cal|bb|it|sf|tt|frak|scr|op|rel|bin|ord)|boldsymbol|bm|pmb|text(?:bf|it|rm|tt|sf|up|normal)?|mbox|hbox|fbox|boxed|hat|widehat|tilde|widetilde|bar|overline|underline|vec|dot|ddot|acute|grave|breve|check|overrightarrow|overleftarrow|overbrace|underbrace|overset|underset|stackrel|operatorname|substack|color|textcolor|phantom|hphantom|vphantom|cancel|xrightarrow|xleftarrow|label|tag|ref|eqref|pmod|pod|bmod)$/;
+  /* What precedes the brace at `at` in its formula, spaces and the brace's own
+     backslash aside: the character, and the control word ending there. */
+  function beforeBrace(sp, at) {
+    var k = at - 1;
+    while (k >= sp.innerStart && src[k] === '\\') k--;
+    while (k >= sp.innerStart && /\s/.test(src[k])) k--;
+    var cw = k >= sp.innerStart ? /\\([A-Za-z]+)\*?$/.exec(src.slice(sp.innerStart, k + 1)) : null;
+    return { ch: k >= sp.innerStart ? src[k] : '', word: cw ? cw[1] : null };
+  }
+  /* A { that surely opens a group: right after ^ or _, or after a command
+     that takes an argument. Such a brace gets no card. */
+  function opensGroup(sp, at) {
+    var b = beforeBrace(sp, at);
+    return b.ch === '^' || b.ch === '_' || (!!b.word && ARG_CMD.test(b.word));
+  }
+  /* Relations, operators and delimiter sizes a set follows: "x \in \{0,1\}",
+     "A \cup \{x\}", "\left\{". */
+  var SET_PREV = /^(?:in|notin|ni|subset|subseteq|subsetneq|supset|supseteq|supsetneq|cup|cap|setminus|times|left|[bB]igg?l?|mid|colon|equiv|neq|ne|le|leq|ge|geq|to|mapsto|cdot|sim|approx)$/;
+  /* A consumed brace whose fix leaves no doubt: one of a pair typed "\{ … \}"
+     that opens where only a set can, at the start of the formula, after
+     = ( , : | < > +, or after a relation or a delimiter size. Elsewhere
+     ("\bigcup_{i=1}^{n}\{x_i\}", "\label\{eq:x\}") the author decides. */
+  function setBraces(sp, j) {
+    var partner = braceGroups(sp)[j];
+    /* Unmatched, the bare brace is broken TeX: the author meant a literal one. */
+    if (partner === undefined) return true;
+    if (countBackslashesBefore(src, partner) % 4 !== 1) return false;
+    var b = beforeBrace(sp, src[j] === '{' ? j : partner);
+    return b.ch === '' || /[=(,:|<>+]/.test(b.ch) || (!!b.word && SET_PREV.test(b.word));
+  }
+  /* A consumed "\X" (at i, the character at j) that already gives MathJax what
+     the author meant, so the TeX control symbol \X would change a formula
+     that shows correctly:
+     - bars composed into a double bar, "\|\|h\|\|" or "|\|" ("||h||"); any
+       other \| gets its card, with a fix decided for the whole formula
+       (check 3);
+     - "\&" in an alignment, where & is the column separator;
+     - a brace that groups: matched with a bare brace ("\sqrt\{n+1}",
+       "\mathbf{x\}"), where literal braces would unbalance the formula, or
+       opening a group (opensGroup: "R^\{P\}", "\sqrt\{n+1\}"). Set braces,
+       "\{x_i\}" or "\in \{0,1\}", still get the fix. */
+  function shieldMeant(sp, i, j, next) {
+    if (next === '|') return src[i - 1] === '|' || src[j + 1] === '|' || (src[j + 1] === '\\' && src[j + 2] === '|');
+    if (next === '&') {
+      var c = texContextAt(src, sp.innerStart, i);
+      return c.row && !c.text;
+    }
+    if (next !== '{' && next !== '}') return false;
+    var partner = braceGroups(sp)[j];
+    if (partner === undefined) return false;
+    if (countBackslashesBefore(src, partner) % 4 === 0) return true;
+    return opensGroup(sp, next === '{' ? j : partner);
+  }
+
   /* 1. Delimiters MathJax cannot pair within their own paragraph. */
   scan.lone.forEach(function (u) {
     if (u.kind === '\\)' || u.kind === '\\]') {
@@ -2248,16 +2462,12 @@ function analyzeText(src, opts) {
       return;
     }
     /* In an HTML block shown as text there are no Markdown escapes to fix. */
-    var slashRun = countBackslashesBefore(src, u.at);
-    if (u.kind === '$' && !u.literal && slashRun % 4 === 1) {
-      push('err', '\\$ is not protected after Markdown',
-        'Markdown consumes the final source backslash, leaving an even number before <code>$</code>; MathJax therefore still sees a delimiter. For a literal currency sign type <code>\\\\$</code>.',
-        u.at - slashRun, u.at + 1,
-        fix('\\\\$', [literalDollar(u.at)]));
+    if (u.kind === '$' && !u.literal && slashedDollar(u.at)) {
+      unprotectedLone(u.at);
     } else {
       var currency = u.kind === '$' && !u.literal && /^[-+−]?\d/.test(src.slice(u.at + 1, u.at + 3));
       push('warn', u.kind === '$$' ? 'Unpaired $$' : 'Unpaired $',
-        'MathJax finds no partner for this delimiter in its paragraph, so for now it shows as literal text — but any later <code>' + u.kind + '</code> in the same paragraph would pair with it and turn the prose in between into math. ' +
+        'MathJax finds no partner for this delimiter in its paragraph, so for now it shows as literal text, but any later <code>' + u.kind + '</code> in the same paragraph would pair with it and turn the prose in between into math. ' +
         (currency ? 'For a literal dollar sign type <code>\\\\$</code>.' : 'Add the missing closing delimiter, or type <code>\\\\$</code> for a literal dollar sign.'),
         u.start, u.end,
         currency ? fix('\\\\$', [literalDollar(u.at)]) : null);
@@ -2266,14 +2476,34 @@ function analyzeText(src, opts) {
 
   spans.forEach(function (sp) {
     if (sp.delimiter !== 'dollar' || sp.display || sp.literal) return;
-    [sp.openAt, sp.closeAt].forEach(function (at) {
+    var slashed = [sp.openAt, sp.closeAt].filter(slashedDollar);
+    if (!slashed.length) return;
+    /* MathJax never pairs the signs of a recovered span (they sit in different
+       blocks), so each one shows as typed for now, like a lone sign. */
+    if (sp.recovered) { slashed.forEach(unprotectedLone); return; }
+    /* Both signs escaped: currency only with prose between them and no TeX
+       ("\$5 and \$10", "\$5/hour and \$8/hour"), or an amount and a separator
+       ("\$5, \$10"). Around anything else, "(\$\tilde{P}\$)", "\$n=16\$",
+       "\$16\$", "\$2 - 1\$", the author may have escaped the delimiters for
+       Markdown, and MathJax typesets that formula. */
+    var pairInner = src.slice(sp.innerStart, sp.innerEnd), pairAfter = src.slice(sp.end, sp.end + 3);
+    /* The second sign must lead into the next amount: "\$16 GB\$ of memory"
+       is a quantity in a formula. */
+    var prices = afterDollar(pairAfter) === 'amount' && !TEXISH.test(pairInner) &&
+      (/[A-Za-z]{2,}/.test(pairInner) || /^\s*[-+−]?\d[\d,.]*[kKmMbB]?[\s,;\/–-]+$/.test(pairInner));
+    if (slashed.length === 2 && !prices && !looksLikeCurrencyPair(pairInner, pairAfter)) return;
+    slashed.forEach(function (at) {
       var slashRun = countBackslashesBefore(src, at);
-      if (slashRun % 4 === 1) {
-        push('err', 'Backslash does not protect this $',
-          'Markdown removes the final source backslash, and the remaining slash count is even, so MathJax still treats this <code>$</code> as a delimiter. Type <code>\\\\$</code> for a literal dollar sign.',
-          at - slashRun, at + 1,
-          fix('\\\\$', [literalDollar(at)]));
-      }
+      var autofix = fix('\\\\$', [literalDollar(at)]);
+      /* With one sign escaped, a literal sign frees its partner, which then
+         shows as typed or pairs with a later sign ("$A \approx $ \$ 369.65 $
+         dollars"): only the author can tell. (A price followed by a formula,
+         "costs \$5, and $x$", gets its automatic fix from the currency check
+         below.) */
+      if (autofix && slashed.length === 1) autofix.manual = true;
+      push('err', 'Backslash does not protect this $',
+        'Markdown removes the final source backslash, and the remaining slash count is even, so MathJax still treats this <code>$</code> as a delimiter. Type <code>\\\\$</code> for a literal dollar sign.',
+        at - slashRun, at + 1, autofix);
     });
   });
 
@@ -2381,17 +2611,62 @@ function analyzeText(src, opts) {
           i, Math.min(sp.innerEnd, j + 1),
           fix('\\\\' + next, [edit(i, j, bs(2))]));
       } else if (run === 1 && TEX_CTRL_SYMBOLS.indexOf(next) !== -1) {
-        if ((next === '|' && inTable(i)) || (next === '>' && atLineStart(i))) {
-          /* Correct shields: a GFM table cell separator, or a block quote
-             marker at the start of a line. MathJax receives the bare | or >. */
+        if ((next === '|' && inTable(i)) || (next === '>' && atLineStart(i)) || shieldMeant(sp, i, j, next)) {
+          /* Correct shields: a GFM table cell separator, a block quote marker at
+             the start of a line, or a character MathJax should receive bare
+             (shieldMeant). */
         } else {
+          var symFix = fix('\\\\' + next, [edit(i, j, bs(2))]);
+          /* Fix all repairs a consumed escape where the bare character cannot
+             be what the author meant: a visible comma or semicolon instead of
+             a space, # or a stray & (TeX errors), % (a comment). A bare {, }
+             or | is valid TeX with another meaning. "\|" may be an absolute
+             value ("\|r\|^2" of a scalar), a conditioning or evaluation bar
+             ("P(A \big\| B)", "F(t)\big\|\_{t=b}") or a KL separator
+             ("[q\|p]"): no context makes its fix certain, so it always waits
+             for the author's click. "\{" may shield a grouping brace
+             ("\label\{eq:x\}"): it is repaired unattended only where only a
+             set can open (setBraces). (codex-recheck-312: rules that guessed
+             had holes.) */
+          if (symFix && next === '|') symFix.manual = true;
+          if (symFix && (next === '{' || next === '}') && !setBraces(sp, j)) symFix.manual = true;
           push('warn', '\\' + next + ' is consumed by Markdown',
             'A single backslash before ASCII punctuation is removed before MathJax runs, so MathJax receives <code>' + escHtml(next) + '</code>. If you intended the TeX control symbol <code>\\' + escHtml(next) + '</code>, type <code>\\\\' + escHtml(next) + '</code>.',
-            i, j + 1,
-            fix('\\\\' + next, [edit(i, j, bs(2))]));
+            i, j + 1, symFix);
         }
       }
       i = Math.max(j, i + 1);
+    }
+
+    /* A bare % is a TeX comment: MathJax drops it and the rest of its line of
+       the formula, with no error ("$78.1%$" shows 78.1). Only an unmistakable
+       percentage is reported: right after a digit, and right before the end
+       of the formula or a closing bracket or separator ("$78.1%$",
+       "\text{top 10%}"). Anything after it may be a comment its author meant,
+       as in LaTeX: "% \vspace{-1mm}", "x=1%\quad + 2" (an addend switched
+       off), "x=1 % fixed in all runs". Inside \verb the sign shows as typed. */
+    var verbs = [], vm, verbRe = /\\verb\*?([^A-Za-z\s*])/g, innerText = src.slice(sp.innerStart, sp.innerEnd);
+    while ((vm = verbRe.exec(innerText))) {
+      var vEnd = innerText.indexOf(vm[1], verbRe.lastIndex);
+      vEnd = vEnd < 0 ? innerText.length : vEnd + 1;
+      verbs.push({ start: sp.innerStart + vm.index, end: sp.innerStart + vEnd });
+      verbRe.lastIndex = vEnd;
+    }
+    for (var pc = sp.innerStart; !sp.literal && !sp.recovered && pc < sp.innerEnd; pc++) {
+      if (src[pc] !== '%' || codeMask[pc] || countBackslashesBefore(src, pc) % 4 !== 0) continue;
+      if (!/\d$/.test(src.slice(sp.innerStart, pc))) continue;
+      if (verbs.some(function (v) { return pc >= v.start && pc < v.end; })) continue;
+      var lineEnd = src.indexOf('\n', pc);
+      var lastLine = lineEnd < 0 || lineEnd >= sp.innerEnd || !/\S/.test(src.slice(lineEnd, sp.innerEnd));
+      var lost = src.slice(pc + 1, lastLine ? sp.innerEnd : lineEnd);
+      /* At the end of a line with more lines after it, "%" joins the lines,
+         as LaTeX authors write it ("x=1%" then "+y"). */
+      if (!/^\s*[)\]},;]/.test(lost) && !(lastLine && /^\s*$/.test(lost))) continue;
+      push('err', 'A bare % starts a TeX comment',
+        'MathJax reads <code>%</code> as the start of a TeX comment, so the percent sign' +
+        (/\S/.test(lost) ? ' and the rest of its line (<code>' + escHtml(lost.trim().slice(0, 40)) + '</code>)' : '') +
+        ' disappear from the formula. Type <code>\\\\%</code>, which reaches MathJax as <code>\\%</code>.',
+        pc, pc + 1, fix('\\\\%', [edit(pc, pc, bs(2))]));
     }
 
     if (sp.why === 'blank') {
@@ -2452,20 +2727,28 @@ function analyzeText(src, opts) {
       var sp = spans[s];
       if (!rangeOverlaps(r, sp) || rangeWraps(r, sp)) continue;
       sp.cut = true; /* MathJax never sees this formula whole (texProblemIssues) */
-      if (reported) continue;
+      var emph = r.type === 'em' || r.type === 'strong' || r.type === 'del';
+      if (reported || !meantAsFormula(sp, emph ? src[r.start] : null)) continue;
       reported = true;
       var raw = src.slice(r.start, r.end);
       var offset = (r.type === 'link' || r.type === 'image') ? Math.max(0, raw.indexOf('[')) : 0;
       var hs = r.start + offset;
       var he = Math.min(r.end, hs + (r.type === 'strong' ? 2 : 1));
-      var autofix = (r.type === 'em' || r.type === 'strong' || r.type === 'del') ? emphasisFix(r) : null;
-      push('err', risky[r.type][0], risky[r.type][1], hs, he, autofix);
+      var autofix = emph ? emphasisFix(r) : null;
+      var detail = risky[r.type][1];
+      /* In \text{…} the escaped delimiters reach MathJax as typed text: the
+         formula comes back, but "**word**" shows its stars instead of bold. */
+      if (autofix && texContextAt(src, sp.innerStart, Math.max(sp.innerStart, Math.min(r.start, sp.innerEnd))).text) {
+        autofix.manual = true;
+        detail += ' Inside <code>\\text{…}</code> the escaped stars then show as typed; for bold or italic words in a formula use <code>\\textbf{…}</code> or <code>\\textit{…}</code>.';
+      }
+      push('err', risky[r.type][0], detail, hs, he, autofix);
     }
   });
 
   var blockTypes = { paragraph: 1, heading: 1, blockquote: 1, list: 1, list_item: 1, table: 1, code: 1, hr: 1, def: 1 };
   spans.forEach(function (sp) {
-    if (sp.why !== 'block') return;
+    if (sp.why !== 'block' || !meantAsFormula(sp, null)) return;
     var cuts = markedRanges.filter(function (r) {
       return !r.inline && blockTypes[r.type] && rangeOverlaps(r, sp) && !rangeWraps(r, sp);
     });
@@ -2532,19 +2815,37 @@ function analyzeText(src, opts) {
 
   /* 7. Indented text that Marked turns into a code block. Only TeX-looking
         blocks are flagged, and only unmistakable TeX gets the unindent fix, so
-        a deliberate shell snippet with $HOME or a Windows path is left alone. */
-  var TEXISH = /\$[^$\n]+\$|\\[a-zA-Z]{2,}/;
+        a deliberate shell snippet with $HOME or a Windows path is left alone.
+        Two prices on one line ("$7.50 each and $5.00") are not TeX either. */
   /* Positive evidence for the fix: a control word taking an argument, a
      subscript or a superscript, or one inside $…$ ("dir src\utils" is not). */
   var TEXWORD = /\\[a-zA-Z]{2,}\s*[{_^]|\$[^$\n]*\\[a-zA-Z]{2,}[^$\n]*\$/;
   /* Windows paths are not TeX: C:\data, \\server\share, src\utils\run.py. */
   var WINPATH = /[A-Za-z]:\\[^\s"'`]*|\\\\[^\s"'`\\]+\\[^\s"'`]*|[\w.-]+(?:\\[\w.-]+)+\.[A-Za-z0-9]{1,5}\b/g;
+  function indentedTeXish(text) {
+    if (/\\[a-zA-Z]{2,}/.test(text)) return true;
+    var re = /\$([^$\n]+)\$/g, m;
+    while ((m = re.exec(text))) {
+      var inner = m[1], after = text.slice(re.lastIndex);
+      /* Skip dollar pairs formed by two prices on one line, e.g.
+         "$7.50 each and $5.00" or "$7.50 = $15.00". */
+      var pricePair = !/[\\^_{}]/.test(inner) &&
+        /^\d[\d,.]*[kKmMbB]?(?:\s|[.,;:\-–—\/~])/.test(inner) &&
+        /[\s\-–—\/~+×=]$/.test(inner) &&
+        /^\d/.test(after);
+      if (!pricePair) return true;
+      /* The second price's sign may open a formula ("costs $5 and we use $2n$
+         GPUs"): scan on from it. */
+      re.lastIndex = m.index + 1 + inner.length;
+    }
+    return false;
+  }
   var sawExactIndented = false;
   markedRanges.forEach(function (r) {
     if (r.type !== 'code' || !r.token || r.token.codeBlockStyle !== 'indented') return;
     sawExactIndented = true;
     var body = src.slice(r.start, r.end), texBody = body.replace(WINPATH, ' ');
-    if (!TEXISH.test(texBody)) return;
+    if (!indentedTeXish(texBody)) return;
     var unindent = [], pos = r.start, lines = body.split('\n');
     for (var k = 0; k < lines.length; k++) {
       var lead = lines[k].match(/^(?: {1,4}|\t)/);
@@ -2560,7 +2861,7 @@ function analyzeText(src, opts) {
   if (!sawExactIndented && !model) {
     fallbackCodeRanges(src).forEach(function (r) {
       var raw = src.slice(r.start, r.end);
-      if (/^(?: {4}|\t)/.test(raw) && TEXISH.test(raw.replace(WINPATH, ' '))) {
+      if (/^(?: {4}|\t)/.test(raw) && indentedTeXish(raw.replace(WINPATH, ' '))) {
         push('warn', 'Indented text may be a code block',
           'Markdown can treat this indentation as code, which MathJax skips. Remove the leading indentation when the TeX should render.',
           r.start, Math.min(r.end, r.start + 8));
@@ -2648,14 +2949,25 @@ function analyzeText(src, opts) {
         struck[r.start] = struck[r.end - 1] = standalone ? 'standalone' : 'tie';
       } else if (r.type === 'html' && !codeMask[r.start]) {
         /* An inline token is one tag. A block such as <details> can contain
-           several tags and comments; quoted attributes can contain '>'. */
+           several tags and comments; quoted attributes can contain '>'. Only
+           real HTML elements and comments are flagged; invented angle-bracket
+           tokens such as <think> or <Goal> are meant to appear as typed. */
+        /* The elements of HTML markup and page structure (legacy ones too, and
+           inline SVG and MathML roots). Form and metadata elements named by
+           plain words (input, output, label, title, data, option, source,
+           select...) are left out: in a rebuttal "<input>" and "<output>" are
+           far more often a prompt's tokens than markup (codex-review-312). */
+        var htmlTags = /^(?:a|abbr|acronym|address|article|aside|audio|b|bdi|bdo|big|blink|blockquote|br|canvas|caption|center|cite|code|col|colgroup|dd|del|details|dfn|dir|div|dl|dt|em|figcaption|figure|font|footer|h[1-6]|header|hgroup|hr|i|iframe|img|ins|kbd|li|main|mark|marquee|math|nav|nobr|ol|p|picture|pre|q|rp|rt|ruby|s|samp|section|small|span|strike|strong|sub|summary|sup|svg|table|tbody|td|tfoot|th|thead|tr|tt|u|ul|var|video|wbr)$/;
         var tagRe = /<!--(?:-?>|[\s\S]*?(?:-->|$))|<\/?([A-Za-z][\w:-]*)(?=[\s/>])(?:[^<>"']|"[^"]*"|'[^']*')*>|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<![A-Za-z]+\s[^>]*>/g;
         var raw = src.slice(r.start, r.end), m;
         while ((m = tagRe.exec(raw))) {
           var start = r.start + m.index, end = r.start + tagRe.lastIndex;
-          if (!protectedText[start]) tags.push({ start: start, end: end, raw: m[0],
-            name: (m[1] || '').toLowerCase(), inline: r.inline });
-          protect(start, end);
+          var tagName = (m[1] || '').toLowerCase();
+          if (m[0].slice(0, 4) === '<!--' || htmlTags.test(tagName)) {
+            if (!protectedText[start]) tags.push({ start: start, end: end, raw: m[0],
+              name: tagName, inline: r.inline });
+            protect(start, end);
+          }
         }
       } else if (r.type === 'image' && !codeMask[r.start]) {
         if (r.token.href.indexOf('/images/') !== 0) images.push(r);
@@ -2736,20 +3048,73 @@ function analyzeText(src, opts) {
       }
     }
 
-    /* 13. The mirrored h4–h6 rules set 12px and font-weight 400. */
+    /* 13. The mirrored h4–h6 rules set 12px and font-weight 400. A heading
+           whose whole visible content is already bold (allowing spaces and
+           punctuation beside the bold) does not look like plain body text. */
+    function headingIsBold(tokens) {
+      if (!Array.isArray(tokens) || !tokens.length) return false;
+      var hasStrong = false;
+      for (var i = 0; i < tokens.length; i++) {
+        var tk = tokens[i];
+        if (tk.type === 'strong') {
+          if (tk.text && /\S/.test(tk.text)) hasStrong = true;
+        } else if ((tk.type === 'em' || tk.type === 'del' || tk.type === 'link') && headingIsBold(tk.tokens)) {
+          hasStrong = true;
+        } else if ((tk.type === 'text' || tk.type === 'escape') && /^[\s.,:;!?\-–—/()\[\]"'“”‘’]*$/.test(tk.text || '')) {
+          /* spaces or punctuation outside the bold */
+        } else {
+          return false;
+        }
+      }
+      return hasStrong;
+    }
     headings.forEach(function (r) {
+      if (headingIsBold(r.token.tokens)) return;
       var marker = /^ *(#{4,6})/.exec(r.token.raw);
       if (marker) push('note', 'This heading looks like body text',
         'OpenReview uses the body text’s size and regular weight for level 4–6 headings. Use <code>###</code> or bold text for more emphasis.',
         r.start + marker[0].length - marker[1].length, r.start + marker[0].length);
     });
 
-    /* 14. Pasted LaTeX prose. Work within each remaining text run so that
-           braces and quote marks cannot pair through code, math or a link
-           destination. Autolinked URLs may still be arguments of \href/\url. */
+    /* 14. Pasted LaTeX prose and undelimited math commands. Work within each
+           remaining text run so that braces and quote marks cannot pair through
+           code, math or a link destination. Autolinked URLs may still be
+           arguments of \href/\url. */
+    var MATH_CMD_LIST = 'alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega|' +
+      'varepsilon|vartheta|varkappa|varpi|varrho|varsigma|varphi|' +
+      'Gamma|Delta|Theta|Lambda|Xi|Pi|Sigma|Upsilon|Phi|Psi|Omega|' +
+      'varGamma|varDelta|varTheta|varLambda|varXi|varPi|varSigma|varUpsilon|varPhi|varPsi|varOmega|' +
+      'frac|dfrac|tfrac|sqrt|sum|prod|int|oint|lim|limsup|liminf|log|ln|exp|max|min|arg|sup|inf|det|' +
+      'leq|le|geq|ge|neq|ne|approx|sim|simeq|equiv|propto|in|notin|subset|subseteq|supset|supseteq|' +
+      'cup|cap|setminus|cdot|cdots|ldots|times|div|pm|mp|infty|partial|nabla|forall|exists|top|bot|' +
+      'mathbf|mathbb|mathcal|mathrm|mathit|boldsymbol|hat|tilde|bar|vec|dot|ddot|overline|widehat|widetilde|' +
+      'left|right|langle|rangle|lVert|rVert|mid|to|rightarrow|leftarrow|Rightarrow|mapsto|operatorname|star|circ|ell';
+    var mathCmdRe = new RegExp('\\\\(' + MATH_CMD_LIST + ')(?![A-Za-z])', 'g');
+    var mathCmdExact = new RegExp('^(?:' + MATH_CMD_LIST + ')$');
+    /* Skip formulas Check 2 already flagged as \(…\)/\[…\], and formulas whose
+       $…$ delimiters were stolen by an already-reported cut or currency span. */
+    var degradedRanges = [];
+    var currencyStarts = Object.create(null), unpairedDollars = Object.create(null);
+    issues.forEach(function (iss) {
+      if (/loses its MathJax delimiters$/.test(iss.title) && iss.fix && iss.fix.edits.length === 2) {
+        degradedRanges.push({ start: iss.fix.edits[0].start, end: iss.fix.edits[1].end });
+      } else if (iss.title === 'Currency dollars pair into a formula') {
+        currencyStarts[iss.start] = true;
+      } else if (iss.title === 'Unpaired $') {
+        unpairedDollars[iss.start] = true;
+      }
+    });
+    var degradedMask = makeMask(src.length, degradedRanges);
+    var quoteMask = makeMask(src.length, markedRanges.filter(function (r) { return r.type === 'blockquote'; }));
+    var shiftedOpen = Object.create(null), shiftedClose = Object.create(null);
+    spans.forEach(function (sp) {
+      if (sp.cut || currencyStarts[sp.start]) shiftedOpen[sp.end] = true;
+      if (sp.cut) shiftedClose[sp.start] = true;
+    });
+    Object.keys(unpairedDollars).forEach(function (k) { shiftedClose[k] = true; });
     function checkRun(start, end, literalBlock) {
       var raw = src.slice(start, end), m;
-      var commands = /\\(textbf|textit|emph|texttt|url|href|underline|cite(?:author|year|p|t)?)(?![A-Za-z])/g;
+      var commands = /\\(textbf|textit|emph|texttt|url|href|underline|footnote|cite(?:author|year|p|t)?)(?![A-Za-z])/g;
       var closeBrace;
       function argument(after) {
         while (after < raw.length && /\s/.test(raw[after])) after++;
@@ -2776,6 +3141,7 @@ function analyzeText(src, opts) {
         }
         var detail = 'OpenReview displays this LaTeX command in the prose. Markdown can express the formatting.';
         if (/^cite/.test(cmd)) detail = 'OpenReview has no bibliography for a comment. Write the reference out so reviewers can identify the work.';
+        else if (cmd === 'footnote') detail = 'OpenReview does not support footnotes and displays this command as typed. Write the note inline.';
         else if (cmd === 'underline') detail = 'Markdown has no underline syntax. Use bold or italics if the text needs emphasis.';
         else if (!arg || (cmd === 'href' && !second)) detail = 'This command needs balanced braced arguments in the same text run. Check the braces before converting it to Markdown.';
         else if (!literalBlock) {
@@ -2785,6 +3151,71 @@ function analyzeText(src, opts) {
         }
         push('warn', '\\' + cmd + ' is shown outside math', detail, at, last,
           out === null ? null : manual(cmd === 'url' ? 'keep the URL' : 'convert to Markdown', at, last, out));
+      }
+      if (!literalBlock) {
+        var shiftedEnd = -1;
+        if (shiftedOpen[start] && src[start - 1] === '$') {
+          if (shiftedClose[end] && src[end] === '$') shiftedEnd = end;
+          else {
+            for (var sd = start; sd < end; sd++) {
+              if (src[sd] === '$' && shiftedClose[sd]) { shiftedEnd = sd; break; }
+            }
+          }
+        }
+        var hits = [];
+        mathCmdRe.lastIndex = 0;
+        while ((m = mathCmdRe.exec(raw))) {
+          var mAt = start + m.index, mEnd = m.index + m[0].length;
+          if (mAt < shiftedEnd || urlMask[mAt] || degradedMask[mAt] || countBackslashesBefore(src, mAt) % 2) continue;
+          /* Skip path-like runs: C:\top, \\srv\share\top, src\min\run.py, \theta\data. */
+          var tokS = m.index, tokE = mEnd;
+          while (tokS > 0 && !/[\s"'`()[\]{},;]/.test(raw[tokS - 1])) tokS--;
+          while (tokE < raw.length && !/[\s"'`()[\]{},;]/.test(raw[tokE])) tokE++;
+          var token = raw.slice(tokS, tokE);
+          if (/^[A-Za-z]:\\|^\\\\/.test(token) || /^[\w.-]+(?:\\[\w.-]+)+\.[A-Za-z0-9]{1,5}$/.test(token)) continue;
+          /* Right after a word with a small letter (not a control word), it is
+             a path's segment, "results\min"; after one letter or an acronym
+             it is TeX, "T\geq", "RMSE\leq". A quote of the review keeps the
+             reviewer's words as they were typed. */
+          if (/(?:^|[^\\A-Za-z])(?=[A-Za-z]*[a-z])[A-Za-z]{2,}$/.test(raw.slice(0, m.index)) || quoteMask[mAt]) continue;
+          var nextCmd = raw[mEnd] === '\\' ? /^\\([A-Za-z]+)(?![A-Za-z])/.exec(raw.slice(mEnd)) : null;
+          if (raw[mEnd] === '\\' && !(nextCmd && mathCmdExact.test(nextCmd[1])) && /^\\[A-Za-z0-9._-]+/.test(raw.slice(mEnd))) continue;
+          var prevSeg = raw[m.index - 1] !== '_' ? /\\([A-Za-z0-9._-]+)$/.exec(raw.slice(tokS, m.index)) : null;
+          if (prevSeg && !mathCmdExact.test(prevSeg[1])) continue;
+          /* Skip a command quoted by itself as a macro name, e.g. the macro "\alpha". */
+          var ql = src[mAt - 1] || '', qr = src[start + mEnd] || '', qr2 = src[start + mEnd + 1] || '';
+          var pair = ql === '"' ? '"' : ql === '\u201c' ? '\u201d' : ql === "'" ? "'" : ql === '\u2018' ? '\u2019' : '';
+          if (pair && (qr === pair || (/[.,;:!?]/.test(qr) && qr2 === pair))) continue;
+          var ext = mEnd;
+          for (var ar = 0; ar < 2; ar++) {
+            if (raw[ext] !== '{') break;
+            var ma = argument(ext);
+            if (!ma) break;
+            ext = ma.end;
+          }
+          if ((raw[ext] === '_' || raw[ext] === '^') && raw[ext + 1] === '{') {
+            var sc = argument(ext + 1);
+            if (sc) ext = sc.end;
+          }
+          hits.push({ name: m[1], start: m.index, end: ext });
+        }
+        /* Group adjacent commands belonging to one expression into a single card. */
+        for (var hi = 0; hi < hits.length; hi++) {
+          var grp = hits[hi], gEnd = grp.end;
+          while (hi + 1 < hits.length) {
+            var nx = hits[hi + 1];
+            if (nx.start < gEnd) { gEnd = Math.max(gEnd, nx.end); hi++; continue; }
+            var gap = raw.slice(gEnd, nx.start);
+            if (gap.length <= 24 && !/[\n.;:!?]/.test(gap) &&
+                !/[A-Za-z]{2,}/.test(gap.replace(/\\[A-Za-z]+/g, ' '))) {
+              gEnd = Math.max(gEnd, nx.end);
+              hi++;
+            } else break;
+          }
+          push('warn', '\\' + grp.name + ' is shown outside math',
+            'OpenReview shows this TeX as typed outside math delimiters. Put the expression between <code>$…$</code> so MathJax typesets it. To name the command itself, as in a reviewer\'s question about <code>\\' + grp.name + '</code>, put it in backticks instead.',
+            start + grp.start, start + gEnd);
+        }
       }
       var quotes = /``([^`\n]+?)''/g;
       while ((m = quotes.exec(raw))) {
@@ -2797,6 +3228,11 @@ function analyzeText(src, opts) {
         var pos = start + p, left = src[pos - 1], right = src[pos + 1];
         if (!left || !right || /[\s~/]/.test(left) || /[\s~/]/.test(right) ||
             struck[pos] === 'standalone' || urlMask[pos] || countBackslashesBefore(src, pos) % 2) continue;
+        /* A bare tilde outside strikethrough is only a LaTeX tie between a
+           word of at least two letters (optionally with a period) and a label,
+           not an approximation or numeric range such as (~2GB) or 2K~4K. */
+        if (!struck[pos] && (!(/(?:^|[^A-Za-z0-9])[A-Za-z]{2,}\.?$/.test(raw.slice(0, p))) ||
+            !/[0-9A-Za-z\\(\[]/.test(right))) continue;
         push(struck[pos] ? 'err' : 'warn', struck[pos] ? 'LaTeX tie became strikethrough' : 'LaTeX tie is shown as a tilde',
           struck[pos] ? 'Marked paired two single tildes and crossed out the intervening text. Use a space for a LaTeX tie.'
             : 'A LaTeX tie in prose appears as a tilde. Use a space between the words.',
@@ -2863,17 +3299,41 @@ function analyzeText(src, opts) {
     /* a cross-reference to fill in: "Table X", "Fig. ??", "Section~XX", "Fig.X" */
     { re: /\b(?:(?:Tables?|Figures?|Sections?|Appendix|Equations?|Theorems?|Lemmas?|Lines?|Pages?)(?:[ \t]|~)+|(?:Tab|Fig|Sec|App|Eqs?|Thm)\.(?:[ \t]|~)*)(?:X{1,3}|\?{1,3})(?![\w?])/g, math: false },
     { re: /\bReviewer[ \t]+(?:X|XXXX|\?+)(?![\w?])/g, math: false },
-    { re: /\b(?:TODO|TBD|TBA|FIXME|[Ff]ixme)\b/g, math: true },
+    /* Skip hyphenated compounds such as "TBD-based tracking" (track-before-detect). */
+    { re: /\b(?:(?:TODO|TBD|TBA)(?!-[A-Za-z])|FIXME|[Ff]ixme)\b/g, math: true },
     { re: /\bXXX+\b/g, math: false },
     /* a number to fill in: "XX.X", "x.xx", "+X.X", "XX%" and "XX\%", also
        at the end of a sentence */
     { re: /(^|[^\w.])(X{1,3}(?:\.X{1,3})+|x{2,3}\.x{1,3}|x\.x{2,3}|X{1,3}(?=[ \t]?\\?%))(?!\w|\.\w)/g, math: true, group: 2 },
-    { re: /\?{2,}/g, math: false },
+    { re: /\?{2,}/g, math: false, qq: true },
     { re: /\[(?:cite|citation(?: needed)?|refs?|references?|todo|tbd|placeholder|(?:insert|add|fill in)\b[^\]\n]{0,60})\](?![(\[:])/gi, math: false },
     /* what a template or a chat assistant leaves for the author: "[Your Name]" */
     { re: /\[(?:insert )?your (?:full )?(?:names?|affiliations?|institution|e-?mail|title|signature)\](?![(\[:])/gi, math: false },
     { re: /\blorem ipsum\b/gi, math: true }
   ];
+  /* A placeholder quoted on its line ("We will correct \"Figure ??\" to
+     \"Figure 2\".") is being cited, not left unfilled. */
+  function inLineQuotes(ps, pe) {
+    var ls = src.lastIndexOf('\n', ps - 1) + 1;
+    var le = src.indexOf('\n', pe);
+    if (le < 0) le = src.length;
+    var before = src.slice(ls, ps), after = src.slice(pe, le);
+    if ((before.split('"').length - 1) % 2 && after.indexOf('"') >= 0) return true;
+    if (before.lastIndexOf('\u201c') > before.lastIndexOf('\u201d') && after.indexOf('\u201d') >= 0) return true;
+    var openCurly = false, openStraight = false;
+    for (var i = 0; i < before.length; i++) {
+      var ch = before[i], prev = before[i - 1] || '', next = src[ls + i + 1] || '';
+      if (ch === '\u2018') openCurly = true;
+      else if (ch === '\u2019' && !/[A-Za-z]/.test(next)) openCurly = false;
+      else if (ch === "'") {
+        if (!openStraight && (!prev || /[\s(\[]/.test(prev)) && !/\s/.test(next)) openStraight = true;
+        else if (openStraight && !/[A-Za-z]/.test(next)) openStraight = false;
+      }
+    }
+    if (openCurly && /\u2019(?![A-Za-z])/.test(after)) return true;
+    if (openStraight && /'(?![A-Za-z])/.test(after)) return true;
+    return false;
+  }
   var placed = new Uint8Array(src.length);
   PLACEHOLDERS.forEach(function (p) {
     var pm;
@@ -2882,6 +3342,10 @@ function analyzeText(src, opts) {
       var ps = pm.index + (p.group ? pm[1].length : 0), pe = ps + (p.group ? pm[p.group] : pm[0]).length;
       if (pe === ps) { p.re.lastIndex++; continue; }
       if (skipText[ps] || placed[ps] || (!p.math && mathMask[ps])) continue;
+      /* Emphatic "??" directly after a letter or digit at the end of a question ("feasible??"). */
+      if (p.qq && pe - ps === 2 && ps > 0 && WORD_CHAR.test(src[ps - 1]) &&
+          (pe === src.length || !WORD_CHAR.test(src[pe]))) continue;
+      if (inLineQuotes(ps, pe)) continue;
       for (var k = ps; k < pe; k++) placed[k] = 1;
       push('warn', 'Placeholder left in the text',
         '“' + escHtml(src.slice(ps, pe)) + '” looks like a placeholder. Reviewers would see it as typed: fill it in or remove it.',
@@ -3020,11 +3484,77 @@ function analyzeText(src, opts) {
   CHAT_SELF.lastIndex = 0;
   while ((cm = CHAT_SELF.exec(src))) chatCard(cm.index, cm.index + cm[0].length, null);
 
+  /* 21. Author's private anonymity word list. OpenReview posts the comment
+         as typed and e-mails its source text to reviewers and chairs
+         (openreview-py comment_process.py), so every part of the posted text
+         counts: prose, code, math, link destinations and definitions, image
+         syntax and HTML comments. Exact matches on the author's own words
+         only; no fix, because only the author can rewrite it. */
+  var identityCount = 0;
+  if (opts && Array.isArray(opts.identity) && opts.identity.length) {
+    var lowerSrc = src.toLowerCase();
+    var sameLen = lowerSrc.length === src.length;
+    var hay = sameLen ? lowerSrc : src;
+    var idHits = [];
+    for (var ti = 0; ti < opts.identity.length; ti++) {
+      var rawTerm = opts.identity[ti];
+      if (typeof rawTerm !== 'string') continue;
+      var term = rawTerm.trim().replace(/\s+/g, ' ');
+      if (!term) continue;
+      var w0 = WORD_CHAR.test(term.charAt(0));
+      var w1 = WORD_CHAR.test(term.charAt(term.length - 1));
+      var needle = sameLen ? term.toLowerCase() : term;
+      /* A space in a term is any run of blanks with at most one line break
+         (a wrapped name), never a blank line. No-break spaces count as
+         blanks: a name copied from a PDF or Word often has one. */
+      var pat = needle.split(' ').map(escRe)
+        .join('(?:[ \\t\\u00a0\\u202f]*(?:\\r\\n?|[\\n\\u2028\\u2029])[ \\t\\u00a0\\u202f]*|[ \\t\\u00a0\\u202f]+)');
+      var idRe = new RegExp(pat, sameLen ? 'g' : 'gi'), im;
+      while ((im = idRe.exec(hay))) {
+        var ms = im.index, me = ms + im[0].length;
+        var before = ms > 0 ? src.charAt(ms - 1) : '';
+        var after = me < src.length ? src.charAt(me) : '';
+        if ((w0 && before && WORD_CHAR.test(before)) || (w1 && after && WORD_CHAR.test(after))) {
+          idRe.lastIndex = ms + 1;
+          continue;
+        }
+        idHits.push({ start: ms, end: me, term: term });
+      }
+    }
+    /* Longer match wins when two terms overlap ("Jane Doe" over "Doe"). */
+    idHits.sort(function (a, b) {
+      return (b.end - b.start) - (a.end - a.start) || a.start - b.start;
+    });
+    var idTaken = new Uint8Array(src.length), idKept = [];
+    for (var hi = 0; hi < idHits.length; hi++) {
+      var h = idHits[hi], overlap = false;
+      for (var k = h.start; k < h.end; k++) {
+        if (idTaken[k]) { overlap = true; break; }
+      }
+      if (overlap) continue;
+      for (var k2 = h.start; k2 < h.end; k2++) idTaken[k2] = 1;
+      idKept.push(h);
+    }
+    idKept.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
+    identityCount = idKept.length;
+    var maxCards = Math.min(idKept.length, 30);
+    for (var ci = 0; ci < maxCards; ci++) {
+      var hit = idKept[ci];
+      var more = ci === 29 && idKept.length > 30
+        ? ' Showing the first 30 matches, and ' + (idKept.length - 30) + ' more in this draft.'
+        : '';
+      push('err', 'Words that name the authors',
+        'Matches “' + escHtml(hit.term) + '” from your anonymity list. Reviews are double-blind, and OpenReview posts and e-mails the comment as typed, so link destinations, code and HTML comments count too.' + more,
+        hit.start, hit.end);
+    }
+  }
+
   issues.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
   return {
     issues: issues,
     spans: spans,
-    mathCount: spans.filter(function (sp) { return !sp.recovered; }).length
+    mathCount: spans.filter(function (sp) { return !sp.recovered; }).length,
+    identityCount: identityCount
   };
 }
 
@@ -6850,6 +7380,11 @@ var promisesBox = document.getElementById('promisesBox');
 var promisesSum = document.getElementById('promisesSum');
 var promisesList = document.getElementById('promisesList');
 var copyPromises = document.getElementById('copyPromises');
+var anonBox = document.getElementById('anonBox');
+var anonSum = document.getElementById('anonSum');
+var anonSlot = document.getElementById('anonSlot');
+var anonTerms = null;
+var anonNote = document.getElementById('anonNote');
 
 /* Listeners on the editor go through onEditor, so that a fresh textarea (a
    draft switch puts one in, see openDraft) gets every one of them. */
@@ -6871,6 +7406,9 @@ function freshEditor(value) {
 }
 var venueSelect = document.getElementById('venue');
 var venueStat = document.getElementById('venueStat');
+var appVersion = document.getElementById('appVersion');
+var reportLink = document.getElementById('reportLink');
+var ideaLink = document.getElementById('ideaLink');
 VENUES.forEach(function (v) {
   var opt = document.createElement('option');
   opt.value = v.id;
@@ -6960,7 +7498,7 @@ var FS_STEPS = { fsEditor: 1, zoomPreview: 10 };
    not stay on after switching to another. */
 var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, ownLimit: 5000, sync: true, venue: '',
   compact: compactDefaults(), compactOpen: false, wordingOpen: false, sectionsOpen: false, spellcheck: false,
-  promisesOpen: false, view: 'preview', skeletonQuotes: true };
+  promisesOpen: false, anonOpen: false, view: 'preview', skeletonQuotes: true };
 
 function applyPrefs() {
   document.documentElement.setAttribute('data-theme', prefs.theme === 'dark' ? 'dark' : 'light');
@@ -6981,6 +7519,7 @@ function applyPrefs() {
   wordingBox.open = !!prefs.wordingOpen;
   sectionsBox.open = !!prefs.sectionsOpen;
   promisesBox.open = !!prefs.promisesOpen;
+  anonBox.open = !!prefs.anonOpen;
   spellBox.checked = !!prefs.spellcheck;
   ta.spellcheck = !!prefs.spellcheck;
   refreshFind(); /* the editor's font size moves the text under find's boxes */
@@ -6988,9 +7527,11 @@ function applyPrefs() {
     box.checked = !!prefs.compact[box.getAttribute('data-trick')];
   });
   renderVenueStat();
+  renderReportLinks();
   skeletonQuote.checked = !!prefs.skeletonQuotes;
   applyView();
   themeReviewBox();
+  themeAnonBox();
 }
 
 /* The venue's rule beside the counter: the year of its rules, what its limit
@@ -7016,6 +7557,17 @@ function renderVenueStat() {
     (venue.also ? '; also ' + venue.also.join(', ') : '') +
     ' (checked ' + VENUES_CHECKED + '; rules change every year). Click to open the first.';
   limitInput.title = own ? 'Your own character limit' : 'The character limit of ' + venue.label + ' (' + venue.unit + ')';
+}
+
+/* The footer's version and report links, set as plain hrefs so a middle
+   click or a copied link works too. The venue goes into a report (its rules
+   decide some cards); no draft text does. */
+function renderReportLinks() {
+  appVersion.textContent = APP_VERSION;
+  reportLink.href = reportUrl('problem.yml', {
+    version: APP_VERSION, browser: browserLabel(navigator.userAgent), venue: reportVenue(venueById(prefs.venue))
+  });
+  ideaLink.href = reportUrl('idea.yml', { version: APP_VERSION });
 }
 
 var prefsTimer = null;
@@ -7267,13 +7819,13 @@ var lastAnalysis = null; /* analyze(analyzedText) */
 var userEdited = false;  /* typed before the saved draft finished loading */
 
 var EXAMPLE = [
-  '**Response to Reviewer aBcD — Part 1/2**',
+  '**Response to Reviewer aBcD (part 1 of 2)**',
   '',
   'We thank the reviewer for the careful reading and constructive comments. We address each point below and will fold all clarifications into the revision.',
   '',
   '**Q1. "The update rule for the weights is unclear."**',
   '',
-  'The parameters $\\mathbf{W}_{t}$ and the momentum buffer $\\mathbf{m}_{t}$ are updated jointly, so the per-step cost is $O(d)$ — identical to SGD:',
+  'The parameters $\\mathbf{W}_{t}$ and the momentum buffer $\\mathbf{m}_{t}$ are updated jointly, so the per-step cost is $O(d)$, identical to SGD:',
   '',
   '$$',
   '\\begin{aligned}',
@@ -7295,11 +7847,11 @@ var EXAMPLE = [
   '',
   'The bound below was moved to App. B:',
   '',
-  '\\[ \\mathbb{E}\\left[ \\| \\hat{y} - y \\|_2^2 \\right] \\le C \\sigma_x^2 \\Delta^2 \\]',
+  '\\[ \\mathbb{E}\\left[ \\\\| \\hat{y} - y \\\\|_2^2 \\right] \\le C \\sigma_x^2 \\Delta^2 \\]',
   '',
   '---',
   '',
-  '*Every hazard flagged below is deliberate — click one to jump to it, then apply the fix from the cheat sheet and watch the preview heal.*'
+  '*Every hazard flagged below is deliberate: click one to jump to it, then apply the fix from the cheat sheet and watch the preview heal.*'
 ].join('\n');
 
 /* ---- rendering ---- */
@@ -7539,12 +8091,19 @@ function characterStat(chars, limit) {
   return (limit > 0 ? fmt(chars) + ' / ' + fmt(limit) : fmt(chars)) + ' characters';
 }
 
+/* Page-only checks (venue link rules and the author's anonymity list): shared
+   by updateAll and texProblemIssues so macro-fix verification sees the same
+   hazards as the cards, while Fix all and compaction stay independent of them. */
+function pageAnalyzeOptions() {
+  return { venue: prefs.venue, identity: identityTerms(identityText) };
+}
+
 function updateAll() {
   var text = ta.value;
   analyzedText = text;
   lineStarts = computeLineStarts(text);
 
-  var res = analyze(text, { venue: prefs.venue });
+  var res = analyze(text, pageAnalyzeOptions());
   lastAnalysis = res;
 
   /* stats — counted like OpenReview's own counter (TextAreaWidget.js):
@@ -7564,6 +8123,7 @@ function updateAll() {
   mathStat.textContent = fmt(res.mathCount) + ' math span' + (res.mathCount === 1 ? '' : 's');
 
   renderIssues();
+  renderAnon(res.identityCount || 0);
   renderWording(text, res.spans);
   renderSections(text, chars);
   renderPromises();
@@ -7571,6 +8131,11 @@ function updateAll() {
   refreshFind(); /* a draft switch puts in another text */
   scheduleCompaction();
   renderDraftTabs();
+}
+
+function renderAnon(count) {
+  anonSum.textContent = count ? fmt(count) + (count === 1 ? ' match' : ' matches') : '';
+  anonSum.classList.toggle('zero', !count);
 }
 
 /* One row per phrase (wordingHints), biggest saving first; a click selects
@@ -7709,7 +8274,7 @@ function renderIssues() {
   if (!res) return;
   texCardsStale = texReportsFor !== text;
   currentIssues = res.issues.concat(texProblemIssues(text, res.spans, texReports, res.issues,
-    { stale: texCardsStale, analyze: { venue: prefs.venue } }), reviewerCards(text, res.spans));
+    { stale: texCardsStale, analyze: pageAnalyzeOptions() }), reviewerCards(text, res.spans));
   currentIssues.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
 
   var n = currentIssues.length;
@@ -9041,6 +9606,56 @@ copyPromises.addEventListener('click', function () {
   if (lines.length) copyText(lines.join('\n'), 'Copied the revision checklist', copyPromises);
 });
 
+anonBox.addEventListener('toggle', function () {
+  prefs.anonOpen = anonBox.open;
+  if (!prefsRestored) prefsTouched.anonOpen = true;
+  savePrefs();
+});
+function themeAnonBox() {
+  if (!anonTerms) return;
+  var root = anonTerms.ownerDocument.documentElement, style = getComputedStyle(anonSlot);
+  ['--editor-bg', '--text', '--placeholder', '--mono', '--accent'].forEach(function (key) {
+    root.style.setProperty(key, style.getPropertyValue(key));
+  });
+  root.style.colorScheme = prefs.theme === 'dark' ? 'dark' : 'light';
+}
+/* The word list is text the author typed, so it has a key of its own in
+   localStorage, like a draft's review: written whole and at once on every
+   edit (writes cannot land out of order), never sent to the asynchronous
+   store, and taken in from another window on its storage event. In the
+   preferences object, another window's save of an unrelated switch wrote its
+   own old copy over the list (codex-review-312). */
+var IDENTITY_KEY = 'rebuttal-bench-identity';
+var identityText = fallbackGet(IDENTITY_KEY) || '';
+function saveIdentity() {
+  anonNote.hidden = fallbackSet(IDENTITY_KEY, identityText) || !identityText;
+}
+window.addEventListener('storage', function (e) {
+  if (e.key !== IDENTITY_KEY) return;
+  identityText = typeof e.newValue === 'string' ? e.newValue : '';
+  if (anonTerms && anonTerms.value !== identityText) anonTerms.value = identityText;
+  if (draftReady) updateAll();
+});
+/* Chrome keeps one undo history per document, so the word list lives in its
+   own same-origin srcdoc iframe (like the review box): typing here never
+   enters the source editor's Ctrl+Z stack. */
+(function loadAnonBox() {
+  var frame = document.createElement('iframe');
+  frame.title = 'Words that would name the authors';
+  frame.srcdoc = '<!doctype html><html lang="en"><meta charset="utf-8">' + document.getElementById('anonEditor').innerHTML;
+  frame.addEventListener('load', function () {
+    anonTerms = frame.contentDocument.getElementById('anonTerms');
+    anonTerms.value = identityText;
+    themeAnonBox();
+    anonTerms.addEventListener('input', function () {
+      identityText = anonTerms.value;
+      saveIdentity();
+      updateAll();
+    });
+  });
+  anonSlot.appendChild(frame);
+})();
+
 /* ---- the review each draft answers ----
    The right pane shows the preview or the review of the open draft. A review
    is kept in localStorage only, under its draft's id: never the asynchronous
@@ -9561,9 +10176,6 @@ preview.addEventListener('dblclick', function (e) {
   ta.setSelectionRange(at, to);
   revealOffset(at);
 });
-/* Letters and digits of the common scripts: a word's boundary. Not "_" (a
-   Markdown emphasis delimiter) or punctuation such as curly quotes. */
-var WORD_CHAR = new RegExp('[0-9A-Za-z\u00aa\u00b5\u00ba\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u02af\u0370-\u03ff\u0400-\u052f\u0590-\u06ff\u0900-\u0dff\u0e00-\u0eff\u1e00-\u1fff\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]');
 /* Where `word` starts in text[from, to), as a whole word, outside `mask`. */
 function wordUses(text, word, from, to, mask) {
   var out = [], k = from, w0 = WORD_CHAR.test(word.charAt(0)), w1 = WORD_CHAR.test(word.charAt(word.length - 1));
@@ -9664,7 +10276,7 @@ function applyIssueFix(iss) {
   /* Matching bytes are not enough: the same "\{" may now sit inside code. */
   if (text !== analyzedText || !editsStillValid(text, iss.fix.edits)) {
     updateAll();
-    showToast('The draft moved on — hazards refreshed, try again');
+    showToast('The draft moved on, so the hazards were refreshed: try again');
     return;
   }
   /* A TeX fix is checked now, against the whole comment compiled by MathJax. */
@@ -9677,7 +10289,7 @@ function applyIssueFix(iss) {
   setSourceText(applyEditsToText(text, edits), first.start, first.start + first.text.length);
   revealOffset(first.start);
   afterSourceChange();
-  showToast('Fixed — ' + UNDO_HINT + ' undoes it');
+  showToast('Fixed. ' + UNDO_HINT + ' undoes it');
 }
 
 function applyAllFixes() {
@@ -9700,9 +10312,9 @@ function applyAllFixes() {
   var nowOver = limit > 0 && text.trim().length > limit && startText.trim().length <= limit;
   showToast('Applied ' + applied + ' fix' + (applied === 1 ? '' : 'es') +
     (grew ? ' (' + (grew > 0 ? '+' : '−') + fmt(Math.abs(grew)) + ' character' + (Math.abs(grew) === 1 ? '' : 's') + ')' : '') +
-    (left ? ' — ' + left + ' hazard' + (left === 1 ? '' : 's') + ' still need you'
-      : !window.MJ_READY ? ' — MathJax has not loaded yet, so the formulas are not checked'
-      : texCardsStale ? ' — MathJax is checking the formulas again' : ' — no hazards left') +
+    (left ? '; ' + left + ' hazard' + (left === 1 ? '' : 's') + ' still need you'
+      : !window.MJ_READY ? '; MathJax has not loaded yet, so the formulas are not checked'
+      : texCardsStale ? '; MathJax is checking the formulas again' : '; no hazards left') +
     '. ' + (nowOver ? 'The draft is now ' + fmt(text.trim().length - limit) + ' over the limit. ' : '') +
     UNDO_HINT + ' undoes the pass.');
 }
@@ -9722,7 +10334,7 @@ document.addEventListener('selectionchange', function () { if (document.activeEl
 function jumpToIssue(iss) {
   if (ta.value !== analyzedText) {
     updateAll();
-    showToast('The draft moved on — hazards refreshed, try again');
+    showToast('The draft moved on, so the hazards were refreshed: try again');
     return;
   }
   ta.focus();
@@ -9837,7 +10449,7 @@ onEditor('scroll', function () {
 });
 
 copyBtn.addEventListener('click', function () {
-  copyText(ta.value, 'Copied — paste it straight into OpenReview');
+  copyText(ta.value, 'Copied: paste it straight into OpenReview');
 });
 /* `from`: the button in a dialog that asked for the copy, which keeps the
    focus; the editor behind the dialog is never selected then. */
@@ -9870,7 +10482,7 @@ function fallbackCopy(txt, ok, from) {
   if (box !== ta) { box.parentNode.removeChild(box); (from || ta).focus(); }
   /* execCommand reports failure by returning false, not by throwing. */
   if (copied) ok();
-  else showToast(box === ta ? 'Copy failed — select and copy manually'
+  else showToast(box === ta ? 'Copy failed: select and copy manually'
     : from ? 'Copy failed: select the text shown and copy it.'
     : 'Copy failed. Use Apply to source, copy from the editor, then undo to get your text back.');
 }
@@ -10103,6 +10715,7 @@ storeGet(PREFS_KEY).then(function (v) {
       if (typeof p.wordingOpen === 'boolean') restore('wordingOpen', p.wordingOpen);
       if (typeof p.sectionsOpen === 'boolean') restore('sectionsOpen', p.sectionsOpen);
       if (typeof p.promisesOpen === 'boolean') restore('promisesOpen', p.promisesOpen);
+      if (typeof p.anonOpen === 'boolean') restore('anonOpen', p.anonOpen);
       if (typeof p.spellcheck === 'boolean') restore('spellcheck', p.spellcheck);
       if (p.view === 'preview' || p.view === 'review') restore('view', p.view);
       if (typeof p.skeletonQuotes === 'boolean') restore('skeletonQuotes', p.skeletonQuotes);
@@ -10116,6 +10729,7 @@ storeGet(PREFS_KEY).then(function (v) {
   /* What was written while waiting lacked the stored values; write the merge. */
   if (Object.keys(prefsTouched).length) savePrefs();
   applyPrefs();
+  if (draftReady) updateAll();
   localMeta = fallbackGet(DRAFTS_KEY); /* before loading refreshes the local copy */
   return loadDraft(DRAFTS_KEY);
 }).then(function (metaRes) {

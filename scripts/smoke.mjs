@@ -321,6 +321,17 @@ try {
     return aaai && iclr && typed && custom && prefs.ownLimit === 5000 ||
       { aaai, iclr, typed, custom, stat: venueStat.textContent, limit: limitInput.value, toast: toast.textContent };`);
 
+  await check('the footer names the version, and its report link follows the venue but carries no draft text', `
+    setSourceText('Secret result 0.917 for Method Zed.', 0); updateAll();
+    venueSelect.value = 'icml'; venueSelect.dispatchEvent(new Event('change')); await wait(50);
+    const shown = appVersion.textContent, href = decodeURIComponent(reportLink.href);
+    venueSelect.value = ''; venueSelect.dispatchEvent(new Event('change'));
+    limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
+    const after = decodeURIComponent(reportLink.href);
+    return shown === APP_VERSION && href.indexOf('/issues/new?template=problem.yml&version=' + APP_VERSION + '&') > 0 &&
+      /&browser=(?:Chrome|Edge) \\d+ on /.test(href) && /&venue=ICML 2027$/.test(href) && !/Secret|0\\.917|Zed/.test(href) &&
+      !/venue=/.test(after) && /template=idea\\.yml&version=/.test(ideaLink.href) || { shown, href, after };`);
+
   /* Preferences stored before 3.8 have no ownLimit: a venue's own limit is
      not taken for the author's. */
   await inPage(`localStorage.setItem('rebuttal-bench-prefs',
@@ -1358,6 +1369,80 @@ try {
     [ab, cd, unknown].forEach(deleteDraft);
     return shown && switched && current && checklist && copyPromises.disabled ||
       { shown, switched, current, copied, remaining: promisesSum.textContent }; `);
+
+  await check('Anonymity panel flags matching words in the open draft, stays quiet on clean drafts, and leaves Ctrl+F alone', `
+    for (let i = 0; i < 40 && !anonTerms; i++) await wait(25);
+    const origId = draftMeta.active, origText = ta.value;
+    const withName = createDraft('With name', 'We thank Reviewer 1. Jane Doe ran the experiments.');
+    const clean = createDraft('Clean draft', 'No identifying names here.');
+    switchDraft(withName);
+    anonBox.open = true; await wait(50);
+    anonTerms.focus();
+    anonTerms.setSelectionRange(0, anonTerms.value.length);
+    anonTerms.ownerDocument.execCommand('insertText', false, 'Jane Doe');
+    await wait(50);
+    const card = currentIssues.find((i) => i.title === 'Words that name the authors');
+    const matched = !!card && card.sev === 'err' && !card.fix && anonSum.textContent === '1 match' && !anonSum.classList.contains('zero');
+    anonTerms.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }));
+    const findUntouched = findBar.hidden === true;
+    switchDraft(clean); await wait(50);
+    const quiet = !currentIssues.some((i) => i.title === 'Words that name the authors') &&
+      anonSum.textContent === '' && anonSum.classList.contains('zero') && anonTerms.value === 'Jane Doe';
+    switchDraft(withName); await wait(50);
+    const back = currentIssues.some((i) => i.title === 'Words that name the authors') && anonSum.textContent === '1 match';
+    saveDraftNow(); await wait(50);
+    return matched && findUntouched && quiet && back || { matched, findUntouched, quiet, back, sum: anonSum.textContent };`);
+  await load();
+  await check('Anonymity word list survives a reload, does not touch editor undo history, and clearing removes the card', `
+    for (let i = 0; i < 40 && !anonTerms; i++) await wait(25);
+    const persisted = anonBox.open === true && anonTerms.value === 'Jane Doe' &&
+      currentIssues.some((i) => i.title === 'Words that name the authors') && anonSum.textContent === '1 match';
+    setSourceText('First draft text.', 0); updateAll();
+    setSourceText('Second draft text with Jane Doe.', 0); updateAll();
+    anonTerms.focus();
+    anonTerms.setSelectionRange(anonTerms.value.length, anonTerms.value.length);
+    anonTerms.ownerDocument.execCommand('insertText', false, '\\nAcmeLab');
+    await wait(50);
+    const unchanged = ta.value === 'Second draft text with Jane Doe.';
+    ta.focus(); document.execCommand('undo'); await wait(50);
+    const afterUndoTa = ta.value, afterUndoAnon = anonTerms.value;
+    const undoIsolated = afterUndoTa === 'First draft text.' && afterUndoAnon === 'Jane Doe\\nAcmeLab';
+    setSourceText('Second draft text with Jane Doe.', 0); updateAll();
+    const beforeClear = currentIssues.some((i) => i.title === 'Words that name the authors');
+    anonTerms.value = ''; anonTerms.dispatchEvent(new Event('input')); await wait(50);
+    const cleared = !currentIssues.some((i) => i.title === 'Words that name the authors') &&
+      anonSum.textContent === '' && anonSum.classList.contains('zero');
+    anonBox.open = false;
+    window.confirm = () => true;
+    const ids = draftMeta.list.filter((d) => d.name === 'With name' || d.name === 'Clean draft').map((d) => d.id);
+    const keep = draftMeta.list.find((d) => d.name !== 'With name' && d.name !== 'Clean draft');
+    if (keep) switchDraft(keep.id);
+    ids.forEach(deleteDraft);
+    await wait(50);
+    return persisted && unchanged && undoIsolated && beforeClear && cleared ||
+      { persisted, unchanged, undoIsolated, beforeClear, cleared, afterUndoTa, afterUndoAnon, sum: anonSum.textContent };`);
+
+  /* codex-review-312: in the preferences object, another window's save of an
+     unrelated switch wrote its old copy over the list. */
+  await check('the word list has its own key: another window’s preference save leaves it, and its edit arrives', `
+    for (let i = 0; i < 40 && !anonTerms; i++) await wait(25);
+    anonTerms.value = 'Example Laboratory'; anonTerms.dispatchEvent(new Event('input')); await wait(30);
+    const own = localStorage.getItem(IDENTITY_KEY) === 'Example Laboratory' &&
+      !('identity' in JSON.parse(localStorage.getItem(PREFS_KEY))) && anonNote.hidden;
+    /* Another window saves its preferences, then edits the list. */
+    localStorage.setItem(PREFS_KEY, localStorage.getItem(PREFS_KEY));
+    localStorage.setItem(IDENTITY_KEY, 'Example Laboratory\\nJane Doe');
+    window.dispatchEvent(new StorageEvent('storage', { key: IDENTITY_KEY, newValue: 'Example Laboratory\\nJane Doe' }));
+    setSourceText('Written by Jane Doe.', 0); updateAll(); await wait(30);
+    const taken = anonTerms.value === 'Example Laboratory\\nJane Doe' &&
+      currentIssues.some((i) => i.title === 'Words that name the authors');
+    return own && taken || { own, taken, value: anonTerms.value };`);
+  await load();
+  await check('after a reload the word list is the one written last', `
+    for (let i = 0; i < 40 && !anonTerms; i++) await wait(25);
+    const kept = anonTerms.value === 'Example Laboratory\\nJane Doe';
+    anonTerms.value = ''; anonTerms.dispatchEvent(new Event('input')); await wait(30);
+    return kept && localStorage.getItem(IDENTITY_KEY) === '' || anonTerms.value;`);
 
   await check('the spellcheck switch reaches the editor and survives a draft switch', `
     const was = ta.spellcheck;

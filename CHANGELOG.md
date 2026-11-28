@@ -1,5 +1,75 @@
 # Changelog
 
+## 3.12.0 (unreleased)
+
+### Checked on real author responses
+- A field audit ran the analyzer on 1,300 public author responses (ICLR, NeurIPS, ICML, TMLR,
+  COLM). About one in eight of those with math had a formula that OpenReview showed differently
+  from what was typed, and the cards pointed at most of them. It also found Fix all rewriting
+  formulas that already showed what their authors meant, in 10 of the 126 responses it changed,
+  and two review rounds found more such inputs. The rule now: **Fix all repairs a Markdown-eaten
+  escape unattended only where the bare character cannot be what you meant.** A visible comma
+  instead of `\,`, a stray `#` or `&` (TeX errors) and a `%` (a comment) are still repaired;
+  `{`, `}` and `|` are valid TeX with other meanings, so their fixes mostly wait for your click:
+  - a `\|` always does: it can be a norm, an absolute value (`\|r\|^2` of a scalar), a
+    conditioning or evaluation bar (`P(A \big\| B)`, `F(t)\big\|\_{t=b}`) or a KL divergence's
+    separator (`[q\|p]`), and its card says which TeX symbol the fix gives;
+  - set braces are repaired only where only a set can open (`$\{x_i\}_{i=1}^N$`, `S = \{…\}`,
+    `\in \{0,1\}`, `\left\{`) or when a brace has no partner; elsewhere (`\bigcup_i\{x_i\}`)
+    the card's fix waits, and braces that group (`R^\{P\}`, `\sqrt\{n+1\}`, `\label\{eq:x\}`,
+    `\mathbf{x\}`) get no card at all;
+  - both dollar signs escaped around a formula (`(\$\tilde{P}\$)`, `\$n=16\$`, `\$16 GB\$`) are
+    a formula; only prices between escaped signs, the second leading into the next amount, are
+    currency. With one sign of a pair escaped, the fix waits for your click;
+  - bars composed into a double bar (`\|\|h\|\|`) and `\&` as the column separator of an
+    alignment keep their escapes;
+  - emphasis between two prices (`**$484**) vs. B (**$1,500**`, `__$5__ versus __$8__`) cuts no
+    formula, and escaping emphasis inside `\text{}` is manual, since the stars would then show.
+  On the 1,300 responses Fix all now changes 103 (rather than 126), none of them for the worse;
+  24 keep a card with a one-click fix instead.
+- Fourteen error cards that were wrong are gone; a lone `\$`, which shows as typed for now, is a
+  warning.
+- A bare `%` right after a number that ends a formula or comes before a closing bracket
+  (`$78.1%$`, `$\text{top 10%}$`) gets a card and a fix: MathJax reads it as a TeX comment and
+  drops the sign. Anything else after it, as in a comment copied from the paper (`x=1%\quad + 2`,
+  `% \vspace{-1mm}`, a line-joining `%`), stays a comment, and so does a `%` in `\verb`.
+- Math commands typed without delimiters in prose (`We use \alpha=10`, `c_\phi`, `\arg\max_i`)
+  and `\footnote{…}` get a card: OpenReview shows them as typed. Adjacent commands of one
+  expression share a card; paths (`results\min`), a macro quoted by name and quotes of the
+  review are left alone. On the two real corpora it found 21 such places outside quotes, all
+  genuine. Built by Gemini 4 Neon.
+- Check 9 (raw HTML shown as text) still reports markup such as `<figure>` and `<section>`, but
+  not prompt tokens named by plain words (`<think>`, `<input>`, `<output>`, `<label>`).
+- Fewer cards on what renders as meant (87 on the two corpora, each read): a heading that is
+  already bold, made-up tokens such as `<think>` (not HTML), approximations and ranges with a
+  tilde (`(~2GB)`, `0.55~0.65`), an indented example with prices, `feasible??` at the end of a
+  question, `TBD-based`, and a placeholder quoted with its correction (`"Figure ??" to "Figure
+  2"`). Built by Gemini 4 Neon.
+- `npm run corpus` replays the analyzer on a corpus of texts and compares its cards with an
+  earlier run, so a change to any check can be measured on real text before review.
+
+### Anonymity
+- The *Anonymity* panel keeps a private list of the words that would name you (your names,
+  e-mail addresses, institution, lab, project and GitHub names, one per line). Each occurrence in
+  the open draft gets a card, wherever it is: prose, code, math, link destinations, image text
+  and HTML comments all count, because OpenReview posts the comment as typed and e-mails its
+  source. Matches are exact (any capitals, a name wrapped across a line), so they cannot fire on
+  words you did not list. The list is kept in this browser only, under a key of its own (so
+  another window's preferences never overwrite it), never in a draft, an export or a copy, and it
+  has its own undo history. Built by Gemini 4 Neon.
+
+### Reporting a problem
+- The footer names the page's version and links to *Report a problem* and *Suggest an idea*,
+  GitHub issue forms that come with the version, the browser and the chosen venue filled in.
+  No draft text goes in: issues are public, so the form asks for a small example rewritten to
+  say nothing about the paper.
+
+### Maintenance
+- A weekly GitHub workflow runs `check-upstream` and opens an issue when openreview-web changes
+  anything the page mirrors, so the preview cannot drift from OpenReview unnoticed between
+  rebuttal seasons.
+- The page's visible text and the README no longer use em-dashes.
+
 ## 3.11.0 (2026-11-27)
 
 ### Paste from Google Docs or Word
@@ -436,7 +506,7 @@ pipeline).
   Fix all), fuzz atoms for references, character references and HTML blocks, and ten new
   smoke checks.
 
-## 3.0.0 — 2026-09-22
+## 3.0.0 (2026-09-22)
 
 A full review of v2, checked against openreview-web@45c27aa and against the real Marked 15.0.6 /
 DOMPurify 3.4.13 / MathJax 3.2.2 pipeline, with an independent second review by Codex.

@@ -1,0 +1,50 @@
+name: Report a problem
+description: The preview differs from OpenReview, a card is wrong or missing, a fix broke something, or the page misbehaves.
+labels: [problem]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting. **Issues are public**, and a rebuttal under review is not: paste only a small example that shows the problem, rewritten so it says nothing about your paper (replace names, numbers and results with placeholders such as `Method A` or `0.5`).
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What went wrong?
+      options:
+        - The preview differs from what OpenReview shows
+        - A card points out something that is fine
+        - A problem got no card
+        - A fix changed text that was fine
+        - Something else on the page
+    validations:
+      required: true
+  - type: textarea
+    id: snippet
+    attributes:
+      label: A small example
+      description: The fewest lines of your source (Markdown and TeX) that still show the problem.
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened
+      description: For a difference from OpenReview, screenshots of both are the most useful (drag them in here).
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Rebuttal Bench version
+      description: Shown at the end of the page's footer. The page's "Report a problem" link fills this in.
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and system
+      placeholder: Chrome 142 on Windows
+  - type: input
+    id: venue
+    attributes:
+      label: Venue preset chosen, if any
+      placeholder: ICML 2027
