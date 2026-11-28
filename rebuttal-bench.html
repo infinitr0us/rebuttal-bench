@@ -6221,6 +6221,32 @@ function importPlan(existing, incoming) {
   return { add: add, same: same, sameIn: sameIn };
 }
 
+/* A paper name from an imported file's base name (strip directory and known
+   extensions, clean like a draft name). */
+function paperNameFromFile(fileName) {
+  var base = String(fileName || '').replace(/^.*[\\\/]/, '').replace(/\.(?:json|md|markdown|txt|text)$/i, '');
+  return cleanDraftName(base) || 'Imported';
+}
+
+/* Where drafts already present on import live, from importPlan's `sameIn`:
+   ", in ICML #1234", ", in ICML #1234 and ARR", or "" when no scope has a
+   label to show (e.g. no papers exist yet). */
+function formatSameIn(sameIn, labelOf) {
+  if (!sameIn || !sameIn.length || typeof labelOf !== 'function') return '';
+  var seen = Object.create(null), labels = [];
+  sameIn.forEach(function (scope) {
+    var name = labelOf(scope);
+    if (!name || seen[name]) return;
+    seen[name] = true;
+    labels.push(name);
+  });
+  if (!labels.length) return '';
+  if (labels.length === 1) return ', in ' + labels[0];
+  if (labels.length === 2) return ', in ' + labels[0] + ' and ' + labels[1];
+  var rest = labels.length - 2;
+  return ', in ' + labels[0] + ', ' + labels[1] + ' and ' + rest + ' other' + (rest === 1 ? '' : 's');
+}
+
 /* ---- sections of a comment (pure) ----
    A combined response (one comment for every reviewer, or a long answer
    point by point) is balanced part by part. A heading starts a section that
