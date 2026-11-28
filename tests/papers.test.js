@@ -89,6 +89,14 @@ test('parsing tolerates garbage and keeps what it does not know', () => {
   assert.equal(ser(parse('{"name":{"pa":{"at":1,"v":"X"}},"version":1}')), ser(parse('{"version":1,"name":{"pa":{"v":"X","at":1}}}')));
 });
 
+test('entries alike in stamp and value but not in a later field merge alike in either order', () => {
+  // codex-review-313: the left operand used to win such a tie.
+  const plainEntry = parse('{"version":1,"name":{"pa":{"v":"Alpha","at":1}}}');
+  const extended = parse('{"version":1,"name":{"pa":{"v":"Alpha","at":1,"origin":"mobile"}}}');
+  assert.equal(ser(merge(plainEntry, extended)), ser(merge(extended, plainEntry)));
+  assert.equal(merge(plainEntry, extended).maps.name.pa.origin, 'mobile');
+});
+
 test('a record written by a later version is read but marked, also through a merge', () => {
   const newer = parse(JSON.stringify({ version: 2, name: { pa: { v: 'ICML', at: 1 } } }));
   assert.equal(newer.newer, true);

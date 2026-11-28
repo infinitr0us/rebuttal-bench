@@ -1764,6 +1764,50 @@ try {
     results.push([ok312, 'a 3.12 window beside 3.13 keeps its drafts, texts and preferences, and leaves the papers record intact', info312]);
   }
 
+  /* codex-review-313's fixes in the storage layer and the paper actions. */
+  await check('a stored copy that lacks what this window knows is written back on the next event', `
+    const startId = draftMeta.active, d1 = createDraft('W R1', 'Answer W1.'), pw = newPaperId();
+    changePapers((rec, now) => setPaperEntry(setPaperEntry(rec, 'name', pw, 'Paper W', now), 'member', d1, pw, now));
+    /* Another window's write overtook ours: the stored copy lacks Paper W. */
+    let theirs = setPaperEntry(parsePapers('{}'), 'name', newPaperId(), 'Paper V', Date.now());
+    localStorage.setItem(PAPERS_KEY, serializePapers(theirs));
+    window.dispatchEvent(new StorageEvent('storage', { key: PAPERS_KEY, newValue: serializePapers(theirs) }));
+    await wait(30);
+    const stored = parsePapers(localStorage.getItem(PAPERS_KEY));
+    const both = paperName(stored, pw) === 'Paper W' && paperNamed(stored, 'Paper V') !== null && paperOfDraft(d1) === pw;
+    window.__w = { startId, d1, pw };
+    return both || { stored: serializePapers(stored) };`);
+
+  await check('a paper cannot be renamed to another paper’s name (a backup would merge the two)', `
+    const { d1, pw } = window.__w, d2 = createDraft('X R1', 'Answer X1.'), px = newPaperId();
+    changePapers((rec, now) => setPaperEntry(setPaperEntry(rec, 'name', px, 'Paper X', now), 'member', d2, px, now));
+    switchDraft(d2); await wait(30);
+    window.prompt = () => 'paper w';
+    renamePaper(px); await wait(30);
+    const refused = paperName(papers, px) === 'Paper X' && /exists already/.test(toast.textContent);
+    window.prompt = () => 'Paper X2';
+    renamePaper(px); await wait(30);
+    const renamed = paperName(papers, px) === 'Paper X2';
+    window.__w.d2 = d2; window.__w.px = px;
+    return refused && renamed || { refused, renamed, name: paperName(papers, px), toast: toast.textContent };`);
+
+  await check('Group by name keeps a move another window made while the dialog was open', `
+    const { d1, d2 } = window.__w, g1 = createDraft('P2 R1', 'One.'), g2 = createDraft('P2 R2', 'Two.');
+    switchDraft(g1); await wait(30);
+    openGroupDialog(); await wait(50);
+    /* Another window moves P2 R1 into Paper W meanwhile. */
+    const moved = setPaperEntry(mergePapers(papers, parsePapers('{}')), 'member', g1, window.__w.pw, Date.now() + 10);
+    localStorage.setItem(PAPERS_KEY, serializePapers(moved));
+    window.dispatchEvent(new StorageEvent('storage', { key: PAPERS_KEY, newValue: serializePapers(moved) }));
+    await wait(30);
+    groupApplyBtn.click(); await wait(50);
+    const kept = paperOfDraft(g1) === window.__w.pw, grouped = paperName(papers, paperOfDraft(g2)) === 'P2';
+    window.confirm = () => true;
+    switchDraft(window.__w.startId); await wait(30);
+    [d1, d2, g1, g2].forEach(deleteDraft); await wait(30);
+    return kept && grouped && !papersView(draftMeta.list, papers).papers.length ||
+      { kept, grouped, g1paper: paperName(papers, paperOfDraft(g1)), g2paper: paperName(papers, paperOfDraft(g2)) };`);
+
   /* codex-review-312: in the preferences object, another window's save of an
      unrelated switch wrote its old copy over the list. */
   await check('the word list has its own key: another window’s preference save leaves it, and its edit arrives', `
@@ -2107,17 +2151,43 @@ try {
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).
+  // A key's own delay ('stub:delay:<key>') stalls that key alone.
   await send('Page.addScriptToEvaluateOnNewDocument', { source: `
-    const later = (f) => new Promise((r) => setTimeout(() => r(f()), +(localStorage.getItem('stub:delay') || 50)));
+    const later = (k, f) => new Promise((r) => setTimeout(() => r(f()),
+      +(localStorage.getItem('stub:delay:' + k) || localStorage.getItem('stub:delay') || 50)));
     window.storage = {
-      get: (k) => later(() => { const v = localStorage.getItem('stub:' + k); return v === null ? null : { value: v }; }),
-      set: (k, v) => later(() => { localStorage.setItem('stub:' + k, v); }),
-      delete: (k) => later(() => { localStorage.removeItem('stub:' + k); }),
+      get: (k) => later(k, () => { const v = localStorage.getItem('stub:' + k); return v === null ? null : { value: v }; }),
+      set: (k, v) => later(k, () => { localStorage.setItem('stub:' + k, v); }),
+      delete: (k) => later(k, () => { localStorage.removeItem('stub:' + k); }),
     };` }, sessionId);
   await load();
   await check('with an asynchronous store, the autosave reaches it', `
     setSourceText('Old $x$.', 0); ta.dispatchEvent(new Event('input')); await wait(1200);
     return localStorage.getItem('stub:rebuttal-bench-draft') === 'Old $x$.' || localStorage.getItem('stub:rebuttal-bench-draft');`);
+
+  /* codex-review-313: on a fresh device, the papers come from the store; the
+     editor waits for them (up to the 8 s give-up), so nothing is printed,
+     copied or checked against every paper at once. */
+  await inPage(`
+    const id = draftMeta.active, pid = newPaperId();
+    let rec = setPaperEntry(parsePapers('{}'), 'name', pid, 'Stalled paper', Date.now());
+    rec = setPaperEntry(rec, 'member', id, pid, Date.now());
+    localStorage.setItem('stub:' + PAPERS_KEY, serializePapers(rec)); /* on the store only */
+    localStorage.removeItem(PAPERS_KEY);
+    localStorage.setItem('stub:delay:' + PAPERS_KEY, '2500');
+    localStorage.setItem('smoke:stalledPaper', pid);
+    return true;`);
+  await send('Page.navigate', { url: PAGE }, sessionId);
+  await new Promise((r) => setTimeout(r, 1200));
+  await check('with an asynchronous store, the editor waits for the papers record before it opens', `
+    const early = draftReady === false;
+    for (let i = 0; i < 80 && !draftReady; i++) await wait(100);
+    const pid = localStorage.getItem('smoke:stalledPaper'), open = openPaper();
+    localStorage.removeItem('stub:delay:' + PAPERS_KEY);
+    localStorage.removeItem('smoke:stalledPaper');
+    changePapers((rec, now) => setPaperEntry(rec, 'member', draftMeta.active, '', now)); /* back to No paper */
+    return early && open === pid || { early, ready: draftReady, open, pid };`);
+  await load();
   await inPage(`setSourceText('New $y$.', 0); ta.dispatchEvent(new Event('input')); return true;`);
   await load(); /* reload before the 700 ms autosave can reach the store */
   await check('text typed just before a reload wins over the older stored draft', `

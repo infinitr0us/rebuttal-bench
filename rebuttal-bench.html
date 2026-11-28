@@ -5928,11 +5928,18 @@ function canonJSON(v) {
   return '{' + Object.keys(v).sort().map(function (k) { return JSON.stringify(k) + ':' + canonJSON(v[k]); }).join(',') + '}';
 }
 
-/* The total order of entries: `at`, then the value's canonical form. Positive
-   when `a` comes after `b` (and wins a merge). */
+/* The total order of entries: `at`, then the value's canonical form; for two
+   entries alike in both, the one with more fields (a later version's) and then
+   the whole entry's canonical form, so they merge alike in either order and the
+   later version's field is kept (codex-review-313). Positive when `a` comes
+   after `b` (and wins a merge). */
 function entryAfter(a, b) {
   if (a.at !== b.at) return a.at > b.at ? 1 : -1;
-  var ca = canonJSON(a.v), cb = canonJSON(b.v);
+  var va = canonJSON(a.v), vb = canonJSON(b.v);
+  if (va !== vb) return va > vb ? 1 : -1;
+  var ka = Object.keys(a).length, kb = Object.keys(b).length;
+  if (ka !== kb) return ka > kb ? 1 : -1;
+  var ca = canonJSON(a), cb = canonJSON(b);
   return ca === cb ? 0 : ca > cb ? 1 : -1;
 }
 
@@ -8043,14 +8050,19 @@ function sendPapers() {
   });
 }
 /* Another copy (another window's, the store's, the one stored now): merged,
-   so this window's own changes stay. True when it changed something here. */
+   so this window's own changes stay. True when it changed something here.
+   The merge is then written back whenever the stored copy lacks something
+   this window knows: localStorage has no compare-and-set, so another window's
+   write can overtake ours between its read and its write, and a write refused
+   for space leaves an older copy there. Without this, the record would depend
+   on this window staying open (codex-review-313). Each such write only adds to
+   the stored record, so windows stop writing once it holds the union. */
 function takeInPapers(rec) {
-  var merged = mergePapers(papers, rec);
-  if (!papersStored) writePapersLocal();
-  if (serializePapers(merged) === serializePapers(papers)) return false;
+  var merged = mergePapers(papers, rec), changed = serializePapers(merged) !== serializePapers(papers);
   papers = merged;
-  papersChanged();
-  return true;
+  if (!papers.newer && storedValue(PAPERS_KEY) !== serializePapers(papers)) writePapersLocal();
+  if (changed) papersChanged();
+  return changed;
 }
 /* Change the record: `change(rec, now)` returns the new one (setPaperEntry
    returns the same record for no change). Only with the drafts restored, and
@@ -8068,20 +8080,28 @@ function changePapers(change) {
   papersChanged();
   return true;
 }
-/* At start, once the drafts are restored: the store's copy merged in, and the
-   merge written to whichever side lacks it (idempotent, no marks), so that a
+/* At start the store's copy is read beside the drafts, and the editor opens
+   only once it is merged in (or the store is given up, after 8 s), so nothing
+   is scoped by paper before its paper is known: a fresh device would print,
+   copy and check against every paper at once (codex-review-313). The merge is
+   then written to whichever side lacks it (idempotent, no marks), so that a
    grouping whose write to the store failed still gets there. */
-function bootPapers() {
-  if (!canArtifactStore) return;
-  remoteRead(PAPERS_KEY).then(function (r) {
-    if (!r.ok) return;
-    var remote = parsePapers(r.value);
-    takeInPapers(remote);
-    if (papers.newer) return;
-    if (storedValue(PAPERS_KEY) !== serializePapers(papers)) writePapersLocal();
-    if (remote.newer) return;
-    if (r.value === null || serializePapers(remote) !== serializePapers(papers)) sendPapers();
-  });
+var papersBootRead = canArtifactStore ? remoteRead(PAPERS_KEY) : Promise.resolve(null);
+/* Merged whenever it arrives, also after the watchdog opened the editor. */
+var papersBootDone = papersBootRead.then(function (r) { bootPapers(r); });
+function bootPapers(r) {
+  if (!r || !r.ok) return;
+  var remote = parsePapers(r.value);
+  takeInPapers(remote);
+  if (papers.newer || remote.newer) return;
+  if (r.value === null || serializePapers(remote) !== serializePapers(papers)) sendPapers();
+}
+/* Before the drafts are restored the open draft's paper is not known. When
+   this browser already holds papers with drafts, the venue and limit controls
+   wait (a choice made now would land in the preferences, not in the paper);
+   without papers they work as in 3.12. */
+function papersBeforeBoot() {
+  return papersView(parseDraftMeta(fallbackGet(DRAFTS_KEY)).list, papers).papers.length > 0;
 }
 window.addEventListener('storage', function (e) {
   if (e.key === PAPERS_KEY) takeInPapers(parsePapers(e.newValue));
@@ -9091,6 +9111,10 @@ function renamePaper(pid) {
   if (name === null) return;
   name = cleanDraftName(name);
   if (!name) return;
+  /* Two papers of one name would become one in a backup: Export names each
+     draft's paper, and Import groups by that name (codex-review-313). */
+  var same = paperNamed(papersForOutput(), name);
+  if (same && same !== pid) { showToast('A paper named “' + paperName(papersForOutput(), same) + '” exists already: choose another name.'); return; }
   changePapers(function (rec, now) { return setPaperEntry(rec, 'name', pid, name, now); });
 }
 
@@ -9522,6 +9546,11 @@ function applyGroupDialog() {
       var created = Object.create(null);
       picks.forEach(function (p) {
         if (!draftById(p.id)) return;
+        /* The dialog listed this draft under No paper. If it is in a paper now
+           (moved in another window while the dialog was open, and read just
+           before applying), that move is newer than the proposal: keep it
+           (codex-review-313). */
+        if (papersView([{ id: p.id }], rec).paperOf[p.id]) return;
         var pid = '';
         if (p.val.indexOf('id:') === 0) {
           pid = p.val.slice(3);
@@ -10300,7 +10329,9 @@ function importDrafts(content, fileName, opts) {
   var incoming = got.drafts.map(function (d) {
     var out = { name: d.name, text: d.text };
     if (typeof d.venue === 'string') out.venue = d.venue;
-    if (d.paper) {
+    /* New paper from a file puts every draft in that one paper, as its button
+       says; a plain Import follows the papers the file names. */
+    if (d.paper && !newPaperMode) {
       var ep = paperNamed(papers, d.paper);
       if (ep) { out.scope = ep; out._targetPid = ep; }
       else { out.scope = 'new:' + d.paper.toLowerCase(); out._newPaper = d.paper; newNames[out.scope] = d.paper; }
@@ -11391,10 +11422,13 @@ window.addEventListener('pagehide', flushDraft);
    default, which savePrefs's comparison would not notice. */
 var limitAction = null;
 /* In a paper, the venue and limit are the paper's (its entries in the papers
-   record), and the preferences stay as they are; under "No paper", and before
-   the drafts are restored (the open draft's paper is not known yet), they are
-   the preferences, as in 3.12. */
+   record), and the preferences stay as they are; under "No paper" they are the
+   preferences, as in 3.12. Before the drafts are restored the open draft's
+   paper is not known: with papers in this browser the controls wait
+   (papersBeforeBoot); without, they write the preferences, as in 3.12. */
+if (papersBeforeBoot()) venueSelect.disabled = limitInput.disabled = true;
 limitInput.addEventListener('input', function () {
+  if (!draftReady && papersBeforeBoot()) { applyVenueLimit(); return; }
   var typed = Math.max(0, parseInt(limitInput.value, 10) || 0), pid = openPaper();
   if (pid) {
     changePapers(function (rec, now) { return setPaperEntry(rec, 'limit', pid, typed, now); });
@@ -11408,6 +11442,7 @@ limitInput.addEventListener('input', function () {
 });
 
 venueSelect.addEventListener('change', function () {
+  if (!draftReady && papersBeforeBoot()) { applyVenueLimit(); return; }
   var venue = venueById(venueSelect.value), pid = openPaper();
   if (pid) {
     /* A new venue replaces a limit typed for the old one, as below. */
@@ -11766,13 +11801,22 @@ storeGet(PREFS_KEY).then(function (v) {
   draftMeta.list.forEach(function (d) { startBodyLoad(d.id); });
   return bodyLoads[draftMeta.active];
 }).then(function (draft) {
+  /* The papers the store holds, merged in before anything is scoped by paper
+     (a store that never answers is given up by the watchdog below). */
+  bootDraft = draft;
+  return papersBootDone.then(function () { return draft; });
+}).then(function (draft) {
   if (draft && !draftReady) finishBoot(draft, '');
 });
+var bootDraft = null; /* the open draft as the store gave it, while the papers read is still on its way */
 
 /* Storage that never answers must not leave the editor locked: after a while,
    start from this browser's own copies. */
 setTimeout(function () {
   if (draftReady) return;
+  /* The drafts came from the store and only the papers read is late: open
+     them; the papers are merged when they arrive (papersBootDone). */
+  if (bootDraft) { finishBoot(bootDraft, ''); return; }
   draftMeta = parseDraftMeta(fallbackGet(DRAFTS_KEY));
   draftKey = keyOfDraft(draftMeta.active);
   /* Known: this browser's copies; a draft without one stays unknown. */
@@ -11803,8 +11847,8 @@ function finishBoot(draft, note) {
   lastDraftInPaper[openPaper()] = draftMeta.active;
   renderDraftTabs();
   loadReviewBox(draftMeta.active);
+  venueSelect.disabled = limitInput.disabled = false; /* see papersBeforeBoot */
   applyVenueLimit(); /* the open draft's paper is known now */
-  bootPapers();
   updateAll();
   renderPreview();
   if (recoveredDraftIds.length && papersView(draftMeta.list, papers).papers.length) {
