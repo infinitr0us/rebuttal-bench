@@ -425,6 +425,46 @@ cases, Chrome probes); keep their rules:
   only a text another device writes there during that read can still be overwritten (reviews:
   `reviews/2026-11-25/codex-review-storage36`, `codex-recheck-storage36`).
 
+## Papers
+
+Drafts are grouped into papers (3.13; design note and Fable's review in
+`reviews/2026-11-28`, git-ignored). The rules that keep it safe:
+
+- **A paper owns no text.** It is a label on drafts in a record of its own, `PAPERS_KEY`
+  (`rebuttal-bench-papers`), which 3.12 never reads. Losing or rolling back the record can only
+  regroup drafts (all under *No paper* at worst). Papers code changes the draft list only through
+  `createDraft`, `switchDraft`, `renameDraft` and `deleteDraft`, and no action deletes more than
+  one draft. Not a field on the list's entries: 3.12's `parseDraftMeta`/`mergeDraftMeta`
+  rebuild entries and would strip it.
+- **The record** (pure: `parsePapers`, `mergePapers`, `setPaperEntry`, `serializePapers`,
+  `tests/papers.test.js`) is flat maps of single values, `{id: {v, at}}`: `name`, `venue` and
+  `limit` per paper, `member` per draft. The merge takes per id the entry later in
+  `entryAfter`'s order (`at`, then the value's canonical JSON): a last-writer-wins map with **no
+  deletions and no pruning**, so any order of merges converges (property tests check it). Do
+  not prune memberships by this window's draft list: that is a deletion other copies never hear
+  of (a draft re-created after a deletion elsewhere would lose its paper). A membership of a
+  draft the list lacks is inert in `papersView`; the size is bounded by a cap over the entries'
+  order (`PAPERS_KEPT`), which commutes with the merge. One value per entry, so a stale venue
+  change cannot undo a rename; `setPaperEntry` stamps `max(now, old.at + 1)`. Values, entry
+  fields and maps this version does not know are kept verbatim; a record with a higher
+  `version` is read and never written (`newer`), also inside the store's merge
+  (`papersMergeJSON`). Text the author types (3.15's paper context) goes under keys of its own.
+- **Reads and writes** (DOM, after `var draftReady`): `papers` is this window's merge of every
+  copy it has seen. `changePapers(fn)` is the only writer: it merges the stored copy
+  (`storedValue`), applies `fn`, writes whole with its own `localStorage.setItem` (never
+  `fallbackSet`, whose `memNewer` copy and `retryLocalWrites` would write an old record back over
+  a newer one) and sends through `remoteWrite` with the merge, taking in what the store's merge
+  returns. Storage events and `pageshow` (persisted) merge in; `bootPapers` merges the store's
+  copy at start and writes the merge to the side that lacks it.
+- **The open paper is the open draft's** (`openPaper`): nothing else is stored. **No papers state
+  lives in `prefs`**, which every window writes whole. Every reader of the venue and limit goes
+  through `openVenue()` and `openLimit()` (`paperVenue`, `paperLimit`: a paper's own entries, else
+  inherited from `prefs`, so grouping changes no card); in a paper the venue select and the limit
+  input write the paper's entries and leave `prefs` byte for byte (a new venue resets the
+  paper's typed limit to `null`). Before `draftReady` they write `prefs`, as in 3.12.
+- After a delete, `neighbourInPaper` opens a draft of the same paper, and the confirm names the
+  paper: drafts of several papers share names.
+
 ## Splitting
 
 `splitComment(text, limit, {label})` (pure) cuts only where a comment can end: between top-level
