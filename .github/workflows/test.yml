@@ -12,7 +12,11 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      # The whole history with its tags: the smoke test opens the released
+      # 3.12.0 page (git show v3.12.0:...) beside the current one.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 22

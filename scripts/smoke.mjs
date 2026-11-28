@@ -1677,7 +1677,9 @@ try {
   {
     let ok312 = false, info312 = '';
     try {
-      const html312 = execFileSync('git', ['show', 'cef55bf:rebuttal-bench.html'], {
+      // The released 3.12.0 page, by its tag (CI checks out the whole history
+      // with its tags for this; a shallow clone has neither).
+      const html312 = execFileSync('git', ['show', 'v3.12.0:rebuttal-bench.html'], {
         cwd: fileURLToPath(new URL('..', import.meta.url)),
         maxBuffer: 10 * 1024 * 1024,
       });
