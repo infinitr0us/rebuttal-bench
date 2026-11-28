@@ -74,7 +74,7 @@ test('placeholders are reported where they are unmistakable', () => {
     ['[cite]', '[citation needed]', '[add numbers]']);
   assert.deepEqual(placeholders('Thanks, Reviewer X! See Fig.~?? and Section XX.'), ['Reviewer X', 'Fig.~??', 'Section XX']);
   assert.deepEqual(placeholders('| Ours | $XX.X \\pm X.X$ | XX\\% |\n|-|-|-|'), ['XX.X', 'X.X', 'XX']);
-  assert.deepEqual(placeholders('Gains of xx.x points. Why?? Lorem ipsum dolor. XXX'), ['xx.x', '??', 'Lorem ipsum', 'XXX']);
+  assert.deepEqual(placeholders('Gains of xx.x points. Score: ?? Lorem ipsum dolor. XXX'), ['xx.x', '??', 'Lorem ipsum', 'XXX']);
   const [iss] = titled('TODO', PH);
   assert.equal(iss.sev, 'warn');
   assert.equal(iss.fix, null);
