@@ -41,3 +41,33 @@ test('each block is located at its own source, in order', () => {
   for (const odd of [null, undefined, 7, '']) assert.deepEqual(plain(A.blockSources(odd)), []);
   assert.doesNotThrow(() => A.blockSources('\u0000'));
 });
+
+test('findInText matches case sensitivity, non-overlapping and adjacent occurrences, and literal regex characters', () => {
+  assert.deepEqual(plain(A.findInText('Alpha alpha ALPHA', 'alpha', false)), [
+    { start: 0, end: 5 },
+    { start: 6, end: 11 },
+    { start: 12, end: 17 },
+  ]);
+  assert.deepEqual(plain(A.findInText('Alpha alpha ALPHA', 'alpha', true)), [
+    { start: 6, end: 11 },
+  ]);
+  // Overlapping candidates do not overlap (matches replaceAll semantics); adjacent ones both match.
+  assert.deepEqual(plain(A.findInText('aaa', 'aa', false)), [{ start: 0, end: 2 }]);
+  assert.deepEqual(plain(A.findInText('aaaa', 'aa', false)), [
+    { start: 0, end: 2 },
+    { start: 2, end: 4 },
+  ]);
+  // Regex metacharacters are matched literally.
+  const tex = 'Cost is $a+b$ (or [a.b]*?) and $a+b$.';
+  assert.deepEqual(plain(A.findInText(tex, '$a+b$', false)), [
+    { start: 8, end: 13 },
+    { start: 31, end: 36 },
+  ]);
+  assert.deepEqual(plain(A.findInText(tex, '[a.b]*?', true)), [
+    { start: 18, end: 25 },
+  ]);
+  for (const odd of [null, undefined, 7, '']) {
+    assert.deepEqual(plain(A.findInText(odd, 'a', false)), []);
+    assert.deepEqual(plain(A.findInText('abc', odd, false)), []);
+  }
+});

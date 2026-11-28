@@ -2150,6 +2150,89 @@ try {
     viewPreviewBtn.click(); await wait(20);
     return placed && undone || { placed, undone, value: ta.value };`);
 
+  await check('Ready to post shows rows and summary scoped to the open paper, opens a draft on click and keeps storage untouched', `
+    const origId = draftMeta.active;
+    const pa = newPaperId(), pb = newPaperId();
+    const a1 = createDraft('Ready R1', 'We thank the reviewer for noting the needle. We will add the table to the appendix. The result is $x = 1$.');
+    const a2 = createDraft('Ready R2', 'We answer with TBD and a shared needle.');
+    const b1 = createDraft('Other R1', 'Other paper draft with a shared needle.');
+    saveDraftMeta();
+    changePapers((rec, now) => {
+      rec = setPaperEntry(rec, 'name', pa, 'ICML #1234', now);
+      rec = setPaperEntry(rec, 'name', pb, 'NeurIPS #5678', now);
+      for (const [d, p] of [[a1, pa], [a2, pa], [b1, pb]]) rec = setPaperEntry(rec, 'member', d, p, now);
+      return rec;
+    });
+    switchDraft(a1); await wait(50);
+    readyBox.querySelector('summary').click(); await wait(50);
+    const rows = [...readyList.querySelectorAll('[data-draft]')];
+    const ids = rows.map((r) => r.getAttribute('data-draft'));
+    const r1Ok = rows[0] && rows[0].getAttribute('data-ready') === '1' && /1 to do/.test(rows[0].textContent);
+    const r2Ok = rows[1] && rows[1].getAttribute('data-ready') === '0' && /1 placeholder/.test(rows[1].textContent);
+    const scoped = ids.length === 2 && ids[0] === a1 && ids[1] === a2 && !ids.includes(b1);
+    const sumOk = readySum.textContent === '1 of 2 ready' && readyBox.open === true && prefs.readyOpen === true;
+    const prefsBefore = localStorage.getItem(PREFS_KEY);
+    const papersBefore = localStorage.getItem(PAPERS_KEY);
+    const bodiesBefore = [a1, a2, b1].map((id) => localStorage.getItem(keyOfDraft(id)));
+    const listBefore = JSON.parse(localStorage.getItem(DRAFTS_KEY));
+    rows[1].click(); await wait(50);
+    const openedA2 = draftMeta.active === a2;
+    const listAfter = JSON.parse(localStorage.getItem(DRAFTS_KEY));
+    const storageOk = localStorage.getItem(PREFS_KEY) === prefsBefore &&
+      localStorage.getItem(PAPERS_KEY) === papersBefore &&
+      [a1, a2, b1].every((id, i) => localStorage.getItem(keyOfDraft(id)) === bodiesBefore[i]) &&
+      JSON.stringify(listAfter.list) === JSON.stringify(listBefore.list) &&
+      JSON.stringify(listAfter.gone) === JSON.stringify(listBefore.gone) &&
+      listAfter.active === a2;
+    return scoped && r1Ok && r2Ok && sumOk && openedA2 && storageOk ||
+      { scoped, ids, r1Ok, r2Ok, sumOk, sum: readySum.textContent, openedA2, storageOk };`);
+  await load();
+  await check('Ready to post stays open across a reload; Find across drafts scopes to the open paper, selects on click, replaces only in the open draft and leaves storage untouched', `
+    const a1 = draftMeta.list.find((d) => d.name === 'Ready R1').id;
+    const a2 = draftMeta.list.find((d) => d.name === 'Ready R2').id;
+    const b1 = draftMeta.list.find((d) => d.name === 'Other R1').id;
+    const home = draftMeta.list.find((d) => d.id !== a1 && d.id !== a2 && d.id !== b1).id;
+    const reloadedOpen = readyBox.open === true && prefs.readyOpen === true &&
+      readySum.textContent === '1 of 2 ready' && readyList.querySelectorAll('[data-draft]').length === 2;
+    switchDraft(a1); await wait(50);
+    const prefs0 = localStorage.getItem(PREFS_KEY);
+    const papers0 = localStorage.getItem(PAPERS_KEY);
+    const list0 = localStorage.getItem(DRAFTS_KEY);
+    const bodies0 = [a1, a2, b1].map((id) => localStorage.getItem(keyOfDraft(id)));
+    openFind(false); await wait(30);
+    const defaultOff = findAll.checked === false && !('findAll' in prefs) &&
+      findAllText.textContent === 'All drafts of ICML #1234' && findAllLabel.title === 'All drafts of ICML #1234';
+    findAll.click();
+    findInput.value = 'needle'; findInput.dispatchEvent(new Event('input')); await wait(50);
+    const resRows = [...findResults.querySelectorAll('.findres-row')].map((r) => r.getAttribute('data-draft'));
+    const scopedFind = !findResults.hidden && resRows.length === 2 && resRows[0] === a1 && resRows[1] === a2 && !resRows.includes(b1) &&
+      /open draft only/i.test(replaceOneBtn.title) && /open draft only/i.test(replaceAllBtn.title) &&
+      !!findResults.querySelector('.findres-snip b');
+    const unchangedBeforeClick = localStorage.getItem(PREFS_KEY) === prefs0 &&
+      localStorage.getItem(PAPERS_KEY) === papers0 &&
+      localStorage.getItem(DRAFTS_KEY) === list0 &&
+      [a1, a2, b1].every((id, i) => localStorage.getItem(keyOfDraft(id)) === bodies0[i]);
+    findResults.querySelector('.findres-snip[data-draft="' + a2 + '"]').click(); await wait(50);
+    const selectedA2 = draftMeta.active === a2 && ta.value.slice(ta.selectionStart, ta.selectionEnd) === 'needle' &&
+      document.activeElement === ta;
+    const listAfterClick = JSON.parse(localStorage.getItem(DRAFTS_KEY)), list0Parsed = JSON.parse(list0);
+    const unchangedAfterClick = localStorage.getItem(PREFS_KEY) === prefs0 &&
+      localStorage.getItem(PAPERS_KEY) === papers0 &&
+      [a1, a2, b1].every((id, i) => localStorage.getItem(keyOfDraft(id)) === bodies0[i]) &&
+      JSON.stringify(listAfterClick.list) === JSON.stringify(list0Parsed.list) &&
+      JSON.stringify(listAfterClick.gone) === JSON.stringify(list0Parsed.gone) &&
+      listAfterClick.active === a2;
+    replaceInput.value = 'pin';
+    replaceAllBtn.click(); await wait(50);
+    const replacedOpenOnly = ta.value.indexOf('pin') >= 0 && ta.value.indexOf('needle') < 0 &&
+      knownDraftText(a1).indexOf('needle') >= 0 && knownDraftText(b1).indexOf('needle') >= 0;
+    findInput.value = ''; replaceInput.value = ''; findAll.checked = false; closeFind();
+    readyBox.querySelector('summary').click(); await wait(30);
+    switchDraft(home); window.confirm = () => true;
+    [a1, a2, b1].forEach(deleteDraft); await wait(50);
+    return reloadedOpen && defaultOff && scopedFind && unchangedBeforeClick && selectedA2 && unchangedAfterClick && replacedOpenOnly ||
+      { reloadedOpen, defaultOff, scopedFind, resRows, unchangedBeforeClick, selectedA2, unchangedAfterClick, replacedOpenOnly };`);
+
   // Last, as it applies to every later navigation: an asynchronous store like
   // a hosted artifact's window.storage (answers after 50 ms or 'stub:delay',
   // kept in localStorage under its own prefix so that it survives reloads).
@@ -2295,6 +2378,38 @@ try {
     const stored = localStorage.getItem('stub:' + keyOfDraft(id)), local = localStorage.getItem(keyOfDraft(id));
     window.confirm = () => true; switchDraft(origId); deleteDraft(id); await wait(300);
     return stored !== 'Old text $o$.' && local === 'Newer, from a third window.' || { stored, local };`);
+
+  await inPage(`
+    const bg = createDraft('Background draft', 'First line with target token here.');
+    saveDraftMeta(); await wait(400);
+    localStorage.setItem('stub:delay:' + keyOfDraft(bg), '1000');
+    localStorage.removeItem(keyOfDraft(bg));
+    return bg;`);
+  await load();
+  await check('Find across drafts shows not loaded until a background draft arrives, and selects its match once unlocked', `
+    const home = draftMeta.active;
+    const bg = draftMeta.list.find((d) => d.name === 'Background draft').id;
+    openFind(false); findAll.click();
+    findInput.value = 'target'; findInput.dispatchEvent(new Event('input')); await wait(50);
+    const row = () => findResults.querySelector('.findres-row[data-draft="' + bg + '"]');
+    const initiallyNotLoaded = !!row() && /not loaded/i.test(row().textContent);
+    for (let i = 0; i < 60 && bodyState[bg] !== 'ready'; i++) await wait(50);
+    await wait(50);
+    const loadedMatch = !!row() && /1 match/.test(row().textContent) && !!row().querySelector('.findres-snip b');
+    /* Now trigger a slow background reload of bg while it is known, click its
+       snippet so switchDraft locks the editor, and verify unlockDraft selects it. */
+    localStorage.setItem('stub:delay:' + keyOfDraft(bg), '400');
+    startBodyLoad(bg);
+    refreshFind();
+    row().querySelector('.findres-snip').click();
+    const lockedWithPending = draftMeta.active === bg && ta.readOnly === true && pendingSelection !== null;
+    for (let i = 0; i < 60 && ta.readOnly; i++) await wait(50);
+    const selectedAfterUnlock = ta.value.slice(ta.selectionStart, ta.selectionEnd) === 'target' && document.activeElement === ta;
+    localStorage.removeItem('stub:delay:' + keyOfDraft(bg));
+    findInput.value = ''; findAll.checked = false; closeFind();
+    switchDraft(home); window.confirm = () => true; deleteDraft(bg); await wait(300);
+    return initiallyNotLoaded && loadedMatch && lockedWithPending && selectedAfterUnlock ||
+      { initiallyNotLoaded, loadedMatch, lockedWithPending, selectedAfterUnlock, sel: ta.value.slice(ta.selectionStart, ta.selectionEnd) };`);
 
   results.push([errors.length === 0, 'no uncaught page errors', errors.join(' | ')]);
 } catch (e) {
