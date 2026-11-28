@@ -104,7 +104,14 @@ export async function readSnapshot(file = SNAPSHOT) {
 }
 
 async function get(url, json) {
-  const res = await fetch(url, { headers: { 'User-Agent': 'rebuttal-bench-check-upstream' } });
+  const headers = { 'User-Agent': 'rebuttal-bench-check-upstream' };
+  /* In CI, the workflow's token lifts the API's limit for unauthenticated
+     calls (60 an hour per address, which a hosted runner shares with every
+     other job on it). Raw file downloads need none. */
+  if (process.env.GITHUB_TOKEN && url.startsWith('https://api.github.com/')) {
+    headers.Authorization = 'Bearer ' + process.env.GITHUB_TOKEN;
+  }
+  const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(res.status + ' ' + res.statusText + ' for ' + url);
   return json ? res.json() : res.text();
 }
