@@ -1353,6 +1353,7 @@ window.MathJax = {
         <button type="button" id="exportAllBtn" title="Every draft in one .json file, which Import reads back">Export all drafts</button>
         <button type="button" id="exportOneBtn" title="The open draft as a Markdown file">Download this draft (.md)</button>
         <button type="button" id="importBtn" title="The drafts of an exported .json file, or a .md or .txt file as one draft, as new tabs">Import…</button>
+        <button type="button" id="importPaperBtn" title="Import a file into a new paper named after the file">New paper from a file…</button>
         <input type="file" id="importFile" accept=".json,.md,.markdown,.txt" hidden>
         <button type="button" data-close>Close</button>
       </div>
@@ -8672,8 +8673,8 @@ function renderSections(text, total) {
 function reviewerCards(text, spans) {
   var self = draftReady ? draftById(draftMeta.active) : null;
   if (!self || !text.trim()) return [];
-  var lead = leadOf(text);
-  var others = draftMeta.list.filter(function (d) { return d.id !== self.id; }).map(function (d) {
+  var lead = leadOf(text), pid = paperOfDraft(self.id);
+  var others = draftMeta.list.filter(function (d) { return d.id !== self.id && paperOfDraft(d.id) === pid; }).map(function (d) {
     return { name: d.name, text: knownDraftText(d.id) };
   });
   return reviewerIssues(text.trim(), self.name, others, spans.map(function (sp) {
@@ -8690,7 +8691,8 @@ var promisesByDraft = Object.create(null), promisesHtml = '', pendingPromise = n
 function renderPromises() {
   var next = Object.create(null), html = '', count = 0, checklist = [];
   if (!draftReady) return checklist;
-  draftMeta.list.forEach(function (d) {
+  var pid = openPaper();
+  draftMeta.list.filter(function (d) { return paperOfDraft(d.id) === pid; }).forEach(function (d) {
     var text = knownDraftText(d.id);
     if (text !== null) text = text.replace(/\r\n?/g, '\n'); /* textarea offsets when opened */
     var entry = promisesByDraft[d.id];
@@ -9716,9 +9718,10 @@ function renderHistory() {
   (again || historyDialog.querySelector('.modal-x')).focus();
 }
 function drawHistory() {
-  var d = draftById(draftMeta.active);
+  var d = draftById(draftMeta.active), pid = openPaper(), pName = pid ? paperName(papers, pid) : null;
   historyFor = draftMeta.active;
   historyTitle.textContent = 'History of “' + (d ? d.name : 'this draft') + '”';
+  document.getElementById('printAllBtn').title = pName ? 'Print all drafts of ' + pName : 'Print all drafts';
   historyShown = readHistory(historyFor);
   var now = ta.value.trim().length;
   if (!historyShown.length) {
@@ -9783,17 +9786,30 @@ function openCompare() {
   compareSource.add(new Option('Pasted text', 'paste'));
   var others = draftMeta.list.filter(function (d) { return d.id !== historyFor; });
   if (others.length) {
-    var drafts = group('Other drafts');
-    others.forEach(function (d) {
-      var opt = new Option(d.name, 'draft-' + d.id);
+    var view = papersView(draftMeta.list, papers), myPid = view.paperOf[historyFor] || '';
+    var samePaper = others.filter(function (d) { return (view.paperOf[d.id] || '') === myPid; });
+    var otherPapers = others.filter(function (d) { return (view.paperOf[d.id] || '') !== myPid; });
+    function addDraftOpt(parent, d, baseLabel) {
+      var opt = new Option(baseLabel, 'draft-' + d.id);
       function available() {
         opt.disabled = knownDraftText(d.id) === null;
-        opt.textContent = d.name + (opt.disabled ? ' (text unavailable)' : '');
+        opt.textContent = baseLabel + (opt.disabled ? ' (text unavailable)' : '');
       }
       available();
-      drafts.appendChild(opt);
+      parent.appendChild(opt);
       if (opt.disabled && bodyLoads[d.id]) bodyLoads[d.id].then(available);
-    });
+    }
+    if (samePaper.length) {
+      var sameGroup = group(myPid ? 'Other drafts in ' + paperName(papers, myPid) : 'Other drafts');
+      samePaper.forEach(function (d) { addDraftOpt(sameGroup, d, d.name); });
+    }
+    if (otherPapers.length) {
+      var otherGroup = group('Other papers');
+      otherPapers.forEach(function (d) {
+        var dp = view.paperOf[d.id], prefix = dp ? paperName(papers, dp) : 'No paper';
+        addDraftOpt(otherGroup, d, prefix + ' · ' + d.name);
+      });
+    }
   }
   drawCompare();
   compareSource.focus();
@@ -9945,11 +9961,18 @@ function draftsForOutput() {
 }
 function exportAllDrafts() {
   if (!draftReady) return;
+  var outList = draftsForOutput(), outPapers = papersForOutput(), view = papersView(outList, outPapers);
   var drafts = [], missing = [];
-  draftsForOutput().forEach(function (d) {
+  outList.forEach(function (d) {
     var text = knownDraftText(d.id);
-    if (text === null) missing.push('“' + d.name + '”');
-    else drafts.push({ name: d.name, text: text });
+    if (text === null) { missing.push('“' + d.name + '”'); return; }
+    var item = { name: d.name, text: text }, pid = view.paperOf[d.id];
+    if (pid) {
+      item.paper = paperName(outPapers, pid);
+      var ve = outPapers.maps.venue && outPapers.maps.venue[pid];
+      if (ve && typeof ve.v === 'string' && (ve.v === '' || venueById(ve.v))) item.venue = ve.v;
+    }
+    drafts.push(item);
   });
   if (!drafts.length) { showToast('No draft has loaded yet: try again in a moment'); return; }
   if (missing.length && !window.confirm(missing.join(', ') + (missing.length === 1 ? ' has' : ' have') +
@@ -10014,10 +10037,18 @@ function renderPrint() {
 
 function printDrafts(all) {
   if (historyDialog.hidden || historyFor !== draftMeta.active || printRoot) return;
-  var drafts = all ? draftsForOutput() : [draftById(historyFor)];
+  var drafts, limit;
+  if (all) {
+    var outList = draftsForOutput(), outPapers = papersForOutput(), view = papersView(outList, outPapers);
+    var pid = view.paperOf[historyFor] || '';
+    drafts = outList.filter(function (d) { return (view.paperOf[d.id] || '') === pid; });
+    limit = paperLimit(outPapers, pid, prefs.limit, prefs.ownLimit);
+  } else {
+    drafts = [draftById(historyFor)];
+    limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
+  }
   var root = document.createElement('div'), missing = [];
   root.id = 'printDrafts';
-  var limit = Math.max(0, parseInt(limitInput.value, 10) || 0);
   try {
     drafts.forEach(function (d) {
       var text = knownDraftText(d.id);
@@ -10059,27 +10090,88 @@ window.addEventListener('afterprint', function () {
    an imported text, so it cannot cost any text: a draft this browser has no
    room for is left out and named, and the file is still there to import
    again. */
-function importDrafts(content, fileName) {
+function importDrafts(content, fileName, opts) {
   if (!draftReady) { showToast('Wait until the drafts have loaded, then import again.'); return; }
+  opts = opts || {};
   var got = readDraftsFile(content, fileName);
   if (got.error) { showToast(got.error); return; }
   takeInList(storedValue(DRAFTS_KEY)); /* a draft another window just added is here too */
+  takeInPapers(parsePapers(storedValue(PAPERS_KEY)));
+  var view = papersView(draftMeta.list, papers), hasPapers = view.papers.length > 0;
+  var newPaperMode = !!opts.newPaper;
+  var fallbackName = newPaperMode ? paperNameFromFile(fileName) : '';
+  var fallbackExisting = newPaperMode ? paperNamed(papers, fallbackName) : null;
+  var captured = typeof opts.targetPaper === 'string' ? opts.targetPaper : openPaper();
+  var fallbackPid = !newPaperMode && captured && paperName(papers, captured) !== null ? captured : '';
+  var newNames = Object.create(null);
+  var incoming = got.drafts.map(function (d) {
+    var out = { name: d.name, text: d.text };
+    if (typeof d.venue === 'string') out.venue = d.venue;
+    if (d.paper) {
+      var ep = paperNamed(papers, d.paper);
+      if (ep) { out.scope = ep; out._targetPid = ep; }
+      else { out.scope = 'new:' + d.paper.toLowerCase(); out._newPaper = d.paper; newNames[out.scope] = d.paper; }
+    } else if (newPaperMode) {
+      if (fallbackExisting) { out.scope = fallbackExisting; out._targetPid = fallbackExisting; }
+      else { out.scope = 'new:' + fallbackName.toLowerCase(); out._newPaper = fallbackName; newNames[out.scope] = fallbackName; }
+    } else {
+      out.scope = fallbackPid;
+      out._targetPid = fallbackPid;
+    }
+    return out;
+  });
   /* Only texts known here count as already here; unknown ones keep their names. */
-  var plan = importPlan(draftMeta.list.map(function (d) { return { name: d.name, text: knownDraftText(d.id) }; }), got.drafts);
+  var plan = importPlan(draftMeta.list.map(function (d) {
+    return { name: d.name, text: knownDraftText(d.id), scope: view.paperOf[d.id] || '' };
+  }), incoming);
+  var showPlaces = hasPapers || newPaperMode || incoming.some(function (d) { return !!(d._targetPid || d._newPaper); });
+  var samePlace = showPlaces ? formatSameIn(plan.sameIn, function (scope) {
+    if (!scope) return 'No paper';
+    if (scope.indexOf('new:') === 0) return newNames[scope] || '';
+    return paperName(papers, scope) || 'No paper';
+  }) : '';
   if (!plan.add.length) {
-    showToast(plan.same === 1 ? 'That draft is already here.' : 'All ' + plan.same + ' drafts are already here.');
+    showToast((plan.same === 1 ? 'That draft is already here' : 'All ' + plan.same + ' drafts are already here') + samePlace + '.');
     return;
   }
-  var added = [], left = [], made = [];
+  var added = [], left = [], made = [], memberships = [];
   plan.add.forEach(function (d) {
     var m = newDraft(d.name, d.text, true);
-    if (m) { added.push('“' + d.name + '”'); made.push({ stored: m.stored, name: '“' + d.name + '”' }); }
-    else left.push('“' + d.name + '”');
+    if (m) {
+      added.push('“' + d.name + '”');
+      made.push({ stored: m.stored, name: '“' + d.name + '”' });
+      if (d._targetPid || d._newPaper) memberships.push({ id: m.id, pid: d._targetPid || '', name: d._newPaper || '', venue: d.venue });
+    } else left.push('“' + d.name + '”');
   });
   function names(list) {
     return list.length > 5 ? list.slice(0, 5).join(', ') + ' and ' + (list.length - 5) + ' more' : list.join(', ');
   }
+  var grouped = true;
   if (added.length) {
+    if (memberships.length) {
+      grouped = changePapers(function (rec, now) {
+        var created = Object.create(null), createdNow = Object.create(null);
+        memberships.forEach(function (item) {
+          var pid = item.pid;
+          if (!pid && item.name) {
+            var k = item.name.toLowerCase();
+            pid = created[k] || paperNamed(rec, item.name) || newPaperId();
+            created[k] = pid;
+            if (!paperName(rec, pid)) {
+              rec = setPaperEntry(rec, 'name', pid, item.name, now);
+              createdNow[pid] = true;
+            }
+            /* Only when created now: a file never changes an existing paper's venue. */
+            if (createdNow[pid] && !(rec.maps.venue && rec.maps.venue[pid]) &&
+                typeof item.venue === 'string' && (item.venue === '' || venueById(item.venue))) {
+              rec = setPaperEntry(rec, 'venue', pid, item.venue, now);
+            }
+          }
+          if (pid && paperName(rec, pid)) rec = setPaperEntry(rec, 'member', item.id, pid, now);
+        });
+        return rec;
+      });
+    }
     var listSaved = saveDraftMeta();
     renderDraftTabs();
     refreshReviewerCards(); /* new tabs, perhaps named for a reviewer */
@@ -10098,8 +10190,11 @@ function importDrafts(content, fileName) {
     }
   }
   var msg = (added.length ? 'Imported ' + added.length + ' draft' + (added.length === 1 ? '' : 's') + ' as new tabs: ' + names(added) + '.'
-    : 'Nothing was imported.') + (plan.same ? ' Already here: ' + plan.same + '.' : '') +
+    : 'Nothing was imported.') + (plan.same ? ' Already here: ' + plan.same + samePlace + '.' : '') +
     (left.length ? ' No room in this browser for ' + names(left) + ': delete drafts you no longer need, then import the file again.' : '');
+  if (added.length && memberships.length && (!grouped || !papersStored)) {
+    msg += ' Could not save their paper grouping in this browser: after a reload, they may appear under No paper.';
+  }
   if (added.length && memNewer[DRAFTS_KEY]) msg += ' The list of drafts did not fit: after a reload, those with text come back as “Recovered draft”.';
   if (added.length && !canLocalRead && !canArtifactStore) msg += ' This browser cannot keep drafts: export them before you leave.';
   /* Without localStorage, the asynchronous store is the only copy. */
@@ -10139,23 +10234,32 @@ window.addEventListener('storage', function (e) {
 document.getElementById('exportAllBtn').addEventListener('click', exportAllDrafts);
 document.getElementById('exportOneBtn').addEventListener('click', exportOpenDraft);
 var importFile = document.getElementById('importFile');
+var importMode = 'open';
 document.getElementById('importBtn').addEventListener('click', function () {
+  importMode = 'open';
   importFile.value = ''; /* the same file chosen again is a new import */
   importFile.click();
 });
+document.getElementById('importPaperBtn').addEventListener('click', function () {
+  importMode = 'new-paper';
+  importFile.value = '';
+  importFile.click();
+});
 /* Import is bound to no draft: a file read that ends after a switch, or with
-   History closed, still only adds tabs. */
+   History closed, still only adds tabs; the target paper is captured when
+   the file is chosen. */
 importFile.addEventListener('change', function () {
   var f = importFile.files && importFile.files[0];
   if (!f) return;
   /* An export escapes control characters six times over: far beyond what
      browser storage holds, so any export of it still fits under this. */
   if (f.size > 100e6) { showToast('That file is too large to be drafts.'); return; }
+  var opts = importMode === 'new-paper' ? { newPaper: true } : { targetPaper: openPaper() };
   var reader = new FileReader();
   reader.onload = function () {
     var got = decodeTextFile(new Uint8Array(reader.result));
     if (got.error) showToast(got.error);
-    else importDrafts(got.text, f.name);
+    else importDrafts(got.text, f.name, opts);
   };
   reader.onerror = function () { showToast('Could not read that file.'); };
   reader.readAsArrayBuffer(f);
