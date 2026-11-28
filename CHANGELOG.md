@@ -6,23 +6,32 @@
 - A field audit ran the analyzer on 1,300 public author responses (ICLR, NeurIPS, ICML, TMLR,
   COLM). About one in eight of those with math had a formula that OpenReview showed differently
   from what was typed, and the cards pointed at most of them. It also found Fix all rewriting
-  formulas that already showed what their authors meant, in 10 of the 126 responses it changed.
-  Fix all now leaves these alone:
-  - both dollar signs escaped around TeX, `(\$\tilde{P}\$)`, are a formula, not two prices;
-    with only one of a pair's signs escaped, the fix waits for your click;
+  formulas that already showed what their authors meant, in 10 of the 126 responses it changed,
+  and a release review found ten more such inputs. Fix all now leaves these alone:
+  - both dollar signs escaped around a formula, `(\$\tilde{P}\$)` or `\$n=16\$`, are a formula;
+    only prices between escaped signs are currency. With one sign of a pair escaped, the fix
+    waits for your click;
   - bars composed into a double bar (`\|\|h\|\|`), `\&` as the column separator of an
-    alignment, and braces that group (`R^\{P\}`, `\mathbf{x\}`) keep their escapes, while set
-    braces (`\{x_i\}`, `\in \{0,1\}`) and a single `\|` are still repaired;
-  - emphasis between two prices (`**$484**) vs. B (**$1,500**`) cuts no formula, and escaping
-    emphasis inside `\text{}` is manual, since the stars would then show.
+    alignment, and braces that group (`R^\{P\}`, `\sqrt\{n+1\}`, `\frac\{a\}\{b\}`,
+    `\mathbf{x\}`) keep their escapes, while set braces (`\{x_i\}`, `\in \{0,1\}`) are still
+    repaired;
+  - a `\|` that may be an absolute value, a conditioning bar or a KL divergence's separator
+    (`\|x\|`, `P(A \| B)`, `[q\|p]`) gets a fix you click; only a scripted or sized norm
+    (`\|v\|_2`, `\left\|`) is repaired unattended, on both sides;
+  - emphasis between two prices (`**$484**) vs. B (**$1,500**`, `__$5__ versus __$8__`) cuts no
+    formula, and escaping emphasis inside `\text{}` is manual, since the stars would then show.
 - Fourteen error cards that were wrong are gone; a lone `\$`, which shows as typed for now, is a
   warning.
-- A bare `%` after a number in a formula (`$78.1%$`) gets a card and a fix: MathJax reads it as a
-  TeX comment and drops the sign. A `% \vspace{-1mm}` line in a display stays a comment.
+- A bare `%` right after a number in a formula (`$78.1%$`, `$\text{top 10%}$`) gets a card and a
+  fix: MathJax reads it as a TeX comment and drops the sign. A `%` followed by words, as in a
+  comment line copied from the paper, stays a comment, and so does one in `\verb`.
 - Math commands typed without delimiters in prose (`We use \alpha=10`, `c_\phi`, `\arg\max_i`)
   and `\footnote{…}` get a card: OpenReview shows them as typed. Adjacent commands of one
-  expression share a card; paths and a macro quoted by name are left alone. On the two real
-  corpora it found 35 such places, all genuine. Built by Gemini 4 Neon.
+  expression share a card; paths (`results\min`), a macro quoted by name and quotes of the
+  review are left alone. On the two real corpora it found 21 such places outside quotes, all
+  genuine. Built by Gemini 4 Neon.
+- Check 9 (raw HTML shown as text) still reports markup such as `<figure>` and `<section>`, but
+  not prompt tokens named by plain words (`<think>`, `<input>`, `<output>`, `<label>`).
 - Fewer cards on what renders as meant (87 on the two corpora, each read): a heading that is
   already bold, made-up tokens such as `<think>` (not HTML), approximations and ranges with a
   tilde (`(~2GB)`, `0.55~0.65`), an indented example with prices, `feasible??` at the end of a
@@ -37,8 +46,9 @@
   the open draft gets a card, wherever it is: prose, code, math, link destinations, image text
   and HTML comments all count, because OpenReview posts the comment as typed and e-mails its
   source. Matches are exact (any capitals, a name wrapped across a line), so they cannot fire on
-  words you did not list. The list is kept with your preferences, never in a draft, an export or
-  a copy, and it has its own undo history. Built by Gemini 4 Neon.
+  words you did not list. The list is kept in this browser only, under a key of its own (so
+  another window's preferences never overwrite it), never in a draft, an export or a copy, and it
+  has its own undo history. Built by Gemini 4 Neon.
 
 ### Reporting a problem
 - The footer names the page's version and links to *Report a problem* and *Suggest an idea*,

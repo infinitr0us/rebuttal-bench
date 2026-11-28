@@ -134,7 +134,7 @@ leave the browser: they autosave on this device only.
   open draft gets a card, wherever it is, since OpenReview posts the comment as typed and
   e-mails its source: link destinations, code, math and HTML comments count too. Matching is
   exact apart from capitals and a name wrapped across a line, so prefer full names (a surname
-  alone also matches other people's citations). The list is kept with your preferences, never
+  alone also matches other people's citations). The list is kept in this browser only, never
   in a draft, an export or a copy.
 - **Status bar.** Characters counted the way OpenReview's own counter does (trimmed length),
   the length of the selection, the number of formulas MathJax will typeset, hazards, and

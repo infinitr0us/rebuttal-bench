@@ -84,14 +84,18 @@ text, discard the grid and use the regular text importer.
   (the text they expect), so stale fixes are refused; `math` marks checks 1–7, the ones about
   Markdown damaging TeX. Check 4 also marks formulas inline Markdown cuts apart (`sp.cut`).
   Checks 9–14 report what OpenReview shows as typed (raw HTML, HTML comments, external images,
-  footnotes, h4–h6, LaTeX outside math). Since the field audit: check 9 only for real HTML
-  element names (`<think>` is meant to show), check 13 not for a heading already all bold
-  (`headingIsBold`), check 14's tie only between a word and its label (`Table~1`, not `(~2GB)`)
-  and, besides text commands and `\footnote`, math-only commands outside math (`MATH_CMD_LIST`;
-  paths and quoted names skipped, adjacent commands grouped, nothing inside a span check 2
-  reports or one whose `$` a cut or currency span took). That last part reads the earlier cards
-  by title, so keep those titles. Check 7 does not take two prices on a line for TeX, and check
-  17 skips `feasible??`, `TBD-based` and a placeholder quoted on its line (`inLineQuotes`).
+  footnotes, h4–h6, LaTeX outside math). Since the field audit: check 9 only for markup and
+  structure elements (`htmlTags`: `<figure>`, `<section>`; not `<think>`, nor form and metadata
+  elements named by plain words, `<input>`, `<output>`, `<label>`, which are prompt tokens far
+  more often), check 13 not for a heading already all bold (`headingIsBold`), check 14's tie only
+  between a word and its label (`Table~1`, not `(~2GB)`) and, besides text commands and
+  `\footnote`, math-only commands outside math (`MATH_CMD_LIST`; paths, a command right after a
+  word (`results\min`, unlike `T\geq`), quoted names and quotes of the review skipped, adjacent
+  commands grouped, nothing inside a span check 2 reports or one whose `$` a cut or currency
+  span took). That last part reads the earlier cards by title, so keep those titles. Check 7
+  does not take two prices on a line for TeX (and scans on from the second price's sign, which
+  may open a formula), and check 17 skips `feasible??`, `TBD-based` and a placeholder quoted on
+  its line (`inLineQuotes`).
   Their cases are in `tests/field-audit.test.js`. Check 15 reports links under `opts.venue`'s rule (an
   id from `VENUES`; only the page passes it, so Fix all and compaction never see venue hazards).
   Check 17 reports placeholders in visible text only (not in code, link destinations and
@@ -119,7 +123,13 @@ text, discard the grid and use the regular text importer.
   line break, no-break spaces included); keep it free of guesses about what a name is. The
   longer of two overlapping matches wins, a draft shows at most 30 cards (`identityCount` has
   them all), and there is no fix. The list's textarea lives in a same-origin `srcdoc` iframe,
-  like the review box, so its typing never enters the editor's undo history.
+  like the review box, so its typing never enters the editor's undo history. The list is
+  **not a preference**: it is text the author typed, stored whole under `IDENTITY_KEY` in
+  localStorage only (`saveIdentity` through `fallbackSet`, on every edit, so writes cannot land
+  out of order; never the asynchronous store), and taken in from another window on its
+  `storage` event. In the preferences object, another window's save of an unrelated switch
+  wrote its old copy over the list (`reviews/2026-11-27/codex-review-312`). Two windows editing
+  the list at the same moment: the last write wins.
 - `texProblemIssues(src, spans, reports, issues, {stale, analyze})` turns what MathJax reported
   after the last typeset (`texProblems()` in the DOM section: `{tex, undef, errors}` per formula,
   in document order) into cards. Formulas cut apart by inline Markdown are skipped (MathJax never
@@ -155,11 +165,18 @@ text, discard the grid and use the regular text importer.
 - "Correctly" means what the author meant, which the source often shows: a field audit on
   1,300 real author responses (`reviews/2026-11-27/codex-field-audit`, git-ignored) found Fix
   all damaging 10 of the 126 it changed, by repairing escapes that already gave MathJax the
-  intended TeX. `slashedDollar`, `meantAsFormula` and `shieldMeant` in `analyzeText` hold what
-  it taught: both signs escaped around TeX are a formula; bars composed into `||`, `\&` in an
-  alignment and grouping braces (`^\{`, a `\}` closing a bare `{`) are meant as typed; a pair
-  of prices or escaped signs that emphasis "cuts" was never a formula. `tests/field-fixall.test.js`
-  holds each case and its near miss, compared with the independent MathJax oracle.
+  intended TeX; the release review (`reviews/2026-11-27/codex-review-312`) found ten more.
+  `slashedDollar`, `meantAsFormula`, `shieldMeant` and `opensGroup` in `analyzeText` hold what
+  they taught: both signs escaped around anything but prices are a formula; bars composed into
+  `||`, `\&` in an alignment and grouping braces (matched with a bare brace, or after `^`, `_`,
+  `}`, `]` or an argument-taking command in `ARG_CMD`) are meant as typed; a pair of prices
+  (an amount after the first sign, an amount or a backslash after the second) or of escaped
+  signs that emphasis "cuts" was never a formula. A consumed `\|` is ambiguous (absolute value,
+  conditioning bar, KL separator): its fix is automatic only for an even number of bars with a
+  script or a size, decided per formula so a pair is never fixed on one side. A bare `%` gets a
+  card only right after a digit with no words after it, never in `\verb`.
+  `tests/field-fixall.test.js` holds each case and its near miss, compared with the independent
+  MathJax oracle.
 - **Measure every change to a check on real text before review**: `npm run corpus --
   <corpus.jsonl> --baseline <summary.json>` lists the cards that appeared and disappeared per
   text. Use the audit's corpus with its `summary.json` and the 310 responses of
