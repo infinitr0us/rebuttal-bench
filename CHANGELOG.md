@@ -20,14 +20,20 @@
 - *Export* keeps each draft's paper and that paper's venue, in a file 3.12 still imports
   (ungrouped). *Import* puts each draft in the paper its file names (or the open paper) with
   names unique per paper, and says where drafts already present are; *New paper from a file*
-  makes a paper named after the file, for instance from the export of a downloaded copy used
-  for another paper. Built by Gemini 4 Neon on the storage core below.
+  puts every draft of a file in a new paper named after it, for instance the export of a
+  downloaded copy used for another paper. A paper cannot be renamed to another paper's name, so
+  a backup never merges two papers. Built by Gemini 4 Neon on the storage core below.
 - A paper owns no text: it is a label on drafts, in a record of its own that 3.12 never reads.
-  Windows, devices and the back/forward cache merge their copies of it, never replace them, so
-  no window and no order of saves can lose a grouping change for good, and losing the record
-  would only regroup drafts. A paper's venue and limit never touch the preferences, and
-  deleting a paper's open draft opens another draft of the same paper (the confirm names the
-  paper). Designed with a review by Claude Fable 5.2 before any code was written.
+  Windows, devices and the back/forward cache merge their copies of it, never replace them, and
+  a window writes the merge back whenever the stored copy lacks something it knows, so a
+  grouping change survives the window that made it; losing the record would only regroup
+  drafts. A paper's venue and limit never touch the preferences (with papers, the venue and
+  limit controls wait until the drafts are restored), and deleting a paper's open draft opens
+  another draft of the same paper (the confirm names the paper). With an asynchronous store,
+  the editor waits for the papers record at start (up to the usual 8 s). Designed with a review
+  by Claude Fable 5.2 before any code was written; a Codex review then found six problems with
+  windows writing at once, a full storage, a slow store and backups, each fixed and rechecked
+  with its own probe.
 
 ## 3.12.0 (2026-11-28)
 

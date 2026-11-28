@@ -454,8 +454,16 @@ Drafts are grouped into papers (3.13; design note and Fable's review in
   (`storedValue`), applies `fn`, writes whole with its own `localStorage.setItem` (never
   `fallbackSet`, whose `memNewer` copy and `retryLocalWrites` would write an old record back over
   a newer one) and sends through `remoteWrite` with the merge, taking in what the store's merge
-  returns. Storage events and `pageshow` (persisted) merge in; `bootPapers` merges the store's
-  copy at start and writes the merge to the side that lacks it.
+  returns. Storage events and `pageshow` (persisted) merge in, and `takeInPapers` then writes
+  the merge back whenever the stored copy lacks what this window knows: localStorage has no
+  compare-and-set, so another window's write can overtake ours between read and write, and a
+  write refused for space leaves an older copy (`reviews/2026-11-28/codex-review-313`). Each such
+  write only adds to the stored record, so the windows stop once it holds the union. At start
+  the store's copy is read beside the drafts (`papersBootRead`) and the editor opens only once
+  it is merged, so nothing is scoped by paper before its paper is known; after the 8 s give-up
+  the editor opens with the store's drafts (`bootDraft`) and the papers merge when they arrive.
+  With papers in this browser, the venue and limit controls wait for the drafts
+  (`papersBeforeBoot`); without papers they work before as in 3.12.
 - **The open paper is the open draft's** (`openPaper`): nothing else is stored. **No papers state
   lives in `prefs`**, which every window writes whole. Every reader of the venue and limit goes
   through `openVenue()` and `openLimit()` (`paperVenue`, `paperLimit`: a paper's own entries, else
@@ -469,8 +477,10 @@ Drafts are grouped into papers (3.13; design note and Fable's review in
   `recoverDraftBodies` gives back, must never be out of sight), every paper's draft count and
   over-limit mark. The draft last opened in each paper is remembered in memory only
   (`lastDraftInPaper`). *New paper*, *Group by name* and Import reuse a paper of the same name
-  (`paperNamed`); a draft is created before its membership is written, so a failed papers write
-  leaves it visible under *No paper*.
+  (`paperNamed`), and a rename to another paper's name is refused: Export names each draft's
+  paper and Import groups by name, so two papers of one name would merge in a backup. A draft is
+  created before its membership is written, so a failed papers write leaves it visible under *No
+  paper*.
 - **Scoped to the open paper**: `reviewerCards` (and so the pointer check), `renderPromises`,
   `printDrafts(true)`, Compare's first group, new drafts and Split's parts. **Global**: Export
   (the backup; each draft with `paper` and its paper's own `venue`, from `papersForOutput`, a
@@ -478,9 +488,17 @@ Drafts are grouped into papers (3.13; design note and Fable's review in
 - **Import** captures its target when the file is chosen; a file's paper name picks or creates a
   paper and never renames one or changes an existing paper's venue; `importPlan` gets `scope`
   on both sides (names unique per paper, texts compared across papers) and its `sameIn` says
-  where present drafts live. **Group by name** (`#groupDialog`, modal) proposes from
-  `prefixGroups` over the *No paper* drafts, reads the store before proposing and before
-  applying, writes only rows set to a paper in one `changePapers`, and renames nothing.
+  where present drafts live; *New paper from a file* puts every draft in the one new paper.
+  **Group by name** (`#groupDialog`, modal) proposes from `prefixGroups` over the *No paper*
+  drafts, reads the store before proposing and before applying, writes only rows set to a paper
+  in one `changePapers`, skips a draft that got a paper meanwhile (a move made while the dialog
+  was open is newer than the proposal), and renames nothing.
+- Known limits, accepted: a 3.12 window's new drafts appear under *No paper*; two windows moving
+  one draft, renaming one paper or creating papers of one name at the same moment (the later
+  write wins, or two papers of one name); two devices writing through the store at the same
+  moment (one write lost until either's next write or start); an asynchronous store that answers
+  the drafts but not the papers record within 8 s (the editor opens ungrouped, and regroups when
+  the record arrives).
 
 ## Splitting
 
