@@ -1422,6 +1422,69 @@ try {
     return persisted && unchanged && undoIsolated && beforeClear && cleared ||
       { persisted, unchanged, undoIsolated, beforeClear, cleared, afterUndoTa, afterUndoAnon, sum: anonSum.textContent };`);
 
+  /* Papers, the storage layer (the paper row comes with its own checks): a
+     paper's venue and limit live in the papers record, never in the
+     preferences; a delete stays in the paper; another window's change is
+     merged in. */
+  await check('a paper’s venue and limit are its own, and the preferences stay byte for byte', `
+    const startId = draftMeta.active, prefsBefore = localStorage.getItem(PREFS_KEY);
+    const a1 = createDraft('A R1', 'Answer A1.'), a2 = createDraft('A R2', 'Answer A2.'), b1 = createDraft('B R2', 'Answer B2.');
+    switchDraft(a1);
+    const pa = newPaperId(), pb = newPaperId();
+    changePapers((rec, now) => {
+      rec = setPaperEntry(rec, 'name', pa, 'Paper A', now);
+      rec = setPaperEntry(rec, 'name', pb, 'Paper B', now);
+      for (const [d, p] of [[a1, pa], [a2, pa], [b1, pb]]) rec = setPaperEntry(rec, 'member', d, p, now);
+      return rec;
+    });
+    venueSelect.value = 'arr'; venueSelect.dispatchEvent(new Event('change')); await wait(30);
+    const inA = limitInput.value === '5000' && openVenue() === 'arr' && /ACL ARR/.test(venueStat.textContent);
+    limitInput.value = '4321'; limitInput.dispatchEvent(new Event('input')); await wait(30);
+    const typed = openLimit() === 4321 && /your limit/.test(venueStat.textContent);
+    switchDraft(b1); await wait(30);
+    const inB = openVenue() === prefs.venue && limitInput.value === String(prefs.limit);
+    switchDraft(a2); await wait(30);
+    const backInA = openVenue() === 'arr' && limitInput.value === '4321';
+    const prefsSame = localStorage.getItem(PREFS_KEY) === prefsBefore;
+    const stored = parsePapers(localStorage.getItem(PAPERS_KEY));
+    const recorded = stored.maps.venue[pa].v === 'arr' && stored.maps.limit[pa].v === 4321 && !stored.maps.venue[pb];
+    window.__papersSmoke = { startId, a1, a2, b1, pa, pb };
+    return inA && typed && inB && backInA && prefsSame && recorded ||
+      { inA, typed, inB, backInA, prefsSame, recorded, venue: openVenue(), limit: limitInput.value };`);
+
+  await check('deleting a paper’s open draft opens a draft of the same paper and names the paper', `
+    const { a1, a2, b1 } = window.__papersSmoke;
+    switchDraft(a2); await wait(30);
+    let asked = '';
+    window.confirm = (m) => { asked = m; return true; };
+    deleteDraft(a2); await wait(30);
+    const stayed = draftMeta.active === a1 && openPaper() === window.__papersSmoke.pa;
+    return stayed && /“A R2” of Paper A/.test(asked) && !!draftById(b1) ||
+      { stayed, active: draftMeta.active, asked };`);
+
+  await check('another window’s paper change is merged in, never replacing this window’s', `
+    const { a1, b1, pa, pb } = window.__papersSmoke;
+    /* Another window renames paper B and moves A R1 there, with a stale copy that
+       lacks this window's venue for paper A. */
+    let theirs = setPaperEntry(parsePapers('{}'), 'name', pb, 'Paper B renamed', Date.now() + 5);
+    theirs = setPaperEntry(theirs, 'member', a1, pb, Date.now() + 5);
+    localStorage.setItem(PAPERS_KEY, serializePapers(theirs));
+    window.dispatchEvent(new StorageEvent('storage', { key: PAPERS_KEY, newValue: serializePapers(theirs) }));
+    await wait(30);
+    const venueOf = (rec) => (rec.maps.venue && rec.maps.venue[pa] || {}).v;
+    const merged = paperName(papers, pb) === 'Paper B renamed' && paperOfDraft(a1) === pb && venueOf(papers) === 'arr';
+    const state1 = serializePapers(papers);
+    /* The next change here writes the merge, so the other window's copy is kept. */
+    changePapers((rec, now) => setPaperEntry(rec, 'name', pa, 'Paper A', now));
+    const kept = parsePapers(localStorage.getItem(PAPERS_KEY));
+    const written = paperName(kept, pb) === 'Paper B renamed' && venueOf(kept) === 'arr';
+    /* Clean up: back to the start draft, these drafts deleted, no papers left shown. */
+    window.confirm = () => true;
+    switchDraft(window.__papersSmoke.startId);
+    [a1, b1].forEach(deleteDraft);
+    await wait(30);
+    return merged && written && !papersView(draftMeta.list, papers).papers.length || { merged, written, state1 };`);
+
   /* codex-review-312: in the preferences object, another window's save of an
      unrelated switch wrote its old copy over the list. */
   await check('the word list has its own key: another window’s preference save leaves it, and its edit arrives', `

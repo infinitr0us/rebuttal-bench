@@ -7735,14 +7735,8 @@ function applyPrefs() {
   fsEditorVal.textContent = prefs.fsEditor;
   fsPreviewVal.textContent = prefs.zoomPreview + '%';
   themeBtn.textContent = prefs.theme === 'dark' ? 'Light mode' : 'Dark mode';
-  limitInput.value = prefs.limit;
   syncBox.checked = !!prefs.sync;
-  var venue = venueById(prefs.venue);
-  venueSelect.value = venue ? venue.id : '';
-  venueSelect.title = venue
-    ? venue.name + ': ' + venue.rule + '. Source: ' + venue.source + (venue.also ? '; also ' + venue.also.join(', ') : '') +
-      ' (checked ' + VENUES_CHECKED + '; rules change every year)'
-    : 'Choose a venue to set its character limit and check links against its rebuttal rules';
+  applyVenueLimit();
   compactBox.open = !!prefs.compactOpen;
   wordingBox.open = !!prefs.wordingOpen;
   sectionsBox.open = !!prefs.sectionsOpen;
@@ -7754,8 +7748,6 @@ function applyPrefs() {
   Array.prototype.forEach.call(compactList.querySelectorAll('input[data-trick]'), function (box) {
     box.checked = !!prefs.compact[box.getAttribute('data-trick')];
   });
-  renderVenueStat();
-  renderReportLinks();
   skeletonQuote.checked = !!prefs.skeletonQuotes;
   applyView();
   themeReviewBox();
@@ -7766,8 +7758,24 @@ function applyPrefs() {
    counts and its link rule, or that the limit is the author's own (the venue
    states no number, or the author typed another one). It opens the official
    page, which carries nothing of the draft. */
+/* The venue and limit controls, the rule beside the counter and the report
+   links, for the open draft's paper (openVenue, openLimit). A limit being
+   typed is left as it is while it says the same number. */
+function applyVenueLimit() {
+  var limit = openLimit();
+  if (document.activeElement !== limitInput || (parseInt(limitInput.value, 10) || 0) !== limit) limitInput.value = limit;
+  var venue = venueById(openVenue());
+  venueSelect.value = venue ? venue.id : '';
+  venueSelect.title = venue
+    ? venue.name + ': ' + venue.rule + '. Source: ' + venue.source + (venue.also ? '; also ' + venue.also.join(', ') : '') +
+      ' (checked ' + VENUES_CHECKED + '; rules change every year)'
+    : 'Choose a venue to set its character limit and check links against its rebuttal rules';
+  renderVenueStat();
+  renderReportLinks();
+}
+
 function renderVenueStat() {
-  var venue = venueById(prefs.venue);
+  var venue = venueById(openVenue());
   venueStat.hidden = !venue;
   if (!venue) {
     venueStat.textContent = '';
@@ -7775,7 +7783,7 @@ function renderVenueStat() {
     limitInput.title = 'Your own character limit';
     return;
   }
-  var own = !venue.limit || prefs.limit !== venue.limit;
+  var own = !venue.limit || openLimit() !== venue.limit;
   var parts = [venue.label,
     own ? 'your limit (' + (venue.limit ? 'rule: ' + fmt(venue.limit) + ' ' + venue.unit : 'none stated') + ')' : venue.unit];
   if (venue.linksBrief) parts.push(venue.linksBrief);
@@ -7793,7 +7801,7 @@ function renderVenueStat() {
 function renderReportLinks() {
   appVersion.textContent = APP_VERSION;
   reportLink.href = reportUrl('problem.yml', {
-    version: APP_VERSION, browser: browserLabel(navigator.userAgent), venue: reportVenue(venueById(prefs.venue))
+    version: APP_VERSION, browser: browserLabel(navigator.userAgent), venue: reportVenue(venueById(openVenue()))
   });
   ideaLink.href = reportUrl('idea.yml', { version: APP_VERSION });
 }
@@ -7845,6 +7853,118 @@ var readCache = {};        /* key -> a text read from the store that did not fit
 var remoteQueue = {};      /* key -> writes waiting for the asynchronous store */
 var draftReady = false;    /* the open draft has been restored */
 var draftTimer = null;
+
+/* ---- papers: drafts grouped by the paper they answer ----
+   The pure part (parsePapers, mergePapers, papersView, paperVenue, …) says
+   why the record can only regroup drafts, never lose one. `papers` is this
+   window's merge of every copy it has seen. A change is merged with the copy
+   this browser stores now, then written whole: straight to localStorage,
+   never through fallbackSet, whose memory copy and retries would write an old
+   record back over another window's newer one; and through remoteWrite,
+   which merges with the store's copy just before writing. Another window's
+   write arrives as a storage event; every copy is merged, none replaces
+   another. A record written by a later version is read, never written. No
+   papers state lives in `prefs`, which every window writes whole (3.12's word
+   list was clobbered that way). The open paper is the open draft's: nothing
+   else to store. */
+var PAPERS_KEY = 'rebuttal-bench-papers';
+var papers = parsePapers(storedValue(PAPERS_KEY));
+var papersStored = true;   /* false: this window's last write to localStorage was refused */
+
+function writePapersLocal() {
+  if (papers.newer || !canLocalRead) return;
+  try {
+    localStorage.setItem(PAPERS_KEY, serializePapers(papers));
+    papersStored = true;
+  } catch (e) {
+    papersStored = false; /* kept in memory; the next change or event tries again */
+  }
+}
+/* The store's merge: never over a record from a later version. */
+function papersMergeJSON(mine, stored) {
+  var theirs = parsePapers(stored);
+  return theirs.newer ? stored : serializePapers(mergePapers(parsePapers(mine), theirs));
+}
+function sendPapers() {
+  if (!canArtifactStore || papers.newer) return;
+  remoteWrite(PAPERS_KEY, serializePapers(papers), papersMergeJSON).then(function (r) {
+    /* The merge may bring another device's changes: take them in. */
+    if (r.ok && typeof r.value === 'string' && takeInPapers(parsePapers(r.value))) writePapersLocal();
+  });
+}
+/* Another copy (another window's, the store's, the one stored now): merged,
+   so this window's own changes stay. True when it changed something here. */
+function takeInPapers(rec) {
+  var merged = mergePapers(papers, rec);
+  if (!papersStored) writePapersLocal();
+  if (serializePapers(merged) === serializePapers(papers)) return false;
+  papers = merged;
+  papersChanged();
+  return true;
+}
+/* Change the record: `change(rec, now)` returns the new one (setPaperEntry
+   returns the same record for no change). Only with the drafts restored, and
+   never on a record from a later version. */
+function changePapers(change) {
+  if (!draftReady || papers.newer) return false;
+  var stored = storedValue(PAPERS_KEY);
+  papers = mergePapers(papers, parsePapers(stored));
+  var next = change(papers, Date.now()), changed = next !== papers;
+  papers = next;
+  /* Also when only the merge differs from the stored copy, so this browser's
+     copy holds everything this window knows. */
+  if (changed || stored !== serializePapers(papers)) writePapersLocal();
+  if (changed) sendPapers();
+  papersChanged();
+  return true;
+}
+/* At start, once the drafts are restored: the store's copy merged in, and the
+   merge written to whichever side lacks it (idempotent, no marks), so that a
+   grouping whose write to the store failed still gets there. */
+function bootPapers() {
+  if (!canArtifactStore) return;
+  remoteRead(PAPERS_KEY).then(function (r) {
+    if (!r.ok) return;
+    var remote = parsePapers(r.value);
+    takeInPapers(remote);
+    if (papers.newer) return;
+    if (storedValue(PAPERS_KEY) !== serializePapers(papers)) writePapersLocal();
+    if (remote.newer) return;
+    if (r.value === null || serializePapers(remote) !== serializePapers(papers)) sendPapers();
+  });
+}
+window.addEventListener('storage', function (e) {
+  if (e.key === PAPERS_KEY) takeInPapers(parsePapers(e.newValue));
+});
+window.addEventListener('pageshow', function (e) {
+  if (e.persisted) takeInPapers(parsePapers(storedValue(PAPERS_KEY)));
+});
+
+/* The paper of a draft ('' for none) and the open draft's venue and limit,
+   from its paper's own entries, else the global preferences. Every reader of
+   the venue and limit goes through these. */
+function paperOfDraft(id) {
+  return papersView([{ id: id }], papers).paperOf[id] || '';
+}
+function openPaper() {
+  return draftReady ? paperOfDraft(draftMeta.active) : '';
+}
+function openVenue() {
+  return paperVenue(papers, openPaper(), prefs.venue);
+}
+function openLimit() {
+  return paperLimit(papers, openPaper(), prefs.limit, prefs.ownLimit);
+}
+/* Everything the open draft's paper decides: the venue and limit shown, the
+   cards (check 15, the counters, reviewer cards) and the tabs. */
+function papersChanged() {
+  applyVenueLimit();
+  if (!draftReady) return;
+  renderDraftTabs();
+  updateAll();
+  refreshReviewerCards();
+}
+
 function keyOfDraft(id) { return id === 'd1' ? DRAFT_KEY : DRAFT_KEY + '-' + id; }
 function pendingKey(key) { return key + '-pending'; }
 function deletingKey(key) { return key + ':deleting'; }
@@ -8323,7 +8443,7 @@ function characterStat(chars, limit) {
    by updateAll and texProblemIssues so macro-fix verification sees the same
    hazards as the cards, while Fix all and compaction stay independent of them. */
 function pageAnalyzeOptions() {
-  return { venue: prefs.venue, identity: identityTerms(identityText) };
+  return { venue: openVenue(), identity: identityTerms(identityText) };
 }
 
 function updateAll() {
@@ -8763,6 +8883,7 @@ function openDraft(id) {
     load.then(function (res) { clearTimeout(give); unlockDraft(id, res); });
   }
   loadReviewBox(id);
+  applyVenueLimit(); /* the draft opened may be another paper's, with its own venue and limit */
   updateAll();
   renderPreview();
 }
@@ -8847,6 +8968,17 @@ function renameDraft(id) {
   refreshReviewerCards(); /* the reviewer cards read the tabs' names */
 }
 
+/* The draft to open after the one at `i` (already taken out of the list) is
+   deleted: the previous draft of the same paper, else the next one, else the
+   global neighbour. Opening another paper's draft would put the author in that
+   paper, where a second Delete could remove a draft of the same name. */
+function neighbourInPaper(i, pid) {
+  var list = draftMeta.list;
+  for (var j = i - 1; j >= 0; j--) if (paperOfDraft(list[j].id) === pid) return list[j];
+  for (var k = i; k < list.length; k++) if (paperOfDraft(list[k].id) === pid) return list[k];
+  return list[Math.max(0, i - 1)];
+}
+
 function deleteDraft(id) {
   /* Another window may have deleted drafts meanwhile: never delete the last. */
   var latest = fallbackGet(DRAFTS_KEY);
@@ -8856,15 +8988,18 @@ function deleteDraft(id) {
   /* Ask whenever there is text, in this editor or stored by another window
      since this one last looked. */
   var stored = fallbackGet(keyOfDraft(id));
+  /* With papers, drafts of several papers share names ("R2"): say whose. */
+  var pid = paperOfDraft(id), named = !papersView(draftMeta.list, papers).papers.length ? ''
+    : pid ? ' of ' + paperName(papers, pid) : ' (no paper)';
   if ((draftText(id).trim() || (typeof stored === 'string' && stored.trim())) &&
-      !window.confirm('Delete the draft “' + d.name + '”? Its text cannot be brought back.')) return;
+      !window.confirm('Delete the draft “' + d.name + '”' + named + '? Its text cannot be brought back.')) return;
   var i = draftMeta.list.indexOf(d);
   draftMeta.list.splice(i, 1);
   draftMeta.gone[id] = Math.max(Date.now(), d.at + 1);
   delete draftTexts[id];
   if (id === draftMeta.active) {
     clearTimeout(draftTimer);
-    openDraft(draftMeta.list[Math.max(0, i - 1)].id);
+    openDraft(neighbourInPaper(i, pid).id);
   }
   deleteDraftStorage(keyOfDraft(id));
   dropHistory(id);
@@ -8960,7 +9095,7 @@ var splitDraftsBtn = document.getElementById('splitDraftsBtn');
 var splitResult = null;
 
 function renderSplit() {
-  var limit = Math.max(0, parseInt(limitInput.value, 10) || 0), venue = venueById(prefs.venue);
+  var limit = Math.max(0, parseInt(limitInput.value, 10) || 0), venue = venueById(openVenue());
   var compact = splitCompactBox.checked ? compactResult(true) : null;
   /* The comment as posted: its first block may read differently untrimmed. */
   splitResult = limit ? splitComment((compact ? compact.text : ta.value).trim(), limit, { label: splitLabelBox.checked }) : null;
@@ -10626,8 +10761,17 @@ window.addEventListener('pagehide', flushDraft);
    own limit or the stored ownLimit. Recorded even when the value equals the
    default, which savePrefs's comparison would not notice. */
 var limitAction = null;
+/* In a paper, the venue and limit are the paper's (its entries in the papers
+   record), and the preferences stay as they are; under "No paper", and before
+   the drafts are restored (the open draft's paper is not known yet), they are
+   the preferences, as in 3.12. */
 limitInput.addEventListener('input', function () {
-  prefs.limit = prefs.ownLimit = Math.max(0, parseInt(limitInput.value, 10) || 0);
+  var typed = Math.max(0, parseInt(limitInput.value, 10) || 0), pid = openPaper();
+  if (pid) {
+    changePapers(function (rec, now) { return setPaperEntry(rec, 'limit', pid, typed, now); });
+    return;
+  }
+  prefs.limit = prefs.ownLimit = typed;
   if (!prefsRestored) { limitAction = 'typed'; prefsTouched.limit = prefsTouched.ownLimit = true; }
   renderVenueStat();
   savePrefs();
@@ -10635,14 +10779,21 @@ limitInput.addEventListener('input', function () {
 });
 
 venueSelect.addEventListener('change', function () {
-  var venue = venueById(venueSelect.value);
-  prefs.venue = venue ? venue.id : '';
-  prefs.limit = venue && venue.limit ? venue.limit : prefs.ownLimit;
-  if (!prefsRestored) { limitAction = 'venue'; prefsTouched.venue = true; }
-  applyPrefs();
-  savePrefs();
-  updateAll();
-  if (venue) showToast(venue.name + ': ' + venue.rule + '.' + (venue.limit ? '' : ' Limit: your own, ' + fmt(prefs.limit) + '.'));
+  var venue = venueById(venueSelect.value), pid = openPaper();
+  if (pid) {
+    /* A new venue replaces a limit typed for the old one, as below. */
+    changePapers(function (rec, now) {
+      return setPaperEntry(setPaperEntry(rec, 'venue', pid, venue ? venue.id : '', now), 'limit', pid, null, now);
+    });
+  } else {
+    prefs.venue = venue ? venue.id : '';
+    prefs.limit = venue && venue.limit ? venue.limit : prefs.ownLimit;
+    if (!prefsRestored) { limitAction = 'venue'; prefsTouched.venue = true; }
+    applyPrefs();
+    savePrefs();
+    updateAll();
+  }
+  if (venue) showToast(venue.name + ': ' + venue.rule + '.' + (venue.limit ? '' : ' Limit: your own, ' + fmt(openLimit()) + '.'));
 });
 
 syncBox.addEventListener('change', function () {
@@ -11022,6 +11173,8 @@ function finishBoot(draft, note) {
   pruneHistory();
   renderDraftTabs();
   loadReviewBox(draftMeta.active);
+  applyVenueLimit(); /* the open draft's paper is known now */
+  bootPapers();
   updateAll();
   renderPreview();
 }
