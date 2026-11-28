@@ -531,6 +531,44 @@ window.MathJax = {
   .findmarks { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
   .findmarks span { position: absolute; border-radius: 2px; background: rgba(255, 200, 0, 0.28); }
   .findmarks span.cur { background: rgba(255, 140, 0, 0.5); outline: 1px solid rgba(200, 100, 0, 0.8); }
+  .findresults {
+    /* An item of the pane's column: as a shrinking item it lost its room to
+       the editor (down to its padding), so it keeps its height, capped at a
+       share of the pane, and scrolls. */
+    flex: none;
+    max-height: min(150px, 22%);
+    overflow-y: auto;
+    padding: 6px 18px 8px;
+    background: var(--head-bg);
+    border-top: 1px solid var(--line);
+    font-size: 12px;
+  }
+  .findresults[hidden] { display: none; }
+  .findres-row { padding: 4px 0; border-bottom: 1px solid var(--card-line); }
+  .findres-row:last-child { border-bottom: none; }
+  .findres-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .findres-name { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .findres-count { font-family: var(--mono); font-size: 11px; color: var(--dim); white-space: nowrap; }
+  .findres-snips { display: flex; flex-direction: column; gap: 2px; margin-top: 3px; }
+  .findres-snip {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: none;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--dim);
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .findres-snip:hover, .findres-snip:focus-visible { background: var(--card-hover); color: var(--text); }
+  .findres-snip b { color: var(--text); font-weight: 700; }
+  .findres-more, .findres-empty { color: var(--dim); font-size: 11.5px; padding: 2px 0; }
 
   /* editor */
   #src {
@@ -734,6 +772,14 @@ window.MathJax = {
   .section .bar span { display: block; height: 100%; background: var(--accent); }
   .section .gain { font-family: var(--mono); font-size: 11.5px; color: var(--dim); white-space: nowrap; }
   #promisesList h3 { margin: 8px 0 2px; font-size: inherit; }
+  .ready-row { flex-wrap: wrap; row-gap: 2px; padding: 3px 0; }
+  .ready-row[aria-current="true"] .name { font-weight: 600; }
+  .ready-meta { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--dim); white-space: nowrap; }
+  .ready-item.err { color: var(--err); font-weight: 600; }
+  .ready-item.warn { color: var(--title-warn); }
+  .ready-mark { display: inline-block; min-width: 14px; text-align: center; font-weight: 700; }
+  .ready-mark.ok { color: var(--ok); }
+  .ready-mark.no { color: var(--dim); }
   #anonSum:not(.zero) { color: var(--err); }
   #anonSlot {
     height: 6.5em;
@@ -1211,11 +1257,13 @@ window.MathJax = {
       <button type="button" id="findPrev" title="Previous match (Shift+Enter)" aria-label="Previous match">↑</button>
       <button type="button" id="findNext" title="Next match (Enter)" aria-label="Next match">↓</button>
       <label title="Match upper and lower case exactly"><input type="checkbox" id="findCase"> Aa</label>
+      <label id="findAllLabel" title="All drafts"><input type="checkbox" id="findAll"> <span id="findAllText">All drafts</span></label>
       <input id="replaceInput" type="text" placeholder="Replace with" aria-label="Replace with" spellcheck="false" autocomplete="off">
       <button type="button" id="replaceOne" title="Replace this match, then go to the next (Enter in the field)">Replace</button>
       <button type="button" id="replaceAll" title="Replace every match; one undo brings the text back">Replace all</button>
       <button type="button" id="findClose" class="modal-x" title="Close (Escape)" aria-label="Close find and replace">×</button>
     </div>
+    <div id="findResults" class="findresults" hidden aria-label="Matches across drafts"></div>
     <div id="draftPanel" class="dpanel" role="tabpanel"><div id="findMarks" class="findmarks" aria-hidden="true"></div><textarea id="src" spellcheck="false" placeholder="Type or paste your rebuttal…"></textarea></div>
     <div class="lint">
       <div class="lint-head"><span>Hazards</span> <span id="lintCount" class="zero">0</span><button type="button" id="fixAllBtn" hidden title="Rewrite every hazard that has a mechanical fix. One Ctrl+Z undoes the whole pass.">Fix all</button></div>
@@ -1253,6 +1301,13 @@ window.MathJax = {
         <p class="compact-note">Select a sentence to open it in its draft. Copy future changes as a revision checklist.</p>
         <div id="promisesList"></div>
         <div class="compact-actions"><button type="button" id="copyPromises" disabled>Copy as checklist</button></div>
+      </div>
+    </details>
+    <details class="compact" id="readyBox">
+      <summary>Ready to post <span id="readySum" class="compact-sum zero"></span></summary>
+      <div class="compact-body">
+        <p class="compact-note">Counts the analyzer’s cards and placeholders for each draft of this paper. MathJax’s own errors show when a draft is open.</p>
+        <div id="readyList"></div>
       </div>
     </details>
     <details class="compact" id="anonBox">
@@ -7575,7 +7630,11 @@ function splitComment(text, limit, opts) {
   var n = parts.length, warnings = [];
   if (numbered && n > 1) parts = parts.map(function (p, i) { return '(' + (i + 1) + '/' + n + ')\n\n' + p; });
 
-  /* What each part defines and uses, for the fresh TeX state of each comment. */
+  /* What each part defines and uses across parts. OpenReview's forum never
+     resets MathJax's TeX state (no texReset in openreview-web), so a comment
+     sees the definitions and labels of the comments typeset before it on the
+     page, and only those: that order depends on how the forum sorts and loads
+     its replies, and the e-mail shows the source. Each part must stand alone. */
   var defRe = /\\(?:newcommand|renewcommand|providecommand|DeclareMathOperator)\*?\s*\{?\s*\\([A-Za-z]+)|\\def\s*\\([A-Za-z]+)/g;
   var info = parts.map(function (p) {
     var defined = {}, labels = {}, m2;
@@ -7594,7 +7653,7 @@ function splitComment(text, limit, opts) {
         if (new RegExp('\\\\' + name + '(?![A-Za-z])').test(pi.text)) {
           reported['\\' + name] = true;
           warnings.push({ part: j + 1, message: 'Part ' + (j + 1) + ' uses \\' + name + ', defined in part ' + (i + 1) +
-            ': each comment is typeset on its own, so repeat the definition.' });
+            ': whether a comment sees another comment’s definitions depends on the order OpenReview shows them in, so repeat the definition.' });
         }
       });
       Object.keys(other.labels).forEach(function (lab) {
@@ -7602,7 +7661,7 @@ function splitComment(text, limit, opts) {
         if (new RegExp('\\\\(?:eq)?ref\\{' + escRe(lab) + '\\}').test(pi.text)) {
           reported[lab] = true;
           warnings.push({ part: j + 1, message: 'Part ' + (j + 1) + ' refers to \\label{' + lab + '} in part ' + (i + 1) +
-            ': OpenReview will show (???).' });
+            ': OpenReview shows (???) unless part ' + (i + 1) + ' happens to be typeset first, so write the number out.' });
         }
       });
     });
@@ -7614,6 +7673,70 @@ function splitComment(text, limit, opts) {
     }),
     warnings: warnings,
     over: parts.filter(function (p) { return p.trim().length > limit; }).length
+  };
+}
+
+/* Literal substring matches in `text` (non-overlapping, in source order),
+   shared by Find in the open draft and Find across drafts. */
+function findInText(text, query, caseSensitive) {
+  if (typeof text !== 'string' || typeof query !== 'string' || !query) return [];
+  var out = [], re = new RegExp(escRe(query), caseSensitive ? 'g' : 'gi'), m;
+  while ((m = re.exec(text))) out.push({ start: m.index, end: m.index + m[0].length });
+  return out;
+}
+
+/* Per-draft readiness summary for the Ready to post panel: counts trimmed
+   length, analyzer hazards, review coverage when a review has points, and
+   promises by kind. Check 17's placeholders and check 21's identity matches
+   have counts of their own and are left out of `hazards`, so the panel never
+   shows one card twice. MathJax typeset errors are excluded because they
+   require a render. */
+function draftReadiness(text, opts) {
+  text = typeof text === 'string' ? text : '';
+  opts = opts || {};
+  var posted = text.trim();
+  var chars = posted.length;
+  var limit = typeof opts.limit === 'number' && opts.limit > 0 ? opts.limit : 0;
+  var over = limit > 0 && chars > limit;
+  var res = opts.analysis || analyze(text, opts.analyze);
+  var hazards = { err: 0, warn: 0, note: 0 };
+  var placeholders = 0, identity = 0;
+  res.issues.forEach(function (iss) {
+    if (iss.title === 'Placeholder left in the text') placeholders++;
+    else if (iss.title === 'Words that name the authors') identity++;
+    else if (iss.sev === 'err') hazards.err++;
+    else if (iss.sev === 'warn') hazards.warn++;
+    else if (iss.sev === 'note') hazards.note++;
+  });
+  var coverage = null;
+  if (typeof opts.review === 'string' && opts.review.trim()) {
+    /* A review with no points the review view can find: {0, 0}, unlike no
+       review at all (null). */
+    var rp = reviewPoints(opts.review), covered = 0;
+    if (rp.points.length) {
+      reviewCoverage(rp.points, posted).forEach(function (c) { if (c.status !== 'missing') covered++; });
+    }
+    coverage = { covered: covered, total: rp.points.length };
+  }
+  /* A draft shows at most 30 identity cards; analyze counts every match. */
+  if (typeof res.identityCount === 'number' && res.identityCount > identity) identity = res.identityCount;
+  var promises = { will: 0, done: 0 };
+  promisesIn(text, res.spans).forEach(function (p) {
+    if (p.kind === 'will') promises.will++;
+    else if (p.kind === 'done') promises.done++;
+  });
+  var ready = !over && hazards.err === 0 && placeholders === 0 && identity === 0 &&
+    (!coverage || coverage.covered === coverage.total); /* {0, 0} counts as answered */
+  return {
+    chars: chars,
+    limit: limit,
+    over: over,
+    hazards: hazards,
+    placeholders: placeholders,
+    identity: identity,
+    coverage: coverage,
+    promises: promises,
+    ready: ready
   };
 }
 
@@ -7755,6 +7878,9 @@ var promisesBox = document.getElementById('promisesBox');
 var promisesSum = document.getElementById('promisesSum');
 var promisesList = document.getElementById('promisesList');
 var copyPromises = document.getElementById('copyPromises');
+var readyBox = document.getElementById('readyBox');
+var readySum = document.getElementById('readySum');
+var readyList = document.getElementById('readyList');
 var anonBox = document.getElementById('anonBox');
 var anonSum = document.getElementById('anonSum');
 var anonSlot = document.getElementById('anonSlot');
@@ -8101,6 +8227,11 @@ function paperOfDraft(id) {
 function openPaper() {
   return draftReady ? paperOfDraft(draftMeta.active) : '';
 }
+/* Drafts of the open paper (or No paper) in tab order, matching renderDraftTabs. */
+function openPaperDrafts() {
+  var pid = openPaper();
+  return draftMeta.list.filter(function (d) { return paperOfDraft(d.id) === pid; });
+}
 function openVenue() {
   return paperVenue(papers, openPaper(), prefs.venue);
 }
@@ -8429,7 +8560,9 @@ function clearOldMath(target) {
 }
 
 /* MathJax keeps \label keys and \newcommand definitions from one typeset to
-   the next, but OpenReview renders a comment once. Without a reset, every
+   the next. OpenReview's forum does not reset them either, across comments,
+   but the preview shows one comment as it renders with nothing before it on
+   the page (see splitComment), and renders it again on every keystroke. Without a reset, every
    labelled equation turns into "Label multiply defined" after the first
    keystroke, and a deleted macro definition keeps working in the preview. */
 var mathtoolsDefaults = typeof WeakMap === 'function' ? new WeakMap() : { get: function () { return null; }, set: function () {} };
@@ -8606,12 +8739,15 @@ function pageAnalyzeOptions() {
   return { venue: openVenue(), identity: identityTerms(identityText) };
 }
 
+var lastAnalysisKey = '';
 function updateAll() {
   var text = ta.value;
   analyzedText = text;
   lineStarts = computeLineStarts(text);
 
-  var res = analyze(text, pageAnalyzeOptions());
+  var analyzeOpts = pageAnalyzeOptions();
+  lastAnalysisKey = analyzeOpts.venue + '\0' + identityText;
+  var res = analyze(text, analyzeOpts);
   lastAnalysis = res;
 
   /* stats — counted like OpenReview's own counter (TextAreaWidget.js):
@@ -8635,6 +8771,7 @@ function updateAll() {
   renderWording(text, res.spans);
   renderSections(text, chars);
   renderPromises();
+  renderReady();
   renderReview(); /* which points the draft labels or quotes */
   refreshFind(); /* a draft switch puts in another text */
   scheduleCompaction();
@@ -8723,16 +8860,37 @@ function reviewerCards(text, spans) {
     return iss;
   });
 }
+/* Replace a list of buttons (Promises, Ready to post, Find across drafts),
+   keeping the focus on the same row when it is still listed: a background
+   read or another window's save rebuilds the list while the author may be
+   on it with the keyboard. The same row means the same draft, index and
+   text: a row whose sentence or snippet changed is another row, and the
+   focus then leaves the list rather than land on it. A Ready row (a draft,
+   no index) stays the same row when its counts change. */
+function setListHtml(list, html) {
+  var el = document.activeElement, attrs = ['data-draft', 'data-promise', 'data-match'], want = null, label = '';
+  if (el && el !== list && list.contains(el)) {
+    want = attrs.map(function (a) { return el.getAttribute(a); });
+    label = el.textContent;
+  }
+  list.innerHTML = html;
+  if (!want) return;
+  var rows = list.querySelectorAll('button');
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    var sameText = (want[1] === null && want[2] === null) || row.textContent === label;
+    if (sameText && attrs.every(function (a, k) { return row.getAttribute(a) === want[k]; })) { row.focus(); return; }
+  }
+}
+
 /* Only changed bodies need another pass through Marked. An unknown body
    stays distinct from an empty one, including during background reads. */
-var promisesByDraft = Object.create(null), promisesHtml = '', pendingPromise = null;
+var promisesByDraft = Object.create(null), promisesHtml = '';
 function renderPromises() {
   var next = Object.create(null), html = '', count = 0, checklist = [];
   if (!draftReady) return checklist;
-  var pid = openPaper();
-  draftMeta.list.filter(function (d) { return paperOfDraft(d.id) === pid; }).forEach(function (d) {
-    var text = knownDraftText(d.id);
-    if (text !== null) text = text.replace(/\r\n?/g, '\n'); /* textarea offsets when opened */
+  openPaperDrafts().forEach(function (d) {
+    var text = shownDraftText(d.id); /* textarea offsets when opened */
     var entry = promisesByDraft[d.id];
     if (!entry || entry.text !== text) {
       entry = { text: text, rows: promisesIn(text, lastAnalysis && analyzedText === text ? lastAnalysis.spans : null) };
@@ -8753,26 +8911,95 @@ function renderPromises() {
   });
   promisesByDraft = next;
   if (!html) html = '<div class="lint-empty">No promises found in these drafts.</div>';
-  if (promisesHtml !== html) { promisesList.innerHTML = html; promisesHtml = html; }
+  if (promisesHtml !== html) { setListHtml(promisesList, html); promisesHtml = html; }
   promisesSum.textContent = count + (count === 1 ? ' promise' : ' promises');
   promisesSum.classList.toggle('zero', !count);
   copyPromises.disabled = !checklist.length;
   return checklist;
 }
-function selectPromise(target) {
+/* Open draft `id` and select [target.start, target.end] once its text is
+   ready, verifying it still equals `target.text`. Promises and Find across
+   drafts share this so a draft still loading from the store waits for
+   unlockDraft instead of selecting in stale or locked text. */
+var pendingSelection = null;
+function applyDraftSelection(target) {
   if (ta.value !== target.text) {
-    renderPromises();
-    showToast('The draft has changed since this sentence was listed.');
+    if (target.onStale) target.onStale();
+    showToast(target.staleMessage || 'The draft has changed since this match was listed.');
     return;
   }
   ta.focus();
-  ta.setSelectionRange(target.row.start, target.row.end);
-  revealOffset(target.row.start);
+  ta.setSelectionRange(target.start, target.end);
+  revealOffset(target.start);
+  if (target.onSelect) target.onSelect();
 }
+function openDraftSelection(id, target) {
+  if (!draftById(id)) return;
+  switchDraft(id);
+  if (draftMeta.active !== id) return;
+  if (ta.readOnly) pendingSelection = target; /* unlockDraft checks the text it actually read */
+  else applyDraftSelection(target);
+}
+/* Per-draft readiness cache (by draft id and inputs) for the Ready to post
+   panel. Rendered only while the panel is open so closed drafts cost nothing. */
+var readyByDraft = Object.create(null), readyHtml = '';
+function renderReady() {
+  if (!draftReady || !readyBox.open) return;
+  var drafts = openPaperDrafts(), limit = openLimit(), analyzeOpts = pageAnalyzeOptions();
+  var venue = analyzeOpts.venue, idKey = identityText, aKey = venue + '\0' + idKey;
+  var next = Object.create(null), html = '', readyCount = 0;
+  drafts.forEach(function (d) {
+    var text = shownDraftText(d.id), active = d.id === draftMeta.active;
+    if (text === null) {
+      html += '<button type="button" class="section ready-row" data-draft="' + escAttr(d.id) + '" data-ready="0"' +
+        (active ? ' aria-current="true"' : '') + ' title="' + escAttr(d.name + ': not loaded') + '">' +
+        '<span class="name">' + escHtml(d.name) + '</span>' +
+        '<span class="ready-meta"><span class="ready-item">not loaded</span>' +
+        '<span class="ready-mark no" aria-label="Not ready">–</span></span></button>';
+      return;
+    }
+    var review = draftReviewText(d.id);
+    var entry = readyByDraft[d.id];
+    if (!entry || entry.text !== text || entry.review !== review || entry.venue !== venue ||
+        entry.idKey !== idKey || entry.limit !== limit) {
+      var shared = active && lastAnalysis && analyzedText === text && lastAnalysisKey === aKey ? lastAnalysis : null;
+      entry = {
+        text: text, review: review, venue: venue, idKey: idKey, limit: limit,
+        r: draftReadiness(text, { limit: limit, review: review, analyze: analyzeOpts, analysis: shared })
+      };
+    }
+    next[d.id] = entry;
+    var r = entry.r, parts = [];
+    if (r.ready) readyCount++;
+    parts.push('<span class="ready-item' + (r.over ? ' err' : '') + '">' +
+      (r.limit > 0 ? fmt(r.chars) + ' / ' + fmt(r.limit) : fmt(r.chars)) + '</span>');
+    if (r.hazards.err) parts.push('<span class="ready-item err">' + fmt(r.hazards.err) + (r.hazards.err === 1 ? ' error' : ' errors') + '</span>');
+    if (r.hazards.warn) parts.push('<span class="ready-item warn">' + fmt(r.hazards.warn) + (r.hazards.warn === 1 ? ' warning' : ' warnings') + '</span>');
+    if (r.placeholders) parts.push('<span class="ready-item warn">' + fmt(r.placeholders) + (r.placeholders === 1 ? ' placeholder' : ' placeholders') + '</span>');
+    if (r.identity) parts.push('<span class="ready-item err">' + fmt(r.identity) + (r.identity === 1 ? ' identity match' : ' identity matches') + '</span>');
+    if (r.coverage && !r.coverage.total) parts.push('<span class="ready-item" title="The review view finds no points in this draft’s review">no points</span>');
+    else if (r.coverage) parts.push('<span class="ready-item' + (r.coverage.covered < r.coverage.total ? ' warn' : '') + '">' + r.coverage.covered + '/' + r.coverage.total + '</span>');
+    if (r.promises.will) parts.push('<span class="ready-item">' + fmt(r.promises.will) + ' to do</span>');
+    parts.push(r.ready
+      ? '<span class="ready-mark ok" aria-label="Ready" title="Ready to post">✓</span>'
+      : '<span class="ready-mark no" aria-label="Not ready" title="Not ready yet">–</span>');
+    html += '<button type="button" class="section ready-row" data-draft="' + escAttr(d.id) + '" data-ready="' + (r.ready ? '1' : '0') + '"' +
+      (active ? ' aria-current="true"' : '') + ' title="' + escAttr('Open ' + d.name) + '">' +
+      '<span class="name">' + escHtml(d.name) + '</span>' +
+      '<span class="ready-meta">' + parts.join('') + '</span></button>';
+  });
+  readyByDraft = next;
+  if (readyHtml !== html) { setListHtml(readyList, html); readyHtml = html; }
+  readySum.textContent = readyCount + ' of ' + drafts.length + ' ready';
+  readySum.classList.toggle('zero', !drafts.length || readyCount < drafts.length);
+}
+
 function refreshReviewerCards() {
   if (lastAnalysis && analyzedText === ta.value) renderIssues();
   renderReview(); /* its note compares the review's reviewer with the tab's name */
   renderPromises();
+  renderReady();
+  refreshFind();
 }
 
 /* The analyzer's hazards for analyzedText plus what MathJax reported in the
@@ -8857,7 +9084,7 @@ function startBodyLoad(id) {
     if (res.pending && id !== draftMeta.active && typeof res.value === 'string') storeDraft(res.value, key);
     /* Its text is known now: the Promises panel and the pointer cards read it. */
     if (id !== draftMeta.active) {
-      if (draftReady) renderPromises();
+      if (draftReady) { renderPromises(); renderReady(); }
       refreshReviewerCards();
     }
     return res;
@@ -9180,7 +9407,7 @@ function renderDraftTabs() {
    whose text has not been read yet (or could not be) is read first, with the
    editor locked meanwhile. */
 function openDraft(id) {
-  pendingPromise = null;
+  pendingSelection = null;
   /* Dialogs work on the draft being left: History's versions, Split's parts,
      the table about to be inserted. */
   if (historyDialog && !historyDialog.hidden) closeHistory();
@@ -9227,7 +9454,11 @@ function unlockDraft(id, res) {
   ta.placeholder = TA_PLACEHOLDER;
   updateAll();
   renderPreview();
-  if (pendingPromise) { selectPromise(pendingPromise); pendingPromise = null; }
+  if (pendingSelection) {
+    var sel = pendingSelection;
+    pendingSelection = null;
+    applyDraftSelection(sel);
+  }
 }
 
 function switchDraft(id) {
@@ -9585,7 +9816,9 @@ window.addEventListener('storage', function (e) {
      draft, a pointer card the drafts other than the open one. */
   else if (draftReady && draftMeta.list.some(function (d) { return e.key === keyOfDraft(d.id); })) {
     renderPromises();
+    renderReady();
     if (e.key !== draftKey) refreshReviewerCards();
+    else refreshFind();
   }
 });
 /* A page restored from the back/forward cache got no storage events while it
@@ -9871,6 +10104,24 @@ function knownDraftText(id) {
   if (typeof local === 'string' && (bodyKnown[id] || state !== 'loading')) return local;
   if (state === 'loading' || !bodyKnown[id]) return null;
   return draftTexts[id] === undefined || draftTexts[id] === EXAMPLE ? '' : draftTexts[id];
+}
+/* What the panels that describe drafts read (Promises, Ready to post, Find
+   across drafts): each draft as its editor shows it, or null (not loaded)
+   whenever knownDraftText is null (not read yet, a read that failed: an
+   empty editor then is no text of the author's). For the open draft that is
+   the editor, which the hazards, the counter and the find boxes describe,
+   also when another window saved a newer copy since (knownDraftText prefers
+   that one, as Export must; a panel that did approved text the editor did not
+   hold). For the others, what openDraft puts in the editor: the stored copy,
+   else the text held in memory, the example included (knownDraftText's empty
+   text for it made a closed example "ready"), with line breaks as a textarea
+   gives them, so a length and an offset do not change when it is opened. */
+function shownDraftText(id) {
+  var text = knownDraftText(id);
+  if (text === null) return null;
+  if (id === draftMeta.active) return ta.readOnly ? text : ta.value;
+  if (typeof fallbackGet(keyOfDraft(id)) !== 'string' && draftTexts[id] === EXAMPLE) text = EXAMPLE;
+  return text.replace(/\r\n?/g, '\n');
 }
 
 function versionTime(at) {
@@ -10579,16 +10830,39 @@ promisesList.addEventListener('click', function (e) {
   var button = e.target.closest('[data-promise]');
   if (!button) return;
   var id = button.getAttribute('data-draft'), entry = promisesByDraft[id];
-  if (!entry || !draftById(id)) return;
-  var target = { text: entry.text, row: entry.rows[Number(button.getAttribute('data-promise'))] };
-  switchDraft(id);
-  if (draftMeta.active !== id) return;
-  if (ta.readOnly) pendingPromise = target; /* unlockDraft checks the text it actually read */
-  else selectPromise(target);
+  var row = entry && entry.rows[Number(button.getAttribute('data-promise'))];
+  if (!row) return;
+  openDraftSelection(id, {
+    text: entry.text,
+    start: row.start,
+    end: row.end,
+    onStale: renderPromises,
+    staleMessage: 'The draft has changed since this sentence was listed.'
+  });
 });
 copyPromises.addEventListener('click', function () {
   var lines = renderPromises(); /* include edits and renames since the last analysis */
   if (lines.length) copyText(lines.join('\n'), 'Copied the revision checklist', copyPromises);
+});
+
+/* The panel's open state has a key of its own, in this browser only. In the
+   preferences object, which every window writes whole, opening the panel
+   wrote this window's old copy of every other setting over what another
+   window had saved, such as its limit (Codex review of 3.14; a merge of the
+   two copies, tried next, mixed up venues and limits). */
+var READY_OPEN_KEY = 'rebuttal-bench-ready-open';
+readyBox.open = fallbackGet(READY_OPEN_KEY) === '1';
+readyBox.addEventListener('toggle', function () {
+  var open = readyBox.open ? '1' : '0';
+  if (fallbackGet(READY_OPEN_KEY) !== open) fallbackSet(READY_OPEN_KEY, open);
+  if (readyBox.open) renderReady();
+  else { readySum.textContent = ''; readySum.classList.add('zero'); }
+});
+readyList.addEventListener('click', function (e) {
+  var row = e.target.closest('[data-draft]');
+  if (!row) return;
+  var id = row.getAttribute('data-draft');
+  if (id && draftById(id)) switchDraft(id);
 });
 
 anonBox.addEventListener('toggle', function () {
@@ -10666,6 +10940,12 @@ function reviewKey(id) { return REVIEW_PREFIX + id; }
 function storedReview(id) {
   var v = fallbackGet(reviewKey(id));
   return typeof v === 'string' ? v : '';
+}
+/* Live review text for any draft without writing: the open draft may hold an
+   un-flushed edit in the review box; other drafts come from storedReview. */
+function draftReviewText(id) {
+  if (id === reviewFor) return reviewInput ? reviewInput.value : reviewSaved;
+  return storedReview(id);
 }
 function flushReview() {
   clearTimeout(reviewTimer);
@@ -10813,15 +11093,18 @@ function reviewEdited() {
   clearTimeout(reviewTimer);
   reviewTimer = setTimeout(flushReview, 400);
   renderReview();
+  renderReady();
 }
 window.addEventListener('pagehide', flushReview);
 window.addEventListener('storage', function (e) {
-  /* Another window saved this draft's review: take it unless this box holds
-     an edit of its own. */
-  if (reviewFor === null || e.key !== reviewKey(reviewFor) || (reviewInput && reviewInput.value !== reviewSaved)) return;
-  reviewSaved = typeof e.newValue === 'string' ? e.newValue : '';
-  if (reviewInput) reviewInput.value = reviewSaved;
-  renderReview();
+  /* Another window saved a review: update the open review box if it matches
+     and holds no edit of its own, and refresh the Ready panel for any draft. */
+  if (reviewFor !== null && e.key === reviewKey(reviewFor) && !(reviewInput && reviewInput.value !== reviewSaved)) {
+    reviewSaved = typeof e.newValue === 'string' ? e.newValue : '';
+    if (reviewInput) reviewInput.value = reviewSaved;
+    renderReview();
+  }
+  if (e.key && e.key.indexOf(REVIEW_PREFIX) === 0 && draftReady) renderReady();
 });
 
 /* Insert `block` at the editor's cursor as a paragraph of its own, through
@@ -10925,16 +11208,79 @@ var findBar = document.getElementById('findBar');
 var findInput = document.getElementById('findInput');
 var findCount = document.getElementById('findCount');
 var findCase = document.getElementById('findCase');
+var findAll = document.getElementById('findAll');
+var findAllLabel = document.getElementById('findAllLabel');
+var findAllText = document.getElementById('findAllText');
+var findResults = document.getElementById('findResults');
 var replaceInput = document.getElementById('replaceInput');
+var replaceOneBtn = document.getElementById('replaceOne');
+var replaceAllBtn = document.getElementById('replaceAll');
 var findMarks = document.getElementById('findMarks');
 var FIND_MARKS_MAX = 400; /* beyond this, only the current match gets a box */
+var findHitsByDraft = Object.create(null), findResultsHtml = '';
 
 function findMatches() {
-  var q = findInput.value, out = [], m;
-  if (!q) return out;
-  var re = new RegExp(escRe(q), findCase.checked ? 'g' : 'gi'), text = ta.value;
-  while ((m = re.exec(text))) out.push({ start: m.index, end: m.index + m[0].length });
-  return out;
+  return findInText(ta.value, findInput.value, findCase.checked);
+}
+/* Name the open paper on the All drafts checkbox, and make clear that Replace
+   and Replace all never touch any draft other than the open one. */
+function updateFindScope() {
+  var hasPapers = draftReady && papersView(draftMeta.list, papers).papers.length > 0;
+  var pid = openPaper(), pName = pid ? paperName(papers, pid) : null;
+  var label = !hasPapers ? 'All drafts' : pName ? 'All drafts of ' + pName : 'All drafts (No paper)';
+  findAllText.textContent = label;
+  findAllLabel.title = label;
+  replaceOneBtn.title = findAll.checked
+    ? 'Replace this match in the open draft only, then go to the next (Enter in the field)'
+    : 'Replace this match, then go to the next (Enter in the field)';
+  replaceAllBtn.title = findAll.checked
+    ? 'Replace every match in the open draft only; one undo brings the text back'
+    : 'Replace every match; one undo brings the text back';
+}
+/* One row per draft of the open paper with matches (or not loaded), up to
+   three snippets per draft. Clicking a snippet opens that draft and selects
+   the match through openDraftSelection. */
+function renderFindResults() {
+  if (!findBar || findBar.hidden || !findAll.checked || !findInput.value || !draftReady) {
+    if (findResults) findResults.hidden = true;
+    if (findResultsHtml) { findResults.textContent = ''; findResultsHtml = ''; }
+    findHitsByDraft = Object.create(null);
+    return;
+  }
+  var q = findInput.value, cs = findCase.checked, drafts = openPaperDrafts();
+  var nextHits = Object.create(null), html = '';
+  drafts.forEach(function (d) {
+    var text = shownDraftText(d.id); /* textarea offsets when opened */
+    if (text === null) {
+      html += '<div class="findres-row" data-draft="' + escAttr(d.id) + '">' +
+        '<div class="findres-head"><span class="findres-name">' + escHtml(d.name) + '</span>' +
+        '<span class="findres-count">not loaded</span></div></div>';
+      return;
+    }
+    var ms = findInText(text, q, cs);
+    if (!ms.length) return;
+    nextHits[d.id] = { text: text, matches: ms };
+    html += '<div class="findres-row" data-draft="' + escAttr(d.id) + '">' +
+      '<div class="findres-head"><span class="findres-name">' + escHtml(d.name) + '</span>' +
+      '<span class="findres-count">' + fmt(ms.length) + (ms.length === 1 ? ' match' : ' matches') + '</span></div>' +
+      '<div class="findres-snips">';
+    var shown = Math.min(3, ms.length);
+    for (var i = 0; i < shown; i++) {
+      var m = ms[i], a = Math.max(0, m.start - 15), b = Math.min(text.length, m.end + 15);
+      var pre = text.slice(a, m.start).replace(/\n/g, ' ');
+      var hit = text.slice(m.start, m.end).replace(/\n/g, ' ');
+      var post = text.slice(m.end, b).replace(/\n/g, ' ');
+      html += '<button type="button" class="findres-snip" data-draft="' + escAttr(d.id) + '" data-match="' + i + '">' +
+        (a > 0 ? '…' : '') + escHtml(pre) + '<b>' + escHtml(hit) + '</b>' + escHtml(post) + (b < text.length ? '…' : '') + '</button>';
+    }
+    html += '</div>';
+    if (ms.length > 3) html += '<div class="findres-more">…and ' + fmt(ms.length - 3) + ' more</div>';
+    html += '</div>';
+  });
+  findHitsByDraft = nextHits;
+  if (!html) html = '<div class="findres-empty">No matches in any draft.</div>';
+  findResults.hidden = false;
+  if (findResultsHtml !== html) { setListHtml(findResults, html); findResultsHtml = html; }
 }
 /* The match the editor's selection is on, or -1. */
 function currentMatch(ms) {
@@ -10949,11 +11295,13 @@ var findObserved = null;
 function refreshFind() {
   if (!findBar || findBar.hidden) return; /* also before this part of the script has run */
   if (findResize && findObserved !== ta) { findResize.disconnect(); findResize.observe(ta); findObserved = ta; }
+  updateFindScope();
   var ms = findMatches(), i = currentMatch(ms);
   findCount.textContent = !findInput.value ? '' : !ms.length ? 'No matches'
     : i >= 0 ? (i + 1) + ' of ' + fmt(ms.length) : fmt(ms.length) + ' found';
   findCount.classList.toggle('none', !!findInput.value && !ms.length);
   drawFindMarks(ms, i);
+  renderFindResults();
 }
 function drawFindMarks(ms, cur) {
   findMarks.textContent = '';
@@ -11020,6 +11368,9 @@ function openFind(toReplace) {
 function closeFind() {
   if (findBar.hidden) return;
   findBar.hidden = true;
+  findResults.hidden = true;
+  if (findResultsHtml) { findResults.textContent = ''; findResultsHtml = ''; }
+  findHitsByDraft = Object.create(null);
   findMarks.textContent = '';
   ta.focus(); /* the current match stays selected */
 }
@@ -11066,6 +11417,25 @@ document.getElementById('replaceOne').addEventListener('click', replaceOne);
 document.getElementById('replaceAll').addEventListener('click', replaceAll);
 document.getElementById('findClose').addEventListener('click', closeFind);
 findCase.addEventListener('change', refreshFind);
+findAll.addEventListener('change', refreshFind);
+findResults.addEventListener('click', function (e) {
+  var btn = e.target.closest('[data-match]');
+  if (!btn) return;
+  var id = btn.getAttribute('data-draft'), entry = findHitsByDraft[id];
+  var m = entry && entry.matches[Number(btn.getAttribute('data-match'))];
+  if (!m) return;
+  openDraftSelection(id, {
+    text: entry.text,
+    start: m.start,
+    end: m.end,
+    onStale: refreshFind,
+    onSelect: refreshFind,
+    staleMessage: 'The draft has changed since this match was listed.'
+  });
+});
+findResults.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
+});
 findInput.addEventListener('input', function () {
   /* Typing searches from where the caret was, like a browser's find. */
   var ms = findMatches(), pick = null;
@@ -11084,7 +11454,7 @@ findBar.addEventListener('keydown', function (e) {
    hides the browser. */
 var IS_MAC = /Mac|iPod|iPhone|iPad/.test((navigator.platform || '') + ' ' + (navigator.userAgent || ''));
 document.addEventListener('keydown', function (e) {
-  if (!(e.ctrlKey || e.metaKey) || e.altKey || !(e.target === ta || findBar.contains(e.target))) return;
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || !(e.target === ta || findBar.contains(e.target) || findResults.contains(e.target))) return;
   var key = (e.key || '').toLowerCase();
   if (key === 'f' || (key === 'h' && !IS_MAC && e.ctrlKey)) {
     e.preventDefault();

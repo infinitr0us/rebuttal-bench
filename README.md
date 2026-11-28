@@ -59,9 +59,18 @@ leave the browser: they autosave on this device only.
   the commitments as a Markdown to-do list with their tab names, for the revision. A draft not
   read yet is marked *not checked*. It errs on the side of missing an indirect promise rather
   than listing a sentence that promises nothing.
+- **Ready to post.** The *Ready to post* panel lists every draft of the open paper with its
+  length against the limit, the analyzer's errors and warnings, placeholders, words from your
+  anonymity list, how many of its review's points it answers (when the draft has a review) and
+  its promises still to do. A draft is ready when it fits the limit and has no error, placeholder
+  or anonymity match left, and answers every point of its review; the summary reads *3 of 4
+  ready*. MathJax's own TeX errors need a typeset, so they show only for the open draft. Click a
+  row to open that draft.
 - **Editing.** *Find* (Ctrl+F or ⌘F in the editor) searches and replaces in the source, with the
-  matches highlighted; one undo takes back *Replace all*. Double-click a word or formula in the
-  preview to select it in the source. *Spellcheck* turns on the browser's spellchecker in the
+  matches highlighted; one undo takes back *Replace all*. Tick *All drafts* to list the matches
+  in every draft of the open paper, up to three per draft with the text around them; click one to
+  open its draft at the match. *Replace* and *Replace all* still change the open draft only.
+  Double-click a word or formula in the preview to select it in the source. *Spellcheck* turns on the browser's spellchecker in the
   editor (off by default, since TeX and Markdown are full of words it does not know).
 - **Venue.** Sets the limit and checks links against the venue's rebuttal rules: NeurIPS 2026
   (10,000 per review) allows no links in a response (an anonymized link to code the reviewers
