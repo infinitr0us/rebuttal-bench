@@ -1160,7 +1160,8 @@ window.MathJax = {
     <details class="compact" id="anonBox">
       <summary>Anonymity <span id="anonSum" class="compact-sum zero"></span></summary>
       <div class="compact-body">
-        <p class="compact-note">Words that would name you, one per line: your names, e-mail addresses, institution, lab, project and GitHub names. Each one found in a draft gets a card. Prefer full names: a surname alone also matches other people’s citations. Kept with your preferences, never in a draft, an export or a copy.</p>
+        <p class="compact-note">Words that would name you, one per line: your names, e-mail addresses, institution, lab, project and GitHub names. Each one found in a draft gets a card. Prefer full names: a surname alone also matches other people’s citations. Kept in this browser only, never in a draft, an export or a copy.</p>
+        <p class="compact-note" id="anonNote" hidden>This browser cannot store the list, so it lasts until you leave the page.</p>
         <div id="anonSlot"></div>
         <template id="anonEditor">
           <style>
@@ -2350,12 +2351,20 @@ function analyzeText(src, opts) {
      cutting emphasis's delimiter character, left out of the content. */
   function meantAsFormula(sp, strip) {
     var inner = src.slice(sp.innerStart, sp.innerEnd);
-    if (TEXISH.test(inner)) return true;
-    var bare = strip ? inner.split(strip).join('') : inner;
-    if (!/[A-Za-z0-9]/.test(bare)) return false;
-    if (sp.delimiter === 'dollar' && (slashedDollar(sp.openAt) || slashedDollar(sp.closeAt))) return false;
-    /* an amount, then prose: "484) vs. B (" */
-    return !(/^\s*[-+−]?\d[\d,.]*[kKmMbB%]?(?![\d.]*[A-Za-z(])/.test(bare) && /[A-Za-z]{2,}/.test(bare));
+    if (sp.delimiter === 'dollar') {
+      /* The signs of two prices: an amount after the first, and after the
+         second the next amount or a formula's backslash ("__$5__ versus
+         __$8__", "**$484**) vs. B ($\approx$"). A formula's closing sign is
+         followed by a space, punctuation or a word ("$2 + a*b*c$.",
+         "$5$-fold"). Tested first: the prose between prices can hold an
+         underscore ("GPU_hour") that looks like TeX. */
+      if (afterDollar(src.slice(sp.openAt + 1, sp.openAt + 4)) === 'amount' &&
+          (afterDollar(src.slice(sp.closeAt + 1, sp.closeAt + 4)) === 'amount' || src[sp.closeAt + 1] === '\\')) return false;
+      if (slashedDollar(sp.openAt) || slashedDollar(sp.closeAt)) return TEXISH.test(inner);
+    }
+    /* "__$5__": underscores that make bold are no subscripts */
+    if ((strip === '_' ? /\\[A-Za-z]|[\^{}]/ : TEXISH).test(inner)) return true;
+    return WORD_CHAR.test(strip ? inner.split(strip).join('') : inner);
   }
   /* The braces MathJax takes as group braces in a formula's source (typed bare,
      or with one backslash that Markdown consumes; "\\{" reaches MathJax as a
@@ -2370,21 +2379,40 @@ function analyzeText(src, opts) {
     }
     return (sp.braceGroups = pairOf);
   }
-  /* A { that opens the group of a script: ^ or _ before it, spaces aside. */
-  function opensScript(sp, at) {
+  /* Control words whose next group is their argument ("\sqrt\{n+1\}"), unlike
+     relations, operators and delimiter sizes ("\in \{0,1\}", "\left\{"). */
+  var ARG_CMD = /^(?:sqrt|[dtc]?frac|[dt]?binom|math(?:bf|rm|cal|bb|it|sf|tt|frak|scr|op|rel|bin|ord)|boldsymbol|bm|pmb|text(?:bf|it|rm|tt|sf|up|normal)?|mbox|hbox|fbox|boxed|hat|widehat|tilde|widetilde|bar|overline|underline|vec|dot|ddot|acute|grave|breve|check|overrightarrow|overleftarrow|overbrace|underbrace|overset|underset|stackrel|operatorname|substack|color|textcolor|phantom|hphantom|vphantom|cancel|xrightarrow|xleftarrow)$/;
+  /* A { that opens a group rather than a set: right after ^ or _, after the
+     closing } or ] of a previous argument ("\frac{a}\{b\}", "\sqrt[3]\{x\}"),
+     or after a command that takes an argument. Spaces and the brace's own
+     backslash aside. */
+  function opensGroup(sp, at) {
     var k = at - 1;
-    while (k >= sp.innerStart && (src[k] === '\\' || /\s/.test(src[k]))) k--;
-    return src[k] === '^' || src[k] === '_';
+    while (k >= sp.innerStart && src[k] === '\\') k--;
+    while (k >= sp.innerStart && /\s/.test(src[k])) k--;
+    if (src[k] === '^' || src[k] === '_' || src[k] === '}' || src[k] === ']') return true;
+    var cw = /\\([A-Za-z]+)\*?$/.exec(src.slice(sp.innerStart, k + 1));
+    return !!cw && ARG_CMD.test(cw[1]);
+  }
+  /* Bars typed \| in a formula, which Markdown turns into |. */
+  function consumedBars(sp) {
+    var n = 0;
+    for (var k = sp.innerStart; k < sp.innerEnd; k++) {
+      if (src[k] === '|' && countBackslashesBefore(src, k) % 4 === 1) n++;
+    }
+    return n;
   }
   /* A consumed "\X" (at i, the character at j) that already gives MathJax what
      the author meant, so the TeX control symbol \X would change a formula
      that shows correctly:
-     - bars composed into a double bar, "\|\|h\|\|" or "|\|" ("||h||");
+     - bars composed into a double bar, "\|\|h\|\|" or "|\|" ("||h||"); any
+       other \| gets its card, with a fix decided for the whole formula
+       (check 3);
      - "\&" in an alignment, where & is the column separator;
-     - a brace that groups: "\{" opening a script's group ("R^\{P\}"), or "\}"
-       closing a bare { ("\mathbf{x\}"), which as literal braces would leave
-       the formula unbalanced. Set braces, "\{x_i\}" or "\in \{0,1\}", are
-       matched with each other and still get the fix. */
+     - a brace that groups: matched with a bare brace ("\sqrt\{n+1}",
+       "\mathbf{x\}"), where literal braces would unbalance the formula, or
+       opening a group (opensGroup: "R^\{P\}", "\sqrt\{n+1\}"). Set braces,
+       "\{x_i\}" or "\in \{0,1\}", still get the fix. */
   function shieldMeant(sp, i, j, next) {
     if (next === '|') return src[i - 1] === '|' || src[j + 1] === '|' || (src[j + 1] === '\\' && src[j + 2] === '|');
     if (next === '&') {
@@ -2394,9 +2422,8 @@ function analyzeText(src, opts) {
     if (next !== '{' && next !== '}') return false;
     var partner = braceGroups(sp)[j];
     if (partner === undefined) return false;
-    var open = next === '{' ? j : partner;
-    if (opensScript(sp, open)) return true;
-    return next === '}' && countBackslashesBefore(src, partner) % 4 === 0;
+    if (countBackslashesBefore(src, partner) % 4 === 0) return true;
+    return opensGroup(sp, next === '{' ? j : partner);
   }
 
   /* 1. Delimiters MathJax cannot pair within their own paragraph. */
@@ -2440,9 +2467,12 @@ function analyzeText(src, opts) {
     /* MathJax never pairs the signs of a recovered span (they sit in different
        blocks), so each one shows as typed for now, like a lone sign. */
     if (sp.recovered) { slashed.forEach(unprotectedLone); return; }
-    /* Both signs escaped around TeX, "(\$\tilde{P}\$)": the author escaped the
-       delimiters for Markdown, and MathJax typesets the formula they meant. */
-    if (slashed.length === 2 && TEXISH.test(src.slice(sp.innerStart, sp.innerEnd))) return;
+    /* Both signs escaped around anything but prices, "(\$\tilde{P}\$)" or
+       "\$n=16\$": the author escaped the delimiters for Markdown, and MathJax
+       typesets the formula they meant. Prices ("\$5 and \$10") are currency. */
+    var pairInner = src.slice(sp.innerStart, sp.innerEnd);
+    if (slashed.length === 2 && !looksLikeCurrencyPair(pairInner, src.slice(sp.end, sp.end + 3)) &&
+        !looksLikePrice(pairInner)) return;
     slashed.forEach(function (at) {
       var slashRun = countBackslashesBefore(src, at);
       var autofix = fix('\\\\$', [literalDollar(at)]);
@@ -2567,24 +2597,45 @@ function analyzeText(src, opts) {
              the start of a line, or a character MathJax should receive bare
              (shieldMeant). */
         } else {
+          var symFix = fix('\\\\' + next, [edit(i, j, bs(2))]);
+          /* "\|x\|" reaches MathJax as |x|, which is also an absolute value,
+             and a single "\|" is a KL divergence's separator ("D(p \| q)") as
+             often as a conditioning bar ("P(A \| B)"). Only pairs with a
+             script or a size ("\|v\|_2", "\left\|") are surely the norm the fix
+             makes of them; the decision covers the whole formula, so that a
+             pair is never fixed on one side only. */
+          if (symFix && next === '|' && (consumedBars(sp) % 2 === 1 ||
+              !/\\\|\s*\\?[_^]|\\(?:left|right|[bB]igg?[lr]?)\s*\\\|/.test(src.slice(sp.innerStart, sp.innerEnd)))) {
+            symFix.manual = true;
+          }
           push('warn', '\\' + next + ' is consumed by Markdown',
             'A single backslash before ASCII punctuation is removed before MathJax runs, so MathJax receives <code>' + escHtml(next) + '</code>. If you intended the TeX control symbol <code>\\' + escHtml(next) + '</code>, type <code>\\\\' + escHtml(next) + '</code>.',
-            i, j + 1,
-            fix('\\\\' + next, [edit(i, j, bs(2))]));
+            i, j + 1, symFix);
         }
       }
       i = Math.max(j, i + 1);
     }
 
     /* A bare % is a TeX comment: MathJax drops it and the rest of its line of
-       the formula, with no error ("$78.1%$" shows 78.1). Only a percentage,
-       right after a number, is reported: a "% \vspace{-1mm}" line in a display
-       copied from the paper is a comment its author meant, as in LaTeX. */
+       the formula, with no error ("$78.1%$" shows 78.1). Only a percentage is
+       reported: right after a digit, with no words after it on its line. A
+       "% \vspace{-1mm}" line, or "x=1 % fixed in all runs" in a display copied
+       from the paper, is a comment its author meant, as in LaTeX; inside
+       \verb the sign is shown as typed. */
+    var verbs = [], vm, verbRe = /\\verb\*?([^A-Za-z\s*])/g, innerText = src.slice(sp.innerStart, sp.innerEnd);
+    while ((vm = verbRe.exec(innerText))) {
+      var vEnd = innerText.indexOf(vm[1], verbRe.lastIndex);
+      vEnd = vEnd < 0 ? innerText.length : vEnd + 1;
+      verbs.push({ start: sp.innerStart + vm.index, end: sp.innerStart + vEnd });
+      verbRe.lastIndex = vEnd;
+    }
     for (var pc = sp.innerStart; !sp.literal && !sp.recovered && pc < sp.innerEnd; pc++) {
       if (src[pc] !== '%' || codeMask[pc] || countBackslashesBefore(src, pc) % 4 !== 0) continue;
-      if (!/\d[ \t]*$/.test(src.slice(sp.innerStart, pc))) continue;
+      if (!/\d$/.test(src.slice(sp.innerStart, pc))) continue;
+      if (verbs.some(function (v) { return pc >= v.start && pc < v.end; })) continue;
       var lineEnd = src.indexOf('\n', pc);
       var lost = src.slice(pc + 1, lineEnd < 0 || lineEnd > sp.innerEnd ? sp.innerEnd : lineEnd);
+      if (/[A-Za-z]{2,}/.test(lost.replace(/\\[A-Za-z]+/g, ' '))) continue;
       push('err', 'A bare % starts a TeX comment',
         'MathJax reads <code>%</code> as the start of a TeX comment, so the percent sign' +
         (/\S/.test(lost) ? ' and the rest of its line (<code>' + escHtml(lost.trim().slice(0, 40)) + '</code>)' : '') +
@@ -2757,6 +2808,9 @@ function analyzeText(src, opts) {
         /[\s\-–—\/~+×=]$/.test(inner) &&
         /^\d/.test(after);
       if (!pricePair) return true;
+      /* The second price's sign may open a formula ("costs $5 and we use $2n$
+         GPUs"): scan on from it. */
+      re.lastIndex = m.index + 1 + inner.length;
     }
     return false;
   }
@@ -2872,7 +2926,12 @@ function analyzeText(src, opts) {
            several tags and comments; quoted attributes can contain '>'. Only
            real HTML elements and comments are flagged; invented angle-bracket
            tokens such as <think> or <Goal> are meant to appear as typed. */
-        var htmlTags = /^(?:a|abbr|b|big|blockquote|br|center|cite|code|col|colgroup|dd|del|details|dfn|div|dl|dt|em|font|h[1-6]|hr|i|img|ins|kbd|li|mark|ol|p|pre|q|s|samp|small|span|strike|strong|sub|summary|sup|table|tbody|td|tfoot|th|thead|tr|tt|u|ul|var|wbr)$/;
+        /* The elements of HTML markup and page structure (legacy ones too, and
+           inline SVG and MathML roots). Form and metadata elements named by
+           plain words (input, output, label, title, data, option, source,
+           select...) are left out: in a rebuttal "<input>" and "<output>" are
+           far more often a prompt's tokens than markup (codex-review-312). */
+        var htmlTags = /^(?:a|abbr|acronym|address|article|aside|audio|b|bdi|bdo|big|blink|blockquote|br|canvas|caption|center|cite|code|col|colgroup|dd|del|details|dfn|dir|div|dl|dt|em|figcaption|figure|font|footer|h[1-6]|header|hgroup|hr|i|iframe|img|ins|kbd|li|mark|marquee|math|nav|nobr|ol|p|picture|pre|q|rp|rt|ruby|s|samp|section|small|span|strike|strong|sub|summary|sup|svg|table|tbody|td|tfoot|th|thead|tr|tt|u|ul|var|video|wbr)$/;
         var tagRe = /<!--(?:-?>|[\s\S]*?(?:-->|$))|<\/?([A-Za-z][\w:-]*)(?=[\s/>])(?:[^<>"']|"[^"]*"|'[^']*')*>|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<![A-Za-z]+\s[^>]*>/g;
         var raw = src.slice(r.start, r.end), m;
         while ((m = tagRe.exec(raw))) {
@@ -3020,6 +3079,7 @@ function analyzeText(src, opts) {
       }
     });
     var degradedMask = makeMask(src.length, degradedRanges);
+    var quoteMask = makeMask(src.length, markedRanges.filter(function (r) { return r.type === 'blockquote'; }));
     var shiftedOpen = Object.create(null), shiftedClose = Object.create(null);
     spans.forEach(function (sp) {
       if (sp.cut || currencyStarts[sp.start]) shiftedOpen[sp.end] = true;
@@ -3087,6 +3147,10 @@ function analyzeText(src, opts) {
           while (tokE < raw.length && !/[\s"'`()[\]{},;]/.test(raw[tokE])) tokE++;
           var token = raw.slice(tokS, tokE);
           if (/^[A-Za-z]:\\|^\\\\/.test(token) || /^[\w.-]+(?:\\[\w.-]+)+\.[A-Za-z0-9]{1,5}$/.test(token)) continue;
+          /* Right after a word (not a control word), it is a path's segment,
+             "results\min"; after one letter it is TeX, "T\geq". A quote of the
+             review keeps the reviewer's words as they were typed. */
+          if (/(?:^|[^\\A-Za-z])[A-Za-z]{2,}$/.test(raw.slice(0, m.index)) || quoteMask[mAt]) continue;
           var nextCmd = raw[mEnd] === '\\' ? /^\\([A-Za-z]+)(?![A-Za-z])/.exec(raw.slice(mEnd)) : null;
           if (raw[mEnd] === '\\' && !(nextCmd && mathCmdExact.test(nextCmd[1])) && /^\\[A-Za-z0-9._-]+/.test(raw.slice(mEnd))) continue;
           var prevSeg = raw[m.index - 1] !== '_' ? /\\([A-Za-z0-9._-]+)$/.exec(raw.slice(tokS, m.index)) : null;
@@ -3122,7 +3186,7 @@ function analyzeText(src, opts) {
             } else break;
           }
           push('warn', '\\' + grp.name + ' is shown outside math',
-            'OpenReview shows this TeX as typed outside math delimiters. Put the expression between <code>$…$</code> so MathJax typesets it.',
+            'OpenReview shows this TeX as typed outside math delimiters. Put the expression between <code>$…$</code> so MathJax typesets it. To name the command itself, as in a reviewer\'s question about <code>\\' + grp.name + '</code>, put it in backticks instead.',
             start + grp.start, start + gEnd);
         }
       }
@@ -7293,6 +7357,7 @@ var anonBox = document.getElementById('anonBox');
 var anonSum = document.getElementById('anonSum');
 var anonSlot = document.getElementById('anonSlot');
 var anonTerms = null;
+var anonNote = document.getElementById('anonNote');
 
 /* Listeners on the editor go through onEditor, so that a fresh textarea (a
    draft switch puts one in, see openDraft) gets every one of them. */
@@ -7406,7 +7471,7 @@ var FS_STEPS = { fsEditor: 1, zoomPreview: 10 };
    not stay on after switching to another. */
 var prefs = { theme: 'light', fsEditor: 13, zoomPreview: 100, limit: 5000, ownLimit: 5000, sync: true, venue: '',
   compact: compactDefaults(), compactOpen: false, wordingOpen: false, sectionsOpen: false, spellcheck: false,
-  promisesOpen: false, identity: '', anonOpen: false, view: 'preview', skeletonQuotes: true };
+  promisesOpen: false, anonOpen: false, view: 'preview', skeletonQuotes: true };
 
 function applyPrefs() {
   document.documentElement.setAttribute('data-theme', prefs.theme === 'dark' ? 'dark' : 'light');
@@ -7428,7 +7493,6 @@ function applyPrefs() {
   sectionsBox.open = !!prefs.sectionsOpen;
   promisesBox.open = !!prefs.promisesOpen;
   anonBox.open = !!prefs.anonOpen;
-  if (anonTerms && anonTerms.value !== prefs.identity) anonTerms.value = prefs.identity;
   spellBox.checked = !!prefs.spellcheck;
   ta.spellcheck = !!prefs.spellcheck;
   refreshFind(); /* the editor's font size moves the text under find's boxes */
@@ -8004,7 +8068,7 @@ function characterStat(chars, limit) {
    by updateAll and texProblemIssues so macro-fix verification sees the same
    hazards as the cards, while Fix all and compaction stay independent of them. */
 function pageAnalyzeOptions() {
-  return { venue: prefs.venue, identity: identityTerms(prefs.identity) };
+  return { venue: prefs.venue, identity: identityTerms(identityText) };
 }
 
 function updateAll() {
@@ -9528,6 +9592,23 @@ function themeAnonBox() {
   });
   root.style.colorScheme = prefs.theme === 'dark' ? 'dark' : 'light';
 }
+/* The word list is text the author typed, so it has a key of its own in
+   localStorage, like a draft's review: written whole and at once on every
+   edit (writes cannot land out of order), never sent to the asynchronous
+   store, and taken in from another window on its storage event. In the
+   preferences object, another window's save of an unrelated switch wrote its
+   own old copy over the list (codex-review-312). */
+var IDENTITY_KEY = 'rebuttal-bench-identity';
+var identityText = fallbackGet(IDENTITY_KEY) || '';
+function saveIdentity() {
+  anonNote.hidden = fallbackSet(IDENTITY_KEY, identityText) || !identityText;
+}
+window.addEventListener('storage', function (e) {
+  if (e.key !== IDENTITY_KEY) return;
+  identityText = typeof e.newValue === 'string' ? e.newValue : '';
+  if (anonTerms && anonTerms.value !== identityText) anonTerms.value = identityText;
+  if (draftReady) updateAll();
+});
 /* Chrome keeps one undo history per document, so the word list lives in its
    own same-origin srcdoc iframe (like the review box): typing here never
    enters the source editor's Ctrl+Z stack. */
@@ -9537,12 +9618,11 @@ function themeAnonBox() {
   frame.srcdoc = '<!doctype html><html lang="en"><meta charset="utf-8">' + document.getElementById('anonEditor').innerHTML;
   frame.addEventListener('load', function () {
     anonTerms = frame.contentDocument.getElementById('anonTerms');
-    anonTerms.value = prefs.identity;
+    anonTerms.value = identityText;
     themeAnonBox();
     anonTerms.addEventListener('input', function () {
-      prefs.identity = anonTerms.value;
-      if (!prefsRestored) prefsTouched.identity = true;
-      savePrefs();
+      identityText = anonTerms.value;
+      saveIdentity();
       updateAll();
     });
   });
@@ -10608,7 +10688,6 @@ storeGet(PREFS_KEY).then(function (v) {
       if (typeof p.wordingOpen === 'boolean') restore('wordingOpen', p.wordingOpen);
       if (typeof p.sectionsOpen === 'boolean') restore('sectionsOpen', p.sectionsOpen);
       if (typeof p.promisesOpen === 'boolean') restore('promisesOpen', p.promisesOpen);
-      if (typeof p.identity === 'string') restore('identity', p.identity);
       if (typeof p.anonOpen === 'boolean') restore('anonOpen', p.anonOpen);
       if (typeof p.spellcheck === 'boolean') restore('spellcheck', p.spellcheck);
       if (p.view === 'preview' || p.view === 'review') restore('view', p.view);

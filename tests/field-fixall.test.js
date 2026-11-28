@@ -113,14 +113,69 @@ test('emphasis inside \\text{} is reported with a manual fix that names \\textbf
 });
 
 test('a bare % after a number is a TeX comment that eats the sign; comment lines are left alone', () => {
-  const src = raw`Our accuracy was $78.1%$, and $50 %$ of runs.`;
+  const src = raw`Our accuracy was $78.1%$, and $50% \pm 2$ of runs, and $\text{top 10%}$.`;
   const found = titled(src, /bare % starts a TeX comment/);
-  assert.equal(found.length, 2);
-  assert.equal(fixAll(src), raw`Our accuracy was $78.1\\%$, and $50 \\%$ of runs.`);
+  assert.equal(found.length, 3);
+  assert.equal(fixAll(src), raw`Our accuracy was $78.1\\%$, and $50\\% \pm 2$ of runs, and $\text{top 10\\%}$.`);
   assert.match(shown(fixAll(src)), /%/);
-  const display = '$$\\begin{aligned} y &= x\\\\\\\\\n % \\vspace{-1mm}\n z &= 1 \\end{aligned}$$';
-  assert.deepEqual(titled(display, /bare %/), []);
+  // Comments their authors meant (codex-review-312): a comment line in a
+  // display, words after the sign, a spaced sign, \verb.
+  for (const meant of [
+    '$$\\begin{aligned} y &= x\\\\\\\\\n % \\vspace{-1mm}\n z &= 1 \\end{aligned}$$',
+    '$$\nx=1 % baseline fixed in all runs\n+y\n$$',
+    raw`About $50 %$ of runs.`,
+    raw`The label is $\verb|95%|$.`,
+  ]) {
+    assert.deepEqual(titled(meant, /bare %/), [], meant);
+    rendersAsPosted(meant);
+  }
   // An escaped percent is fine, and one Markdown consumed has its own card.
   assert.deepEqual(titled(raw`$5\\%$`, /%/), []);
   assert.equal(titled(raw`$5\%$`, /\\% is consumed/).length, 1);
+});
+
+/* The release review (reviews/2026-11-27/codex-review-312) found more input
+   that rendered as meant and that Fix all changed. */
+test('escaped signs around any formula stay a formula; only prices are currency', () => {
+  for (const src of [raw`We set \$n=16\$ for all runs.`, raw`Each sample \$x\$ has unit norm.`, raw`We set \$n_0=16\$.`]) {
+    assert.deepEqual(titled(src, /protect/), [], src);
+    rendersAsPosted(src);
+  }
+  assert.equal(fixAll(raw`It costs \$5, \$10 or \$20.`), raw`It costs \\$5, \\$10 or \\$20.`);
+});
+
+test('braces that group an argument keep their escapes; sets beside them are fixed', () => {
+  for (const src of [raw`The bound is $\sqrt\{n+1\}$.`, raw`The bound is $\sqrt\{n+1}$.`,
+    raw`The fraction is $\frac\{a+b\}\{c+d\}$.`, raw`$\sqrt[3]\{x\}$`, raw`$\mathbf\{v\}$`]) {
+    assert.deepEqual(titled(src, /\\[{}] is consumed/), [], src);
+    rendersAsPosted(src);
+  }
+  assert.equal(fixAll(raw`We take $\sqrt\{n+1\}$ for $n\in \{1,2\}$.`), raw`We take $\sqrt\{n+1\}$ for $n\in \\{1,2\\}$.`);
+  assert.equal(fixAll(raw`$x\in\{0,1\}$`), raw`$x\in\\{0,1\\}$`);
+});
+
+test('a single \\| or an unscripted pair is the author\'s call; a scripted pair is the norm', () => {
+  // A conditioning bar or a KL separator, |x| as absolute value or norm: a
+  // card with a manual fix, and Fix all leaves the formula as posted.
+  for (const src of [raw`The conditional probability is $P(A \| B)$.`, raw`$\text{KL}[q\|p]$`,
+    raw`For a scalar, its absolute value is $\|x\|$.`, raw`$\|\frac{a}{b}-1\|\leq\epsilon$`]) {
+    const found = titled(src, /\\\| is consumed/);
+    assert.ok(found.length && found.every((i) => i.fix && i.fix.manual), src);
+    assert.equal(fixAll(src), src);
+  }
+  // A scripted or sized pair is the norm, spaced or not, and both sides change.
+  assert.equal(fixAll(raw`$\|v\|_2$ and $\|x\|\_2$`), raw`$\\|v\\|_2$ and $\\|x\\|\_2$`);
+  assert.equal(fixAll(raw`$\left\| x \right\|$`), raw`$\left\\| x \right\\|$`);
+  assert.equal(fixAll(raw`$\frac{1}{2} \| \nabla s(x) \|^{2}$`), raw`$\frac{1}{2} \\| \nabla s(x) \\|^{2}$`);
+});
+
+test('bold prices are no formula, whatever the prose between them; emphasis inside one is', () => {
+  for (const src of [raw`Cost per trial: __$5__ versus __$8__.`, raw`Cost per trial: **$5** / **$8**.`,
+    raw`**$5** per GPU_hour or **$8** per GPU_hour.`]) {
+    assert.deepEqual(titled(src, /splits this formula/), [], src);
+    rendersAsPosted(src);
+  }
+  assert.equal(fixAll(raw`We evaluate $2 + a*b*c$.`), raw`We evaluate $2 + a\*b\*c$.`);
+  assert.equal(fixAll('We evaluate $α*β*γ$.'), 'We evaluate $α\\*β\\*γ$.');
+  assert.equal(titled(raw`a **$5$-fold** gain and $x$ too`, /splits this formula/).length, 0);
 });

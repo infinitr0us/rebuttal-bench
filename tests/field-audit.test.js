@@ -280,3 +280,33 @@ test('check 14 math commands: math, code, paths, quoted names, HTML blocks and t
     raw`\alpha is shown outside math`,
   ]);
 });
+
+// ---- the release review (reviews/2026-11-27/codex-review-312) ----
+
+test('check 9: standard markup tags are reported, prompt tokens named by plain words are not', () => {
+  const RAW = 'Raw HTML is shown as text';
+  assert.equal(titled('<figure>\n<figcaption>Ablation results</figcaption>\n</figure>', RAW).length, 3);
+  assert.equal(titled('<section>\nAblation results\n</section>', RAW).length, 1);
+  assert.equal(titled('First line<br>next line.', RAW).length, 1);
+  for (const src of ['The model emits <think> at the start.', 'The template is <input> then <output>.',
+    'Each <label> token is masked.', 'A <title> and a <source> field.']) {
+    assert.deepEqual(titled(src, RAW), [], src);
+  }
+});
+
+test('check 7: a price before an indented formula does not hide the formula', () => {
+  const NOTE = 'Indented text became a code block';
+  assert.equal(titled('Cost model:\n\n    Each GPU costs $5 and we use $2n$ GPUs.', NOTE).length, 1);
+  assert.deepEqual(titled('Example:\n\n    It costs $7.50 each and $5.00 for delivery.', NOTE), []);
+});
+
+test('check 14: paths and quotes of the review keep their backslashes quietly', () => {
+  for (const src of [raw`We use C:\min and results\min to store predictions.`, raw`> “What is the value of \alpha?”`,
+    raw`> The reviewer asks about \theta.`]) {
+    assert.deepEqual(titles(src).filter((t) => /outside math/.test(t)), [], src);
+  }
+  // One letter before the command is TeX, as in "T\geq \exp".
+  assert.deepEqual(titles(raw`so that T\geq \exp(cK) holds`).filter((t) => /outside math/.test(t)), [raw`\geq is shown outside math`]);
+  // The card says how to name a command rather than typeset it.
+  assert.match(titled(raw`What does the \hat, phi and theta mean?`, raw`\hat is shown outside math`)[0].detail, /backticks/);
+});

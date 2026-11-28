@@ -14,7 +14,7 @@ const digest = text => createHash('sha256').update(text).digest('hex');
 const checkTitles = [
   /^(?:Stray |Unpaired |\\begin\{|\\\$ is not protected|Backslash does not protect)/,
   /loses its MathJax delimiters/,
-  /(?:consumed by Markdown|not a math accent|TeX row break|Line-end backslash|Blank line splits|cannot find the end|Currency dollars)/,
+  /(?:consumed by Markdown|not a math accent|TeX row break|Line-end backslash|Blank line splits|cannot find the end|Currency dollars|bare % starts a TeX comment)/,
   /(?:splits this formula|interrupts this formula|Multiplication asterisks)/,
   /^(?:Table cell separator|Table row has more)/,
   /becomes a hyperlink inside math/,

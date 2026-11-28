@@ -329,7 +329,7 @@ try {
     limitInput.value = '5000'; limitInput.dispatchEvent(new Event('input'));
     const after = decodeURIComponent(reportLink.href);
     return shown === APP_VERSION && href.indexOf('/issues/new?template=problem.yml&version=' + APP_VERSION + '&') > 0 &&
-      /&browser=Chrome \\d+ on /.test(href) && /&venue=ICML 2027$/.test(href) && !/Secret|0\\.917|Zed/.test(href) &&
+      /&browser=(?:Chrome|Edge) \\d+ on /.test(href) && /&venue=ICML 2027$/.test(href) && !/Secret|0\\.917|Zed/.test(href) &&
       !/venue=/.test(after) && /template=idea\\.yml&version=/.test(ideaLink.href) || { shown, href, after };`);
 
   /* Preferences stored before 3.8 have no ownLimit: a venue's own limit is
@@ -1421,6 +1421,28 @@ try {
     await wait(50);
     return persisted && unchanged && undoIsolated && beforeClear && cleared ||
       { persisted, unchanged, undoIsolated, beforeClear, cleared, afterUndoTa, afterUndoAnon, sum: anonSum.textContent };`);
+
+  /* codex-review-312: in the preferences object, another window's save of an
+     unrelated switch wrote its old copy over the list. */
+  await check('the word list has its own key: another window’s preference save leaves it, and its edit arrives', `
+    for (let i = 0; i < 40 && !anonTerms; i++) await wait(25);
+    anonTerms.value = 'Example Laboratory'; anonTerms.dispatchEvent(new Event('input')); await wait(30);
+    const own = localStorage.getItem(IDENTITY_KEY) === 'Example Laboratory' &&
+      !('identity' in JSON.parse(localStorage.getItem(PREFS_KEY))) && anonNote.hidden;
+    /* Another window saves its preferences, then edits the list. */
+    localStorage.setItem(PREFS_KEY, localStorage.getItem(PREFS_KEY));
+    localStorage.setItem(IDENTITY_KEY, 'Example Laboratory\\nJane Doe');
+    window.dispatchEvent(new StorageEvent('storage', { key: IDENTITY_KEY, newValue: 'Example Laboratory\\nJane Doe' }));
+    setSourceText('Written by Jane Doe.', 0); updateAll(); await wait(30);
+    const taken = anonTerms.value === 'Example Laboratory\\nJane Doe' &&
+      currentIssues.some((i) => i.title === 'Words that name the authors');
+    return own && taken || { own, taken, value: anonTerms.value };`);
+  await load();
+  await check('after a reload the word list is the one written last', `
+    for (let i = 0; i < 40 && !anonTerms; i++) await wait(25);
+    const kept = anonTerms.value === 'Example Laboratory\\nJane Doe';
+    anonTerms.value = ''; anonTerms.dispatchEvent(new Event('input')); await wait(30);
+    return kept && localStorage.getItem(IDENTITY_KEY) === '' || anonTerms.value;`);
 
   await check('the spellcheck switch reaches the editor and survives a draft switch', `
     const was = ta.spellcheck;

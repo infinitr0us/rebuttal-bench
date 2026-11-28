@@ -35,8 +35,9 @@ jobs:
           code=$?
           cat report.txt
           echo "code=$code" >> "$GITHUB_OUTPUT"
-          # 0 nothing changed, 1 something changed (next step), 2 the check failed.
-          if [ "$code" -eq 2 ]; then exit 1; fi
+          # 0 nothing changed, 1 something changed (next step), 2 the check failed;
+          # any other code (node could not run, a crash) is a failure too.
+          if [ "$code" -ne 0 ] && [ "$code" -ne 1 ]; then exit 1; fi
           exit 0
       - name: Open or refresh the drift issue
         if: steps.check.outputs.code == '1'
